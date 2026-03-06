@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "97363652124",
+    "project_id": "schedio-b3958",
+    "storage_bucket": "schedio-b3958.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:97363652124:android:4238002f8e7207415439d9",
+        "android_client_info": {
+          "package_name": "com.schedio.mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "97363652124-n1ljd61rl8vq9hrcnvn6ljtj52svrdkh.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD2-swMv1FX-yBtiR5KYZZMskYRAyU8PhI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "97363652124-n1ljd61rl8vq9hrcnvn6ljtj52svrdkh.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

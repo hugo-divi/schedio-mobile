@@ -1,0 +1,27 @@
+env: load .env.local
+env: export EXPO_PUBLIC__FIREBASE_API_KEY EXPO_PUBLIC__FIREBASE_AUTH_DOMAIN EXPO_PUBLIC__FIREBASE_PROJECT_ID EXPO_PUBLIC__FIREBASE_STORAGE_BUCKET EXPO_PUBLIC__FIREBASE_MESSAGING_SENDER_ID EXPO_PUBLIC__FIREBASE_APP_ID EXPO_PUBLIC__GEMINI_API_KEY
+Running 17 checks on your project...
+15/17 checks passed. 2 checks failed. Possible issues detected:
+Use the --verbose flag to see more details about passed checks.
+
+Ô£û Check that required peer dependencies are installed
+Missing peer dependency: react-native-worklets
+Required by: react-native-reanimated
+Advice:
+Install missing required peer dependency with "npx expo install react-native-worklets"
+Your app may crash outside of Expo Go without this dependency. Native module peer dependencies must be installed directly.
+
+Ô£û Check that packages match versions required by installed Expo SDK
+
+ÔØù Major version mismatches
+package            expected  found    
+babel-preset-expo  ~54.0.10  12.0.12  
+
+
+
+1 package out of date.
+Advice:
+Use 'npx expo install --check' to review and upgrade your dependencies.
+To ignore specific packages, add them to "expo.install.exclude" in package.json. Learn more: https://expo.fyi/dependency-validation
+
+2 checks failed, indicating possible issues with the project.

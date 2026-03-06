@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 🏠 Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 👤 User Profiles
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      
+      // Allow nested collections (notes, resources, etc.)
+      match /{allPaths=**} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    // 📚 Subjects
+    match /subjects/{subjectId} {
+      allow read, write: if isOwner(resource.data.userId) || isOwner(request.resource.data.userId);
+    }
+
+    // 📝 Exams
+    match /exams/{examId} {
+      allow read, write: if isOwner(resource.data.userId) || isOwner(request.resource.data.userId);
+    }
+
+    // 🔥 Streaks
+    match /streaks/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // ⏳ Sessions
+    match /sessions/{sessionId} {
+      allow read, write: if isOwner(resource.data.userId) || isOwner(request.resource.data.userId);
+    }
+  }
+}
