@@ -21,6 +21,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.schedio.mobile",
+      "versionCode": 1,
       "usesCleartextTraffic": false,
       "permissions": [
         "CAMERA",
@@ -40,6 +41,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "367189b3-2dae-449b-87a5-36de9b7b3c67"
+      }
+    },
+    "owner": "divi_8"
   }
 }

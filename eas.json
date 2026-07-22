@@ -1,0 +1,17 @@
+{
+    "cli": {
+        "version": ">= 10.1.1",
+        "appVersionSource": "remote"
+    },
+    "build": {
+        "preview": {
+            "android": {
+                "buildType": "apk"
+            }
+        },
+        "production": {}
+    },
+    "submit": {
+        "production": {}
+    }
+}
