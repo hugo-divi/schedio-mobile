@@ -2,11 +2,16 @@
   "name": "schedio",
   "version": "1.0.0",
   "main": "expo-router/entry",
+  "engines": {
+    "node": ">=22.20.0"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "eslint .",
+    "prepare": "husky"
   },
   "dependencies": {
     "@expo/html-elements": "0.13.1",
@@ -17,7 +22,6 @@
     "date-fns": "^4.1.0",
     "debug": "^4.4.3",
     "expo": "~51.0.28",
-    "expo-av": "~14.0.7",
     "expo-blur": "~13.0.2",
     "expo-constants": "~16.0.2",
     "expo-document-picker": "~12.0.2",
@@ -47,7 +51,22 @@
   },
   "devDependencies": {
     "@babel/core": "^7.20.0",
-    "babel-preset-expo": "~11.0.14"
+    "babel-preset-expo": "~11.0.14",
+    "eslint": "^8.57.0",
+    "eslint-config-expo": "~7.1.2",
+    "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.9.6"
+  },
+  "lint-staged": {
+    "*.{js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
   },
   "private": true
 }
