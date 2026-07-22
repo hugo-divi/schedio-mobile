@@ -54,5 +54,4 @@ npx eas build --profile preview --platform android
 
 ## Estado del proyecto
 
-- Ver `task.md` para el histórico de fases de desarrollo.
-- Pendiente: migración a Expo SDK 52/53 para cumplir el `targetSdkVersion` 35 exigido por Google Play (ver plan de trabajo en curso).
+En desarrollo activo. Actualmente en Expo SDK 51; próxima migración a SDK 52/53 para cumplir el `targetSdkVersion` 35 exigido por Google Play.
