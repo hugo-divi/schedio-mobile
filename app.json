@@ -19,16 +19,9 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "edgeToEdgeEnabled": true,
       "package": "com.schedio.mobile",
       "versionCode": 1,
-      "usesCleartextTraffic": false,
-      "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "NOTIFICATIONS"
-      ]
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "NOTIFICATIONS"]
     },
     "ios": {
       "supportsTablet": true,
@@ -47,6 +40,20 @@
         "projectId": "367189b3-2dae-449b-87a5-36de9b7b3c67"
       }
     },
-    "owner": "divi_8"
+    "owner": "divi_8",
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "usesCleartextTraffic": false
+          }
+        }
+      ],
+      "expo-font",
+      "expo-asset"
+    ]
   }
 }
