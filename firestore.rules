@@ -13,8 +13,15 @@ service cloud.firestore {
 
     // 👤 User Profiles
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
-      
+      allow read: if isOwner(userId);
+      allow create, delete: if isOwner(userId);
+
+      // 🛡️ Premium entitlement is owned by RevenueCat, never by the client.
+      // Reject any update that touches `isPrime` so a user cannot grant
+      // themselves Prime by writing a single field.
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPrime']);
+
       // Allow nested collections (notes, resources, etc.)
       match /{allPaths=**} {
         allow read, write: if isOwner(userId);
