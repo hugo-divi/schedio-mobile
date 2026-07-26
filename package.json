@@ -36,7 +36,7 @@
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
     "expo-status-bar": "~3.0.9",
-    "firebase": "^10.13.0",
+    "firebase": "^12.16.0",
     "lucide-react-native": ">=0.460.0",
     "nativewind": "4.1.23",
     "react": "19.1.0",
