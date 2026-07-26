@@ -6,9 +6,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
-  LayoutAnimation,
   Platform,
-  UIManager,
   StyleSheet,
   Image,
 } from 'react-native';
@@ -37,10 +35,6 @@ import { es } from 'date-fns/locale';
 import UploadModal from '../../components/UploadModal';
 import ResourceList from '../../components/ResourceList';
 import { GlassCard } from '../../components/GlassView';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export default function PlansScreen() {
   const router = useRouter();
@@ -358,7 +352,9 @@ export default function PlansScreen() {
                           if (Platform.OS !== 'web') {
                             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                           }
-                          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                          // TODO: re-add a list transition here using Reanimated's
+                          // layout animations. LayoutAnimation was removed: it is a
+                          // no-op under the New Architecture (enabled in SDK 54).
                           completeMicroTask(user?.uid, item.id);
                         };
 

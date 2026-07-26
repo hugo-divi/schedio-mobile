@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "scheme": "schedio",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "jsEngine": "hermes",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -46,14 +46,15 @@
         "expo-build-properties",
         {
           "android": {
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
             "usesCleartextTraffic": false
           }
         }
       ],
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-router"
     ]
   }
 }
