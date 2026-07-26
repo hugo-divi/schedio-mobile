@@ -42,11 +42,13 @@ if (Platform.OS === 'web') {
       persistence: getReactNativePersistence(AsyncStorage),
     });
   } catch (e) {
-    // Expected on hot reload: auth is already initialized for this app.
-    // Anything else is a real failure, so surface it instead of hiding it.
-    if (e?.code !== 'auth/already-initialized') {
-      console.warn('[Firebase] initializeAuth failed, falling back to getAuth:', e);
-    }
+    // `auth/already-initialized` is benign (module re-evaluated / hot reload):
+    // persistence was set by the first call and getAuth reuses that instance.
+    // Firebase's RN getAuth() wrapper still logs its "no AsyncStorage" warning
+    // here, which is misleading in that case. Anything else is a real failure.
+    console.warn(
+      `[Firebase] initializeAuth threw (code=${e?.code ?? 'none'}: ${e?.message}); falling back to getAuth`
+    );
     auth = getAuth(app);
   }
 }
