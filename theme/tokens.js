@@ -1,43 +1,82 @@
 import { Platform } from 'react-native';
 
+/**
+ * Schedio design tokens.
+ *
+ * Values mirror the "Schedio Design System" project in Claude Design
+ * (tokens/colors.css, effects.css, spacing.css, typography.css). That project
+ * is the source of truth — change it there first, then reflect it here.
+ *
+ * Single dark theme: `colors.dark` and `colors.light` intentionally hold the
+ * same values so the screens that still branch on `isDarkMode` keep working
+ * while they wait to be redesigned. Those branches get removed screen by
+ * screen; no new code should read `colors.light`.
+ */
+
+const palette = {
+  bgBase: '#191919',
+  surfaceCard: '#242424',
+  surfaceHover: '#2C2C2C',
+  borderDefault: '#373737',
+  textPrimary: '#EDEDED',
+  textSecondary: '#9B9B9B',
+  textDisabled: '#6B6B6B',
+  accent: '#2979FF',
+  accentSoftBg: 'rgba(41, 121, 255, 0.14)',
+  accentSoftBorder: 'rgba(41, 121, 255, 0.28)',
+  accentSoftText: '#2979FF',
+  premiumText: '#D4A94C',
+  premiumBg: 'rgba(212, 169, 76, 0.12)',
+  premiumBorder: 'rgba(212, 169, 76, 0.3)',
+  // Semantic exceptions — restricted use, never decorative.
+  trendUp: '#5AB98A',
+  danger: '#D8604A',
+  white: '#FFFFFF',
+  black: '#000000',
+};
+
+// Surface set consumed by screens via `isDarkMode ? colors.dark : colors.light`.
+const surfaces = {
+  background: palette.bgBase,
+  card: palette.surfaceCard,
+  cardSecondary: palette.surfaceHover,
+  text: palette.textPrimary,
+  textSecondary: palette.textSecondary,
+  border: palette.borderDefault,
+  input: palette.surfaceHover,
+  tabBar: palette.surfaceCard,
+};
+
 export const tokens = {
   colors: {
-    primary: '#4A90E2',
-    secondary: '#50E3C2',
-    blue: '#0A84FF',
-    purple: '#BF5AF2',
-    background: '#000000',
-    card: '#1C1C1E',
-    text: '#FFFFFF',
-    textSecondary: '#8E8E93',
-    border: 'rgba(255, 255, 255, 0.1)',
-    success: '#30D158',
-    warning: '#FF9F0A',
-    error: '#FF453A',
+    ...palette,
 
-    // Dark Mode Palette (Default)
-    dark: {
-      background: '#000000',
-      card: '#1C1C1E',
-      cardSecondary: '#2C2C2E',
-      text: '#FFFFFF',
-      textSecondary: '#8E8E93',
-      border: 'rgba(255, 255, 255, 0.1)',
-      input: '#2C2C2E',
-      tabBar: '#1C1C1E',
-    },
+    // Flat aliases used across the app.
+    primary: palette.accent,
+    blue: palette.accent,
+    indigo: palette.accent,
+    orange: palette.accent,
+    secondary: palette.trendUp,
+    green: palette.trendUp,
+    success: palette.trendUp,
+    error: palette.danger,
+    warning: palette.premiumText,
+    yellow: palette.premiumText,
+    purple: palette.accent,
 
-    // Light Mode Palette
-    light: {
-      background: '#F2F2F7',
-      card: '#FFFFFF',
-      cardSecondary: '#E5E5EA',
-      text: '#000000',
-      textSecondary: '#8E8E93',
-      border: 'rgba(0, 0, 0, 0.1)',
-      input: '#E5E5EA',
-      tabBar: '#FFFFFF',
-    },
+    background: palette.bgBase,
+    card: palette.surfaceCard,
+    text: palette.textPrimary,
+    textSecondary: palette.textSecondary,
+    textTertiary: palette.textDisabled,
+    border: palette.borderDefault,
+
+    // Subtle fills (inputs, pressed states).
+    fillTertiary: palette.surfaceHover,
+    fillQuaternary: palette.surfaceCard,
+
+    dark: surfaces,
+    light: surfaces,
   },
 
   spacing: {
@@ -47,20 +86,53 @@ export const tokens = {
     lg: 24,
     xl: 32,
     xxl: 48,
+    // Design-system scale
+    s1: 4,
+    s2: 8,
+    s3: 12,
+    s4: 16,
+    s6: 24,
+    s8: 32,
+    s12: 48,
+    cardPaddingMin: 16,
+    sectionGapMin: 32,
   },
 
   radius: {
-    xs: 12, // Standard Small
-    sm: 16, // Medium
-    md: 20, // Large
-    lg: 24, // Standard Schedio Card (Matches Web --radius-lg)
-    xl: 32, // Large Card / Modal (Matches Web --radius-xl)
+    // Design-system radii — use these in redesigned screens.
+    btn: 8,
+    card: 12,
+    sheet: 24,
+    pill: 100,
+
+    // Legacy scale, kept so screens awaiting redesign keep their geometry.
+    xs: 12,
+    sm: 16,
+    md: 20,
+    lg: 24,
+    xl: 32,
     hero: 28,
     full: 9999,
   },
 
   typography: {
     families: {
+      /**
+       * Inter — redesigned screens only. React Native picks a weight by family
+       * name, not by `fontWeight`, so pair each weight with its own family.
+       * Do not point `sans` at Inter: screens that still combine `sans` with
+       * `fontWeight` would silently render at regular weight on Android.
+       */
+      inter: {
+        regular: 'Inter_400Regular',
+        medium: 'Inter_500Medium',
+        semibold: 'Inter_600SemiBold',
+        bold: 'Inter_700Bold',
+      },
+      // Large display numbers.
+      display: 'BebasNeue_400Regular',
+
+      // System stack — screens not yet redesigned.
       sans: Platform.select({
         ios: '-apple-system',
         android: 'sans-serif',
@@ -72,13 +144,22 @@ export const tokens = {
         default: 'Lyon-Text, Georgia, YuMincho, serif',
       }),
     },
-    xs: 12, // Caption 2
-    sm: 13, // Footnote
-    base: 17, // Body (iOS Standard)
-    lg: 20, // Title 3
-    xl: 22, // Title 2
-    xxl: 28, // Title 1
-    extra: 34, // Large Title
+
+    // Design-system roles.
+    screenTitle: { size: 26, weight: '700' },
+    sectionTitle: { size: 17, weight: '600' },
+    body: { size: 15, weight: '400', lineHeight: 1.45 },
+    meta: { size: 13, weight: '500' },
+    number: { size: 48 },
+
+    // Legacy numeric scale.
+    xs: 12,
+    sm: 13,
+    base: 17,
+    lg: 20,
+    xl: 22,
+    xxl: 28,
+    extra: 34,
   },
 
   blur: {
@@ -89,9 +170,21 @@ export const tokens = {
   animations: {
     primary: [0.2, 0.8, 0.2, 1], // Schedio Bezier
     toast: [0.2, 0.9, 0.2, 1],
+    standard: 180, // ms — --transition-standard
   },
 
+  /**
+   * The redesigned language is flat (borders, not shadows). These remain for
+   * screens awaiting redesign.
+   */
   shadows: {
+    primary: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      elevation: 4,
+    },
     sm: {
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },

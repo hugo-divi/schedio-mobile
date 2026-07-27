@@ -1,191 +1,201 @@
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react-native';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, isToday, addMonths, subMonths } from 'date-fns';
+import {
+  format,
+  startOfMonth,
+  endOfMonth,
+  startOfWeek,
+  endOfWeek,
+  eachDayOfInterval,
+  isSameMonth,
+  isSameDay,
+  isToday,
+  addMonths,
+  subMonths,
+} from 'date-fns';
 import { es } from 'date-fns/locale';
 import * as Haptics from 'expo-haptics';
 import { tokens } from '../theme/tokens';
 
-const MiniCalendar = ({ exams = [], subjects = [], onDayClick, isDarkMode }) => {
-    const [currentMonth, setCurrentMonth] = useState(new Date());
-    const theme = isDarkMode ? tokens.colors.dark : tokens.colors.light;
+const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
-    // Memoize calculating days to avoid re-calculation on every render if month doesn't change
-    const { startDate, endDate, calendarDays } = React.useMemo(() => {
-        const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 1 });
-        const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 1 });
-        return {
-            startDate: start,
-            endDate: end,
-            calendarDays: eachDayOfInterval({ start, end })
-        };
-    }, [currentMonth]);
+/**
+ * Month grid for the home screen. Renders bare (no surface of its own) — the
+ * caller wraps it in a `Card`, matching the design system's calendar card.
+ */
+const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
+  const [currentMonth, setCurrentMonth] = useState(new Date());
 
-    const weekDays = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+  const calendarDays = React.useMemo(() => {
+    const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 1 });
+    const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 1 });
+    return eachDayOfInterval({ start, end });
+  }, [currentMonth]);
 
-    const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-    const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
+  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
 
-    const getExamsForDay = (day) => {
-        return exams.filter(exam => isSameDay(new Date(exam.date), day));
-    };
+  const getExamsForDay = (day) => exams.filter((exam) => isSameDay(new Date(exam.date), day));
 
-    const handleDayPress = (day) => {
-        if (onDayClick) {
-            onDayClick(day);
-            if (Platform.OS !== 'web') Haptics.selectionAsync();
-        }
-    };
+  const handleDayPress = (day) => {
+    if (!onDayClick) return;
+    onDayClick(day);
+    if (Platform.OS !== 'web') Haptics.selectionAsync();
+  };
 
-    return (
-        <View style={[styles.container, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            {/* Header */}
-            <View style={styles.header}>
-                <Text style={[styles.monthLabel, { color: theme.text }]}>
-                    {format(currentMonth, 'MMMM yyyy', { locale: es })}
+  return (
+    <View>
+      {/* Month navigation — arrows flank a centred label */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={prevMonth}
+          style={styles.navBtn}
+          accessibilityLabel="Mes anterior"
+        >
+          <ChevronLeft size={18} color={tokens.colors.textSecondary} />
+        </TouchableOpacity>
+        <Text style={styles.monthLabel}>{format(currentMonth, 'MMMM yyyy', { locale: es })}</Text>
+        <TouchableOpacity
+          onPress={nextMonth}
+          style={styles.navBtn}
+          accessibilityLabel="Mes siguiente"
+        >
+          <ChevronRight size={18} color={tokens.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.weekHeader}>
+        {WEEK_DAYS.map((d, i) => (
+          <View key={i} style={styles.cellSlot}>
+            <Text style={styles.weekDayText}>{d}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.grid}>
+        {calendarDays.map((day, i) => {
+          const isCurrentMonth = isSameMonth(day, currentMonth);
+          const dayExams = getExamsForDay(day);
+          const isTodayDate = isToday(day);
+
+          return (
+            <View key={i} style={styles.cellSlot}>
+              <TouchableOpacity
+                style={[styles.dayCell, isTodayDate && styles.dayCellToday]}
+                onPress={() => handleDayPress(day)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.dayText,
+                    !isCurrentMonth && styles.dayTextOutside,
+                    isTodayDate && styles.dayTextToday,
+                  ]}
+                >
+                  {format(day, 'd')}
                 </Text>
-                <View style={styles.navButtons}>
-                    <TouchableOpacity
-                        style={[styles.navBtn, { backgroundColor: theme.cardSecondary }]}
-                        onPress={prevMonth}
-                    >
-                        <ChevronLeft size={16} color={theme.textSecondary} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.navBtn, { backgroundColor: theme.cardSecondary }]}
-                        onPress={nextMonth}
-                    >
-                        <ChevronRight size={16} color={theme.textSecondary} />
-                    </TouchableOpacity>
-                </View>
+
+                {/* One dot per exam (max 3), tinted with the subject colour */}
+                {dayExams.length > 0 && (
+                  <View style={styles.dotsContainer}>
+                    {dayExams.slice(0, 3).map((exam, idx) => {
+                      const subject = subjects.find((s) => s.id === exam.subjectId);
+                      return (
+                        <View
+                          key={idx}
+                          style={[
+                            styles.dot,
+                            {
+                              backgroundColor: isTodayDate
+                                ? '#FFFFFF'
+                                : subject?.color || tokens.colors.accent,
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+                )}
+              </TouchableOpacity>
             </View>
-
-            {/* Week Headers */}
-            <View style={styles.weekHeader}>
-                {weekDays.map(d => (
-                    <Text key={d} style={[styles.weekDayText, { color: theme.textSecondary }]}>{d}</Text>
-                ))}
-            </View>
-
-            {/* Grid */}
-            <View style={styles.grid}>
-                {calendarDays.map((day, i) => {
-                    const isCurrentMonth = isSameMonth(day, currentMonth);
-                    const dayExams = getExamsForDay(day);
-                    const hasExams = dayExams.length > 0;
-                    const isTodayDate = isToday(day);
-
-                    return (
-                        <TouchableOpacity
-                            key={i}
-                            style={[
-                                styles.dayCell,
-                                isTodayDate && { backgroundColor: isDarkMode ? 'rgba(74, 144, 226, 0.2)' : 'rgba(74, 144, 226, 0.15)' }
-                            ]}
-                            onPress={() => handleDayPress(day)}
-                            activeOpacity={0.7}
-                        >
-                            <Text style={[
-                                styles.dayText,
-                                { color: theme.text },
-                                !isCurrentMonth && { color: theme.textSecondary, opacity: 0.5 },
-                                isTodayDate && { color: tokens.colors.blue, fontWeight: 'bold' }
-                            ]}>
-                                {format(day, 'd')}
-                            </Text>
-
-                            {/* Dots */}
-                            {hasExams && (
-                                <View style={styles.dotsContainer}>
-                                    {dayExams.slice(0, 3).map((exam, i) => {
-                                        const subject = subjects.find(s => s.id === exam.subjectId);
-                                        return (
-                                            <View
-                                                key={i}
-                                                style={[
-                                                    styles.dot,
-                                                    { backgroundColor: subject?.color || tokens.colors.primary }
-                                                ]}
-                                            />
-                                        );
-                                    })}
-                                </View>
-                            )}
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
-        </View>
-    );
+          );
+        })}
+      </View>
+    </View>
+  );
 };
 
 export default React.memo(MiniCalendar);
 
 const styles = StyleSheet.create({
-    container: {
-        borderRadius: 24,
-        padding: 16,
-        borderWidth: 1,
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 16,
-        paddingHorizontal: 4,
-    },
-    monthLabel: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        textTransform: 'capitalize',
-    },
-    navButtons: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    navBtn: {
-        padding: 6,
-        borderRadius: 8,
-    },
-    weekHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: 12,
-        paddingHorizontal: 4,
-    },
-    weekDayText: {
-        fontSize: 12,
-        fontWeight: '600',
-        width: '13%',
-        textAlign: 'center',
-    },
-    grid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-    },
-    dayCell: {
-        width: '13%',
-        aspectRatio: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 4,
-        borderRadius: 12,
-    },
-    dayText: {
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    dotsContainer: {
-        flexDirection: 'row',
-        gap: 2,
-        marginTop: 4,
-        position: 'absolute',
-        bottom: 6,
-    },
-    dot: {
-        width: 3,
-        height: 3,
-        borderRadius: 1.5,
-    },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  navBtn: {
+    padding: 4,
+  },
+  monthLabel: {
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+    textTransform: 'capitalize',
+  },
+  weekHeader: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  weekDayText: {
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  // Fixed 7-column layout; the visual box lives inside with a small inset.
+  cellSlot: {
+    width: `${100 / 7}%`,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayCell: {
+    width: '92%',
+    aspectRatio: 1,
+    marginVertical: 2,
+    borderRadius: tokens.radius.btn,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dayCellToday: {
+    backgroundColor: tokens.colors.accent,
+  },
+  dayText: {
+    fontFamily: tokens.typography.families.inter.regular,
+    fontSize: 13,
+    color: tokens.colors.textPrimary,
+  },
+  dayTextOutside: {
+    color: tokens.colors.textDisabled,
+  },
+  dayTextToday: {
+    fontFamily: tokens.typography.families.inter.bold,
+    color: '#FFFFFF',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    gap: 2,
+    position: 'absolute',
+    bottom: 3,
+  },
+  dot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
 });

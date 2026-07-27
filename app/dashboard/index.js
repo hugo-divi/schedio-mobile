@@ -1,27 +1,25 @@
-import { View, Image } from 'react-native';
-import { Text } from 'react-native';
-import { ScrollView } from 'react-native';
-import { TouchableOpacity } from 'react-native';
-import { RefreshControl } from 'react-native';
-import { StyleSheet } from 'react-native';
-import { ActivityIndicator } from 'react-native';
-import { Alert } from 'react-native';
-import { Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  View,
+  Image,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  RefreshControl,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
-// DIAGNOSTIC LINE 14 - IF ERROR PERSISTS AT 14:8 THIS FILE IS NOT THE SOURCE
-import { Settings } from 'lucide-react-native';
-import { Flame } from 'lucide-react-native';
-import { Zap } from 'lucide-react-native';
-import { Calendar as CalendarIcon } from 'lucide-react-native';
-import { ChevronRight } from 'lucide-react-native';
-import { AlertCircle, CheckCircle, HelpCircle, Trophy } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Settings, HelpCircle, Trophy } from 'lucide-react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
 import { db } from '../../services/firebase';
 import { auth } from '../../services/firebase';
-import { collection, query, where, getDocs, limit, doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { checkDailyStreak } from '../../services/streaks';
 import {
   getUpcomingExams,
@@ -30,18 +28,13 @@ import {
   updateExam,
   deleteExam,
 } from '../../services/exams';
-import { getUserSubjects } from '../../services/userData';
 import { generateRecommendations } from '../../services/aiService';
-import useAuthStore from '../../store/authStore';
-import useThemeStore from '../../store/themeStore';
 import usePreferencesStore from '../../store/preferencesStore';
 import {
   scheduleExamReminders,
   scheduleInactivityReminder,
   schedulePanicModeAlert,
 } from '../../services/notificationService';
-import { GlassCard } from '../../components/GlassView';
-import { Modal } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import useUserStore from '../../store/userStore';
 import Skeleton from '../../components/Skeleton';
@@ -53,28 +46,30 @@ import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
 import InfoTooltip from '../../components/InfoTooltip';
 import GuidedTour from '../../components/GuidedTour';
+import Card from '../../components/ui/Card';
+import Chip from '../../components/ui/Chip';
+import Button from '../../components/ui/Button';
+import IconButton from '../../components/ui/IconButton';
+import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
+import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
 
 // Main Dashboard component - Refactored for global subject sync
 export default function Dashboard() {
   const router = useRouter();
-  const { isDarkMode } = useThemeStore();
+  const insets = useSafeAreaInsets();
   const { autoGradePrompt } = usePreferencesStore();
   const { updateAverageGrade } = useUserStore();
 
-  const theme = isDarkMode ? tokens.colors.dark : tokens.colors.light;
-
   const [refreshing, setRefreshing] = useState(false);
-  const [userData, setUserData] = useState({ streak: 0, level: 3, xp: 0, rank: 'Aprendiz' });
+  const [userData, setUserData] = useState({ streak: 0, level: 1, xp: 0, rank: 'Aprendiz' });
   const [profile, setProfile] = useState(null);
   const [exams, setExams] = useState([]);
   const [pendingExams, setPendingExams] = useState([]);
-  const { subjects, loadUserData } = useUserStore();
-  const [microplans, setMicroplans] = useState([]);
+  const { subjects, loadUserData, sessionHistory, loadSessionHistory } = useUserStore();
   const [loading, setLoading] = useState(true);
 
   const scrollViewRef = useRef(null);
   const heroCardRef = useRef(null);
-  const examsSectionRef = useRef(null);
   const pendingSectionRef = useRef(null);
   const calendarSectionRef = useRef(null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
@@ -95,8 +90,6 @@ export default function Dashboard() {
   const [rankCelebrationVisible, setRankCelebrationVisible] = useState(false);
   const [newRank, setNewRank] = useState('');
   const previousRankRef = useRef(null);
-
-  const clearUser = useAuthStore((state) => state.clearUser);
 
   const calculateDaysLeft = (date) => {
     const now = new Date();
@@ -136,10 +129,6 @@ export default function Dashboard() {
       // Load subjects and user details via store
       await loadUserData(user.uid);
 
-      // Fetch microplans from profile (which is now in store or fetched above)
-      // Wait, we can get profileData from the store if we want, but we already fetched it locally at line 84.
-      const microplansData = profileData?.microplans || [];
-
       setUserData({
         streak: streakData.currentStreak || 0,
         level: profileData?.gamification?.level || 1,
@@ -149,7 +138,6 @@ export default function Dashboard() {
 
       setExams(examsData || []);
       setPendingExams(pendingExamsData || []);
-      setMicroplans(microplansData);
 
       // --- Notification Scheduling ---
       if (user && profileData) {
@@ -243,6 +231,13 @@ export default function Dashboard() {
     fetchData();
   }, [examRefreshTrigger]);
 
+  // Session history feeds StreakModal's calendar. Kept out of fetchData so the
+  // data/notification flow there stays untouched.
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (user) loadSessionHistory(user.uid);
+  }, [loadSessionHistory]);
+
   // Independent effect for the tour to prevent render loops
   useEffect(() => {
     if (profile && profile.isNewAccount && !profile.hasSeenTour) {
@@ -270,16 +265,6 @@ export default function Dashboard() {
     setRefreshing(true);
     fetchData();
   }, []);
-
-  const handleLogout = async () => {
-    try {
-      await auth.signOut();
-      clearUser();
-      router.replace('/login');
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
-  };
 
   // Calendar Handlers
   const handleDayClick = (date) => {
@@ -378,387 +363,317 @@ export default function Dashboard() {
     }
   };
 
+  // Priority chip reflects real urgency instead of the stored default of 5.
+  const isUrgent = (exam) => {
+    const days = Math.ceil((new Date(exam.date) - new Date()) / (1000 * 60 * 60 * 24));
+    return days <= 3 || (exam.priority || 0) >= 8;
+  };
+
+  const formatShortDate = (date) =>
+    new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+
+  const firstName = (profile?.displayName || '').trim().split(' ')[0];
+  const isFreshAccount = subjects.length === 0 && exams.length === 0;
+
+  // The AI line is the headline when we have one; otherwise fall back to the
+  // empty-state copy for new accounts, or a neutral prompt.
+  const welcomeTitle = aiRecommendation
+    ? aiRecommendation
+    : isFreshAccount
+      ? `Rompe el hielo${firstName ? `, ${firstName}` : ''}`
+      : '¿Qué quieres aprender hoy? 🚀';
+
+  const welcomeBody = isFreshAccount
+    ? 'Añade tus asignaturas y haz una sesión corta de 15 min para activar tu racha y empezar a ganar XP.'
+    : exams.length > 0
+      ? 'Es lo más urgente ahora mismo.'
+      : 'Comienza una sesión de estudio cuando quieras: incluso 15 minutos cuentan.';
+
+  const visibleExams = examsExpanded ? exams : exams.slice(0, 3);
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Header - Fixed at top */}
-      <View style={[styles.header, { backgroundColor: theme.background }]}>
-        <View
-          style={{
-            width: 144,
-            height: 48,
-            borderRadius: 24,
-            backgroundColor: '#FFF',
-            justifyContent: 'center',
-            alignItems: 'center',
-            overflow: 'hidden',
-          }}
-        >
-          <Image
-            source={require('../../assets/images/schedio-icon.png')}
-            style={{ width: 130, height: 42 }}
-            resizeMode="cover"
-          />
-        </View>
-        <View style={styles.headerRight}>
-          <Text style={styles.greeting}>Hola, {profile?.displayName || 'Usuario'}</Text>
-          <TouchableOpacity
-            style={[styles.iconButton, { backgroundColor: theme.cardSecondary, marginRight: 8 }]}
-            onPress={() => setTourVisible(true)}
-          >
-            <HelpCircle size={20} color={tokens.colors.primary} />
-          </TouchableOpacity>
+    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
+      {/* Header */}
+      <View style={styles.header}>
+        <View style={styles.headerRow}>
+          <View style={styles.logoPill}>
+            <Image
+              source={require('../../assets/images/schedio-icon.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
+          </View>
 
-          <TouchableOpacity
-            style={[styles.iconButton, { backgroundColor: theme.cardSecondary }]}
-            onPress={() => router.push('/settings')}
-          >
-            <Settings size={20} color="#8E8E93" />
-          </TouchableOpacity>
-
-          {/* Plus Button */}
-          <TouchableOpacity style={styles.plusButton} onPress={() => router.push('/plus')}>
-            <LinearGradient
-              colors={['#FFD60A', '#FF9F0A']}
-              style={styles.plusGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+          <View style={styles.headerActions}>
+            <IconButton
+              onPress={() => setTourVisible(true)}
+              accessibilityLabel="Ver la guía de ayuda"
             >
-              <Text style={styles.plusText}>PRIME</Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <HelpCircle size={18} color={tokens.colors.textSecondary} />
+            </IconButton>
+            <IconButton onPress={() => router.push('/settings')} accessibilityLabel="Ajustes">
+              <Settings size={18} color={tokens.colors.textSecondary} />
+            </IconButton>
+            <PrimeBadge onPress={() => router.push('/plus')} />
+          </View>
         </View>
+
+        {/* Streak / level strip — each half opens its explainer modal */}
+        <Animated.View entering={FadeInDown.duration(320)} style={styles.stripWrapper}>
+          <StatsStrip>
+            <TouchableOpacity
+              style={styles.statCell}
+              onPress={() => setStreakModalOpen(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statEmoji}>🔥</Text>
+              <View style={styles.statTextWrap}>
+                <OverlineLabel style={styles.statLabel}>Racha</OverlineLabel>
+                <Text
+                  style={[
+                    styles.statValue,
+                    userData.streak === 0 && { color: tokens.colors.textDisabled },
+                  ]}
+                >
+                  {userData.streak} {userData.streak === 1 ? 'día' : 'días'}
+                </Text>
+              </View>
+              <InfoTooltip
+                title="Tu Racha 🔥"
+                content="Mantén tu racha estudiando al menos 5 minutos cada día. ¡No dejes que se apague!"
+                iconSize={13}
+              />
+            </TouchableOpacity>
+
+            <View style={styles.statDivider} />
+
+            <TouchableOpacity
+              style={styles.statCell}
+              onPress={() => setLevelModalOpen(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statEmoji}>⚡</Text>
+              <View style={styles.statTextWrap}>
+                <OverlineLabel style={styles.statLabel}>Nivel</OverlineLabel>
+                <Text style={[styles.statValue, { color: tokens.colors.accent }]}>
+                  {userData.level}
+                </Text>
+              </View>
+              <InfoTooltip
+                title="Nivel y XP ⚡"
+                content="Ganas XP por cada minuto de estudio y por completar objetivos. ¡Sube de nivel para desbloquear rangos!"
+                iconSize={13}
+              />
+            </TouchableOpacity>
+          </StatsStrip>
+        </Animated.View>
       </View>
 
       <ScrollView
         ref={scrollViewRef}
         style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor={tokens.colors.primary}
+            tintColor={tokens.colors.accent}
           />
         }
       >
-        {/* Hero Card */}
-        <View
-          ref={heroCardRef}
-          style={[styles.heroCard, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          {loading ? (
-            <>
-              <Skeleton width={120} height={24} style={{ marginBottom: 20 }} />
-              <Skeleton width="80%" height={32} style={{ marginBottom: 8 }} />
-              <Skeleton width="60%" height={32} style={{ marginBottom: 8 }} />
-              <Skeleton width="40%" height={16} style={{ marginBottom: 24 }} />
-              <Skeleton width="100%" height={50} borderRadius={25} />
-            </>
-          ) : (
-            <>
-              {/* Badges - Clickable */}
-              <View style={styles.badgesRow}>
-                <View style={styles.badgeWrapper}>
-                  <TouchableOpacity
-                    style={[
-                      styles.badge,
-                      {
-                        backgroundColor: isDarkMode
-                          ? 'rgba(255, 159, 10, 0.15)'
-                          : 'rgba(255, 159, 10, 0.1)',
-                        borderColor: 'rgba(255, 159, 10, 0.3)',
-                      },
-                    ]}
-                    onPress={() => setStreakModalOpen(true)}
-                    activeOpacity={0.7}
-                  >
-                    <Flame size={14} color="#FF9F0A" fill="#FF9F0A" />
-                    <Text style={[styles.badgeText, { color: theme.text }]}>
-                      {userData.streak} días
-                    </Text>
-                  </TouchableOpacity>
+        {/* Welcome / AI suggestion */}
+        <View ref={heroCardRef}>
+          <Card padding={20}>
+            {loading ? (
+              <>
+                <Skeleton width={54} height={14} style={{ marginBottom: 10 }} />
+                <Skeleton width="85%" height={24} style={{ marginBottom: 10 }} />
+                <Skeleton width="70%" height={16} style={{ marginBottom: 20 }} />
+                <Skeleton width="100%" height={46} borderRadius={tokens.radius.btn} />
+              </>
+            ) : (
+              <>
+                <View style={styles.welcomeHead}>
+                  <OverlineLabel>Hoy</OverlineLabel>
                   <InfoTooltip
-                    title="Tu Racha 🔥"
-                    content="Mantén tu racha estudiando al menos 5 minutos cada día. ¡No dejes que se apague!"
-                    style={styles.floatingHelp}
-                    iconSize={14}
+                    title="Recomendación IA 🧠"
+                    content="Schedio Prime analiza tus próximos exámenes y tu historial para sugerirte qué estudiar en cada momento."
+                    iconSize={18}
                   />
                 </View>
 
-                <View style={styles.badgeWrapper}>
-                  <TouchableOpacity
-                    style={[
-                      styles.badge,
-                      {
-                        backgroundColor: isDarkMode
-                          ? 'rgba(74, 144, 226, 0.15)'
-                          : 'rgba(74, 144, 226, 0.1)',
-                        borderColor: 'rgba(74, 144, 226, 0.3)',
-                      },
-                    ]}
-                    onPress={() => setLevelModalOpen(true)}
-                    activeOpacity={0.7}
-                  >
-                    <Zap size={14} color="#4A90E2" fill="#4A90E2" />
-                    <Text style={[styles.badgeText, { color: theme.text }]}>
-                      Nivel {userData.level}
-                    </Text>
-                  </TouchableOpacity>
-                  <InfoTooltip
-                    title="Nivel y XP ⚡"
-                    content="Ganas XP por cada minuto de estudio y por completar objetivos. ¡Sube de nivel para desbloquear rangos!"
-                    style={styles.floatingHelp}
-                    iconSize={14}
-                  />
-                </View>
-              </View>
-
-              {/* AI-Generated Title */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 {aiLoading ? (
-                  <>
-                    <Text style={[styles.heroTitle, { color: theme.text }]}>
-                      Analizando tu día...
-                    </Text>
-                    <ActivityIndicator
-                      size="small"
-                      color={theme.textSecondary}
-                      style={{ alignSelf: 'flex-start', marginBottom: 16 }}
-                    />
-                  </>
+                  <View style={styles.aiLoadingRow}>
+                    <Text style={styles.welcomeTitle}>Analizando tu día…</Text>
+                    <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
+                  </View>
                 ) : (
-                  <Text style={[styles.heroTitle, { color: theme.text, flex: 1 }]}>
-                    {aiRecommendation || '¿Qué quieres aprender hoy? 🚀'}
-                  </Text>
+                  <Text style={styles.welcomeTitle}>{welcomeTitle}</Text>
                 )}
-                <InfoTooltip
-                  title="Recomendación IA 🧠"
-                  content="Schedio Prime analiza tus próximos exámenes y tu historial para sugerirte qué estudiar en cada momento."
-                  iconSize={20}
-                />
-              </View>
-              <Text style={styles.heroSubtitle}>
-                {exams.length > 0
-                  ? 'Es lo mas urgente ahora mismo'
-                  : 'Comienza una sesión de estudio'}
-              </Text>
 
-              {/* CTA Button - Navigate to session */}
-              <TouchableOpacity
-                style={styles.ctaButton}
-                onPress={() => router.push('/dashboard/study')}
-                activeOpacity={0.8}
-              >
-                <Zap
-                  size={20}
-                  color={isDarkMode ? '#000000' : '#FFFFFF'}
-                  strokeWidth={2.5}
-                  fill={isDarkMode ? '#000000' : '#FFFFFF'}
+                <Text style={styles.welcomeBody}>{welcomeBody}</Text>
+
+                <Button
+                  title="Comenzar sesión de estudio →"
+                  fullWidth
+                  onPress={() => router.push('/dashboard/study')}
                 />
-                <Text style={[styles.ctaButtonText, { color: isDarkMode ? '#000000' : '#FFFFFF' }]}>
-                  Estudiar ahora
-                </Text>
-              </TouchableOpacity>
-            </>
-          )}
+              </>
+            )}
+          </Card>
         </View>
 
-        {/* Próximos exámenes */}
-        <View ref={examsSectionRef} style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleRow}>
-              <CalendarIcon size={18} color={theme.text} />
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Próximos exámenes</Text>
-              <InfoTooltip
-                title="Gestión de Exámenes 🗓️"
-                content="Mantén pulsado cualquier examen para editarlo o eliminarlo. Pulsa para ver el plan de estudio."
-                style={{ marginLeft: 8 }}
-              />
-            </View>
-            {!loading && exams.length > 3 && (
-              <TouchableOpacity onPress={() => setExamsExpanded(!examsExpanded)}>
-                <Text style={styles.sectionLink}>{examsExpanded ? 'Ver menos' : 'Ver más'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+        {/* Calendar — month grid and upcoming exams share one card */}
+        <View ref={calendarSectionRef}>
+          <SectionTitle
+            right={
+              !loading && exams.length > 3 ? (
+                <TouchableOpacity onPress={() => setExamsExpanded(!examsExpanded)}>
+                  <Text style={styles.link}>{examsExpanded ? 'Ver menos' : 'Ver más'}</Text>
+                </TouchableOpacity>
+              ) : null
+            }
+          >
+            Tu calendario
+          </SectionTitle>
 
           {loading ? (
-            <>
-              <Skeleton width="100%" height={70} style={{ marginBottom: 12 }} borderRadius={16} />
-              <Skeleton width="100%" height={70} style={{ marginBottom: 12 }} borderRadius={16} />
-            </>
-          ) : exams.length === 0 ? (
-            <View
-              style={[
-                styles.emptyState,
-                { backgroundColor: theme.card, borderColor: theme.border },
-              ]}
-            >
-              <CalendarIcon size={48} color={theme.textSecondary} strokeWidth={1.5} />
-              <Text style={[styles.emptyStateTitle, { color: theme.text }]}>
-                No hay exámenes próximos
-              </Text>
-              <Text style={styles.emptyStateText}>
-                Agrega tus exámenes y tareas para mantener tu calendario organizado
-              </Text>
-            </View>
+            <Skeleton width="100%" height={320} borderRadius={tokens.radius.card} />
           ) : (
-            (examsExpanded ? exams : exams.slice(0, 3)).map((exam, index) => {
-              const daysLeft = calculateDaysLeft(exam.date);
-              return (
-                <TouchableOpacity
-                  key={exam.id}
-                  style={[
-                    styles.examCard,
-                    { backgroundColor: theme.card, borderColor: theme.border },
-                  ]}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/dashboard/plans',
-                      params: { highlightId: exam.id },
-                    })
-                  }
-                  onLongPress={() => {
-                    setSelectedEvent(exam);
-                    setSelectedDate(new Date(exam.date));
-                    setEventModalVisible(true);
-                  }}
-                >
-                  <View style={styles.examLeft}>
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginBottom: 4,
+            <Card padding={16}>
+              <MiniCalendar exams={exams} subjects={subjects} onDayClick={handleDayClick} />
+
+              <View style={styles.cardDivider} />
+
+              <View style={styles.examsHead}>
+                <OverlineLabel>Próximos exámenes</OverlineLabel>
+                <InfoTooltip
+                  title="Gestión de Exámenes 🗓️"
+                  content="Mantén pulsado cualquier examen para editarlo o eliminarlo. Pulsa para ver el plan de estudio."
+                  iconSize={16}
+                />
+              </View>
+
+              {exams.length === 0 ? (
+                <Text style={styles.emptyText}>
+                  Añade tus exámenes y tareas para mantener tu calendario organizado.
+                </Text>
+              ) : (
+                visibleExams.map((exam, index) => {
+                  const subject = subjects.find((s) => s.id === exam.subjectId);
+                  const urgent = isUrgent(exam);
+                  const isLast = index === visibleExams.length - 1;
+
+                  return (
+                    <TouchableOpacity
+                      key={exam.id}
+                      style={[styles.examRow, isLast && styles.rowLast]}
+                      activeOpacity={0.7}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/dashboard/plans',
+                          params: { highlightId: exam.id },
+                        })
+                      }
+                      onLongPress={() => {
+                        setSelectedEvent(exam);
+                        setSelectedDate(new Date(exam.date));
+                        setEventModalVisible(true);
                       }}
                     >
-                      {/* Indicator dot */}
-                      <View
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: 4,
-                          backgroundColor:
-                            subjects.find((s) => s.id === exam.subjectId)?.color || '#4A90E2',
-                        }}
-                      />
-                      <Text style={[styles.examTitle, { color: theme.text }]}>{exam.name}</Text>
-                    </View>
-                    <Text style={styles.examDate}>
-                      {new Date(exam.date).toLocaleDateString('es-ES', {
-                        day: 'numeric',
-                        month: 'long',
-                      })}
-                    </Text>
-                  </View>
+                      <View style={styles.rowMain}>
+                        <View style={styles.examTitleRow}>
+                          <View
+                            style={[
+                              styles.subjectDot,
+                              { backgroundColor: subject?.color || tokens.colors.accent },
+                            ]}
+                          />
+                          <Text style={styles.examName} numberOfLines={1}>
+                            {exam.name}
+                          </Text>
+                        </View>
+                        <Text style={styles.rowMeta}>
+                          {formatShortDate(exam.date)} ·{' '}
+                          {calculateDaysLeft(exam.date).toLowerCase()}
+                        </Text>
+                      </View>
 
-                  {/* Days Left Badge */}
-                  <View
-                    style={[
-                      styles.daysLeftBadge,
-                      {
-                        backgroundColor: isDarkMode
-                          ? 'rgba(255, 255, 255, 0.1)'
-                          : 'rgba(0, 0, 0, 0.05)',
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.daysLeftText, { color: theme.text }]}>{daysLeft}</Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })
+                      <Chip active={urgent}>{urgent ? 'Prioridad alta' : 'Normal'}</Chip>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </Card>
           )}
         </View>
 
-        {/* Pendientes de Calificar Section */}
+        {/* Exams waiting for a grade */}
         {!loading && pendingExams.length > 0 && (
-          <View ref={pendingSectionRef} style={styles.section}>
-            <View style={[styles.sectionHeader, { marginBottom: 12 }]}>
-              <View style={styles.sectionTitleRow}>
-                <AlertCircle size={18} color="#FF9F0A" />
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  Pendientes de Calificar
-                </Text>
-                <InfoTooltip
-                  title="Notas y Promedios ✍️"
-                  content="Pon nota a tus exámenes pasados para que Schedio pueda calcular tu media y ajustar tus planes de estudio."
-                  style={{ marginLeft: 8 }}
-                />
-              </View>
-            </View>
+          <View ref={pendingSectionRef}>
+            <SectionTitle>
+              <Text style={styles.sectionTitleText}>Por calificar</Text>
+              <InfoTooltip
+                title="Notas y Promedios ✍️"
+                content="Pon nota a tus exámenes pasados para que Schedio pueda calcular tu media y ajustar tus planes de estudio."
+                iconSize={16}
+              />
+            </SectionTitle>
 
-            {pendingExams.map((exam) => (
-              <TouchableOpacity
-                key={exam.id}
-                style={[
-                  styles.pendingCard,
-                  { backgroundColor: '#1C1C1E', borderColor: theme.border },
-                ]}
-                onLongPress={() => {
-                  Alert.alert(
-                    'Eliminar examen',
-                    `¿Estás seguro de que quieres eliminar "${exam.name}"?`,
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      {
-                        text: 'Eliminar',
-                        style: 'destructive',
-                        onPress: async () => {
-                          try {
-                            const { deleteExam } = await import('../../services/exams');
-                            await deleteExam(exam.id);
-                            fetchData();
-                          } catch (e) {
-                            Alert.alert('Error', 'No se pudo eliminar el examen.');
-                          }
-                        },
-                      },
-                    ]
-                  );
-                }}
-                delayLongPress={500}
-                activeOpacity={0.9}
-              >
-                {/* Orange left border indicator */}
-                <View style={styles.pendingIndicator} />
+            <Card padding={16}>
+              {pendingExams.map((exam, index) => {
+                const isLast = index === pendingExams.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={exam.id}
+                    style={[styles.pendingRow, isLast && styles.rowLast]}
+                    activeOpacity={0.9}
+                    delayLongPress={500}
+                    onLongPress={() => {
+                      Alert.alert(
+                        'Eliminar examen',
+                        `¿Estás seguro de que quieres eliminar "${exam.name}"?`,
+                        [
+                          { text: 'Cancelar', style: 'cancel' },
+                          {
+                            text: 'Eliminar',
+                            style: 'destructive',
+                            onPress: async () => {
+                              try {
+                                await deleteExam(exam.id);
+                                fetchData();
+                              } catch {
+                                Alert.alert('Error', 'No se pudo eliminar el examen.');
+                              }
+                            },
+                          },
+                        ]
+                      );
+                    }}
+                  >
+                    <View style={styles.rowMain}>
+                      <Text style={styles.pendingName} numberOfLines={1}>
+                        {exam.name}
+                      </Text>
+                      <Text style={styles.rowMeta}>
+                        {subjects.find((s) => s.id === exam.subjectId)?.name || 'Asignatura'} ·
+                        Examen terminado · {formatShortDate(exam.date)}
+                      </Text>
+                    </View>
 
-                <View style={styles.pendingContent}>
-                  <Text style={[styles.pendingTitle, { color: '#FFFFFF' }]}>{exam.name}</Text>
-                  <Text style={styles.pendingSubtitle}>
-                    {subjects.find((s) => s.id === exam.subjectId)?.name || 'Asignatura'} • Finalizó
-                    el {new Date(exam.date).toLocaleDateString('es-ES')}
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={styles.gradeButton}
-                  onPress={() => handleOpenGradeModal(exam)}
-                >
-                  <Text style={styles.gradeButtonText}>Poner Nota</Text>
-                </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
+                    <Button
+                      title="Añadir nota →"
+                      variant="secondary"
+                      onPress={() => handleOpenGradeModal(exam)}
+                      style={styles.gradeButton}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </Card>
           </View>
         )}
-
-        {/* Monthly Calendar */}
-        <View ref={calendarSectionRef} style={[styles.section, { marginBottom: 32 }]}>
-          <Text style={[styles.sectionTitle, { marginBottom: 16, color: theme.text }]}>
-            Tu Calendario
-          </Text>
-          {loading ? (
-            <Skeleton width="100%" height={300} borderRadius={20} />
-          ) : (
-            <MiniCalendar
-              exams={exams}
-              subjects={subjects}
-              onDayClick={handleDayClick}
-              isDarkMode={isDarkMode}
-            />
-          )}
-        </View>
       </ScrollView>
 
       {tourVisible && (
@@ -767,7 +682,6 @@ export default function Dashboard() {
           tourRefs={{
             scrollViewRef,
             heroCardRef,
-            examsSectionRef,
             pendingSectionRef,
             calendarSectionRef,
           }}
@@ -780,7 +694,7 @@ export default function Dashboard() {
         visible={streakModalOpen}
         onClose={() => setStreakModalOpen(false)}
         currentStreak={userData.streak}
-        studyHistory={[]}
+        studyHistory={sessionHistory}
       />
 
       <LevelProgressModal
@@ -809,14 +723,14 @@ export default function Dashboard() {
         date={selectedDate}
         events={eventsForSelectedDay}
         onAddNew={() => {
-          setDayOptionsVisible(false); // Close options
-          setSelectedEvent(null); // Clear selected event
-          setTimeout(() => setEventModalVisible(true), 100); // Open new event modal
+          setDayOptionsVisible(false);
+          setSelectedEvent(null);
+          setTimeout(() => setEventModalVisible(true), 100);
         }}
         onEditEvent={(event) => {
-          setDayOptionsVisible(false); // Close options
-          setSelectedEvent(event); // Set event to edit
-          setTimeout(() => setEventModalVisible(true), 100); // Open edit modal
+          setDayOptionsVisible(false);
+          setSelectedEvent(event);
+          setTimeout(() => setEventModalVisible(true), 100);
         }}
       />
 
@@ -827,25 +741,24 @@ export default function Dashboard() {
         onSave={handleSaveGrade}
       />
 
-      {/* Rank Celebration Modal */}
-      <Modal visible={rankCelebrationVisible} transparent={true} animationType="fade">
+      {/* Rank Celebration */}
+      <Modal visible={rankCelebrationVisible} transparent animationType="fade">
         <View style={styles.celebrationOverlay}>
-          <GlassCard style={styles.celebrationCard}>
-            <Trophy size={60} color="#FFD700" style={{ marginBottom: 16 }} />
+          <Card padding={28} style={styles.celebrationCard}>
+            <Trophy
+              size={56}
+              color={tokens.colors.premiumText}
+              style={{ marginBottom: 16, alignSelf: 'center' }}
+            />
             <Text style={styles.celebrationTitle}>¡NUEVO RANGO!</Text>
             <Text style={styles.celebrationRank}>{newRank}</Text>
             <Text style={styles.celebrationText}>
               Tu esfuerzo está dando sus frutos. ¡Sigue así para desbloquear más ventajas!
             </Text>
-            <TouchableOpacity
-              style={styles.celebrationButton}
-              onPress={() => setRankCelebrationVisible(false)}
-            >
-              <Text style={styles.celebrationButtonText}>¡Vamos!</Text>
-            </TouchableOpacity>
-          </GlassCard>
+            <Button title="¡Vamos!" fullWidth onPress={() => setRankCelebrationVisible(false)} />
+          </Card>
           {rankCelebrationVisible && (
-            <ConfettiCannon count={200} origin={{ x: -10, y: 0 }} fadeOut={true} />
+            <ConfettiCannon count={200} origin={{ x: -10, y: 0 }} fadeOut />
           )}
         </View>
       </Modal>
@@ -853,305 +766,232 @@ export default function Dashboard() {
   );
 }
 
+const font = tokens.typography.families.inter;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: tokens.colors.background,
   },
-  loadingContainer: {
+
+  // Header
+  header: {
+    paddingHorizontal: 20,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  logoPill: {
+    height: 34,
+    paddingHorizontal: 12,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
+  logoImage: {
+    width: 96,
+    height: 22,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  // Streak / level strip
+  stripWrapper: {
+    marginTop: 14,
+  },
+  statCell: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  statEmoji: {
+    fontSize: 20,
+  },
+  statTextWrap: {
+    flex: 1,
+  },
+  statLabel: {
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  statValue: {
+    fontFamily: font.bold,
+    fontSize: 16,
+    color: tokens.colors.textPrimary,
+    marginTop: 1,
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: tokens.colors.borderDefault,
+  },
+
+  // Scroll body
   scrollView: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 12, // Reduced top padding
   },
-  header: {
+  scrollContent: {
+    padding: 20,
+    paddingBottom: 32,
+    gap: 24,
+  },
+
+  // Welcome card
+  welcomeHead: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 60, // Fixed header top padding
-    paddingBottom: 20,
-    zIndex: 10,
+    marginBottom: 6,
   },
-  celebrationOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
+  aiLoadingRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 30,
+    gap: 10,
   },
-  celebrationCard: {
-    width: '100%',
-    padding: 32,
-    alignItems: 'center',
-    borderRadius: 32,
-  },
-  celebrationTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#FFD700',
-    letterSpacing: 2,
+  welcomeTitle: {
+    fontFamily: font.bold,
+    fontSize: 22,
+    color: tokens.colors.textPrimary,
     marginBottom: 8,
+    flexShrink: 1,
   },
-  celebrationRank: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  celebrationText: {
-    fontSize: 16,
-    color: '#CCCCCC',
-    textAlign: 'center',
+  welcomeBody: {
+    fontFamily: font.regular,
+    fontSize: tokens.typography.body.size,
     lineHeight: 22,
-    marginBottom: 32,
-  },
-  celebrationButton: {
-    backgroundColor: '#FFFFFF',
-    paddingVertical: 16,
-    paddingHorizontal: 48,
-    borderRadius: 100,
-  },
-  celebrationButtonText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  logo: {
-    fontSize: 24,
-    fontWeight: '700',
-    fontFamily: tokens.typography.families.sans,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  greeting: {
-    fontSize: 13,
-    color: '#8E8E93',
-    fontFamily: tokens.typography.families.sans,
-  },
-  iconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoutText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4A90E2',
-  },
-  plusButton: {
-    shadowColor: '#FF9F0A',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  plusGradient: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-  },
-  plusText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#000000',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  badgeWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  floatingHelp: {
-    opacity: 0.8,
-  },
-  heroCard: {
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 32,
-    borderWidth: 1,
-  },
-  badgesRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 20,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  badgeBlue: {
-    // These styles are overridden by inline style based on isDarkMode
-  },
-  badgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  heroTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    marginBottom: 8,
-    lineHeight: 34,
-  },
-  heroSubtitle: {
-    fontSize: 15,
-    color: '#8E8E93',
-    marginBottom: 24,
-  },
-  ctaButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#4A90E2',
-    paddingVertical: 16,
-    borderRadius: 100,
-  },
-  ctaButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  section: {
-    marginBottom: 32,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    color: tokens.colors.textSecondary,
     marginBottom: 16,
   },
-  sectionTitleRow: {
+
+  // Shared rows
+  sectionTitleText: {
+    fontFamily: font.semibold,
+    fontSize: tokens.typography.sectionTitle.size,
+    color: tokens.colors.textPrimary,
+  },
+  link: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.accent,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: tokens.colors.borderDefault,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  examsHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  rowMain: {
+    flex: 1,
+    gap: 2,
+  },
+  rowMeta: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  rowLast: {
+    borderBottomWidth: 0,
+  },
+  emptyText: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+    paddingVertical: 12,
+  },
+
+  // Upcoming exams
+  examRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
+  },
+  examTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: tokens.typography.families.sans,
+  subjectDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  sectionLink: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4A90E2',
+  examName: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+    flexShrink: 1,
   },
-  emptyState: {
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  emptyStateTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptyStateText: {
-    fontSize: 14,
-    color: '#8E8E93',
-    textAlign: 'center',
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  emptyStateButton: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 100,
-  },
-  emptyStateButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  examCard: {
+
+  // Pending grades
+  pendingRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
   },
-  examLeft: {
-    flex: 1,
-  },
-  examTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  examDate: {
-    fontSize: 13,
-    color: '#8E8E93',
-  },
-  daysLeftBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  daysLeftText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  // Pending Grading Styles
-  pendingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  pendingIndicator: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    width: 4,
-    backgroundColor: '#FF9F0A',
-  },
-  pendingContent: {
-    flex: 1,
-    paddingLeft: 12,
-  },
-  pendingTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  pendingSubtitle: {
-    fontSize: 13,
-    color: '#8E8E93',
+  pendingName: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
   },
   gradeButton: {
-    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 100,
-    borderWidth: 1,
-    borderColor: '#4A90E2',
-    backgroundColor: 'rgba(74, 144, 226, 0.1)',
+    paddingHorizontal: 14,
   },
-  gradeButtonText: {
+
+  // Rank celebration
+  celebrationOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  celebrationCard: {
+    alignItems: 'stretch',
+  },
+  celebrationTitle: {
+    fontFamily: font.semibold,
     fontSize: 13,
-    fontWeight: '600',
-    color: '#4A90E2',
+    letterSpacing: 1,
+    textAlign: 'center',
+    color: tokens.colors.textSecondary,
+  },
+  celebrationRank: {
+    fontFamily: font.bold,
+    fontSize: 26,
+    textAlign: 'center',
+    color: tokens.colors.textPrimary,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  celebrationText: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    color: tokens.colors.textSecondary,
+    marginBottom: 24,
   },
 });
