@@ -1,6 +1,5 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
 import { useCallback, useEffect } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
@@ -16,6 +15,7 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 import { BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { tokens } from '../theme/tokens';
 
 // Hold the splash screen until the fonts are ready, so text never renders in a
@@ -67,7 +67,12 @@ export default function Layout() {
   if (!ready) return null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: tokens.colors.background }} onLayout={onLayoutRoot}>
+    // Gesture handlers (the sheets' drag-to-dismiss) need this at the root;
+    // expo-router doesn't provide it.
+    <GestureHandlerRootView
+      style={{ flex: 1, backgroundColor: tokens.colors.background }}
+      onLayout={onLayoutRoot}
+    >
       <Head>
         <meta name="google" content="notranslate" />
       </Head>
@@ -93,6 +98,6 @@ export default function Layout() {
           }}
         />
       </Stack>
-    </View>
+    </GestureHandlerRootView>
   );
 }

@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [userData, setUserData] = useState({
     streak: 0,
     dailyActivity: 0,
+    maxStreak: 0,
     level: 1,
     xp: 0,
     rank: 'Aprendiz',
@@ -145,9 +146,10 @@ export default function Dashboard() {
 
       setUserData({
         streak: streakData.currentStreak || 0,
-        // Minutes studied today, straight from checkDailyStreak. StreakModal
-        // uses it for the "N min left today" goal; it was being discarded.
+        // Minutes studied today and the personal record, straight from
+        // checkDailyStreak. StreakModal shows both; they were being discarded.
         dailyActivity: streakData.dailyActivity || 0,
+        maxStreak: streakData.maxStreak || 0,
         level: profileData?.gamification?.level || 1,
         xp: profileData?.gamification?.xp || 0,
         rank: profileData?.gamification?.rank || 'Aprendiz',
@@ -755,6 +757,7 @@ export default function Dashboard() {
         currentStreak={userData.streak}
         studyHistory={sessionHistory}
         dailyActivity={userData.dailyActivity}
+        maxStreak={userData.maxStreak}
         onStartSession={() => router.push('/dashboard/study')}
       />
 

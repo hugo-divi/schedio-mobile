@@ -1,3 +1,4 @@
+import { useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,17 +7,33 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  Dimensions,
 } from 'react-native';
-import Animated, { SlideInDown } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  Easing,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tokens } from '../../theme/tokens';
 
 const font = tokens.typography.families.inter;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Past this much drag (or a fast enough flick) the sheet commits to closing.
+const DISMISS_DISTANCE = 110;
+const DISMISS_VELOCITY = 900;
 
 /**
  * The sheet every home-screen modal sits in: dimmed backdrop, rounded top,
- * grab handle, slide-up entrance. Tapping the backdrop dismisses; taps inside
- * the sheet don't bubble out to it.
+ * grab handle, slide-up entrance, and drag-down-to-dismiss.
+ *
+ * The drag is bound to the handle area rather than the whole sheet, so it never
+ * competes with a ScrollView or a horizontal chip list inside the content.
  *
  * Pass `title`/`subtitle` for the standard heading, or render your own header
  * in `children` and leave them out.
@@ -30,14 +47,61 @@ export function BottomSheet({
   avoidKeyboard = false,
 }) {
   const insets = useSafeAreaInsets();
+  const translateY = useSharedValue(SCREEN_HEIGHT);
+
+  useEffect(() => {
+    if (!visible) return;
+    // Modal mounts its content on open, so start from off-screen every time.
+    translateY.value = SCREEN_HEIGHT;
+    translateY.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
+  }, [visible, translateY]);
+
+  // Animate out, then let the parent unmount us.
+  const dismiss = useCallback(() => {
+    translateY.value = withTiming(
+      SCREEN_HEIGHT,
+      { duration: 220, easing: Easing.in(Easing.cubic) },
+      (finished) => {
+        if (finished) runOnJS(onClose)();
+      }
+    );
+  }, [onClose, translateY]);
+
+  const pan = Gesture.Pan()
+    .onUpdate((event) => {
+      // Downward only — dragging up shouldn't lift the sheet off its edge.
+      translateY.value = Math.max(0, event.translationY);
+    })
+    .onEnd((event) => {
+      const shouldClose =
+        event.translationY > DISMISS_DISTANCE || event.velocityY > DISMISS_VELOCITY;
+      if (shouldClose) {
+        translateY.value = withTiming(
+          SCREEN_HEIGHT,
+          { duration: 200, easing: Easing.in(Easing.cubic) },
+          (finished) => {
+            if (finished) runOnJS(onClose)();
+          }
+        );
+      } else {
+        translateY.value = withSpring(0, { damping: 22, stiffness: 240 });
+      }
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
 
   const sheet = (
     <Pressable onPress={() => {}}>
-      <Animated.View
-        entering={SlideInDown.duration(300)}
-        style={[styles.sheet, { paddingBottom: 24 + insets.bottom }]}
-      >
-        <View style={styles.handle} />
+      <Animated.View style={[styles.sheet, { paddingBottom: 24 + insets.bottom }, sheetStyle]}>
+        <GestureDetector gesture={pan}>
+          {/* Padded so the 4px bar isn't the whole target */}
+          <View style={styles.handleArea}>
+            <View style={styles.handle} />
+          </View>
+        </GestureDetector>
+
         {title ? <Text style={styles.title}>{title}</Text> : null}
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         {children}
@@ -46,8 +110,8 @@ export function BottomSheet({
   );
 
   return (
-    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-      <Pressable style={styles.overlay} onPress={onClose}>
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={dismiss}>
+      <Pressable style={styles.overlay} onPress={dismiss}>
         {avoidKeyboard ? (
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -106,15 +170,18 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: tokens.radius.sheet,
     borderTopRightRadius: tokens.radius.sheet,
     paddingHorizontal: 24,
+  },
+  handleArea: {
     paddingTop: 12,
+    paddingBottom: 16,
+    marginHorizontal: -24,
+    alignItems: 'center',
   },
   handle: {
     width: 36,
     height: 4,
     borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.borderDefault,
-    alignSelf: 'center',
-    marginBottom: 20,
   },
   title: {
     fontFamily: font.bold,

@@ -8,11 +8,11 @@ import {
   StyleSheet,
   Platform,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar as CalendarIcon, Trash2 } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
 import BottomSheet, { FieldLabel, sheetStyles } from './ui/BottomSheet';
 import Button from './ui/Button';
+import CalendarPicker from './ui/CalendarPicker';
 
 const font = tokens.typography.families.inter;
 
@@ -72,13 +72,13 @@ export default function EventModal({
       setName('');
       setType('exam');
       setPriority(5);
-      setSubjectId(null);
+      // No subject is a valid choice, so start there instead of forcing a pick.
+      setSubjectId(UNASSIGNED);
     }
   }, [visible, existingEvent, selectedDate]);
 
   const nameMissing = !name.trim();
-  const subjectMissing = !subjectId;
-  const canSave = !nameMissing && !subjectMissing;
+  const canSave = !nameMissing;
 
   const handleSave = () => {
     setTouched(true);
@@ -86,19 +86,12 @@ export default function EventModal({
     onSave({
       id: existingEvent ? existingEvent.id : null,
       name: name.trim(),
-      subjectId,
+      subjectId: subjectId || UNASSIGNED,
       date: date.toISOString(),
       type,
       priority,
     });
     onClose();
-  };
-
-  const onDateChange = (event, picked) => {
-    // Android fires once and closes itself; iOS keeps the spinner mounted.
-    setPickerOpen(Platform.OS === 'ios' && event.type !== 'dismissed');
-    if (event.type === 'dismissed' || !picked) return;
-    setDate(picked);
   };
 
   const formattedDate = date.toLocaleDateString('es-ES', {
@@ -173,13 +166,12 @@ export default function EventModal({
             <Text style={styles.dateAction}>Cambiar</Text>
           </TouchableOpacity>
           {pickerOpen ? (
-            <DateTimePicker
+            <CalendarPicker
               value={date}
-              mode="date"
-              display={Platform.OS === 'ios' ? 'inline' : 'default'}
-              onChange={onDateChange}
-              locale="es-ES"
-              themeVariant="dark"
+              onChange={(picked) => {
+                setDate(picked);
+                setPickerOpen(false);
+              }}
             />
           ) : null}
         </View>
@@ -220,11 +212,6 @@ export default function EventModal({
               </Text>
             </TouchableOpacity>
           </ScrollView>
-          {touched && subjectMissing ? (
-            <Text style={[sheetStyles.helper, sheetStyles.helperError]}>
-              Elige una asignatura (o «Sin asignatura»).
-            </Text>
-          ) : null}
         </View>
 
         {/* Priority */}

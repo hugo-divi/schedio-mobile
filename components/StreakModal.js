@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { Flame } from 'lucide-react-native';
+import { Flame, Trophy } from 'lucide-react-native';
 import { startOfWeek, addDays, isSameDay, isAfter, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { tokens } from '../theme/tokens';
@@ -28,6 +28,7 @@ export default function StreakModal({
   visible,
   onClose,
   currentStreak = 0,
+  maxStreak = 0,
   studyHistory = [],
   dailyActivity = 0,
   onStartSession,
@@ -45,6 +46,10 @@ export default function StreakModal({
     .filter(Boolean);
 
   const hasStudiedOn = (date) => studiedDates.some((d) => isSameDay(d, date));
+
+  // The stored record can lag behind an in-progress streak, so take the higher.
+  const record = Math.max(maxStreak, currentStreak);
+  const isRecord = currentStreak > 0 && currentStreak >= record;
 
   const metToday = dailyActivity >= DAILY_GOAL_MIN;
   const remaining = Math.max(0, DAILY_GOAL_MIN - dailyActivity);
@@ -66,6 +71,16 @@ export default function StreakModal({
           {currentStreak === 1 ? 'día en racha' : 'días en racha'}
         </Text>
         <Text style={styles.motivation}>{getMotivation(currentStreak)}</Text>
+
+        {/* Worth keeping visible: if the streak resets, the record survives */}
+        {record > 0 ? (
+          <View style={styles.recordPill}>
+            <Trophy size={13} color={tokens.colors.premiumText} />
+            <Text style={styles.recordText}>
+              {isRecord ? 'Es tu mejor racha' : `Tu récord: ${record} días`}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.weekRow}>
@@ -166,6 +181,23 @@ const styles = StyleSheet.create({
     color: tokens.colors.textSecondary,
     textAlign: 'center',
     marginTop: 12,
+  },
+  recordPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.premiumBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
+  },
+  recordText: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.premiumText,
   },
   weekRow: {
     flexDirection: 'row',
