@@ -69,6 +69,8 @@ export default function Dashboard() {
     streak: 0,
     dailyActivity: 0,
     maxStreak: 0,
+    restDays: [],
+    restRemaining: 2,
     level: 1,
     xp: 0,
     rank: 'Aprendiz',
@@ -150,6 +152,8 @@ export default function Dashboard() {
         // checkDailyStreak. StreakModal shows both; they were being discarded.
         dailyActivity: streakData.dailyActivity || 0,
         maxStreak: streakData.maxStreak || 0,
+        restDays: streakData.restDays || [],
+        restRemaining: streakData.restRemaining ?? 0,
         level: profileData?.gamification?.level || 1,
         xp: profileData?.gamification?.xp || 0,
         rank: profileData?.gamification?.rank || 'Aprendiz',
@@ -758,6 +762,8 @@ export default function Dashboard() {
         studyHistory={sessionHistory}
         dailyActivity={userData.dailyActivity}
         maxStreak={userData.maxStreak}
+        restDays={userData.restDays}
+        restRemaining={userData.restRemaining}
         onStartSession={() => router.push('/dashboard/study')}
       />
 

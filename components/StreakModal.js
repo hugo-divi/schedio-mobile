@@ -1,8 +1,9 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { Flame, Trophy } from 'lucide-react-native';
+import { Flame, Trophy, Moon } from 'lucide-react-native';
 import { startOfWeek, addDays, isSameDay, isAfter, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { tokens } from '../theme/tokens';
+import { MAX_REST_PER_WEEK } from '../services/streaks';
 import BottomSheet from './ui/BottomSheet';
 import Button from './ui/Button';
 
@@ -31,6 +32,8 @@ export default function StreakModal({
   maxStreak = 0,
   studyHistory = [],
   dailyActivity = 0,
+  restDays = [],
+  restRemaining = MAX_REST_PER_WEEK,
   onStartSession,
 }) {
   const today = new Date();
@@ -46,6 +49,7 @@ export default function StreakModal({
     .filter(Boolean);
 
   const hasStudiedOn = (date) => studiedDates.some((d) => isSameDay(d, date));
+  const restDaySet = new Set(restDays);
 
   // The stored record can lag behind an in-progress streak, so take the higher.
   const record = Math.max(maxStreak, currentStreak);
@@ -86,6 +90,7 @@ export default function StreakModal({
       <View style={styles.weekRow}>
         {week.map((day, i) => {
           const studied = hasStudiedOn(day);
+          const rested = restDaySet.has(format(day, 'yyyy-MM-dd'));
           const isTodayCell = isSameDay(day, today);
           const future = isAfter(day, today);
 
@@ -98,12 +103,15 @@ export default function StreakModal({
                 style={[
                   styles.dayCircle,
                   studied && styles.dayCircleStudied,
+                  rested && !studied && styles.dayCircleRested,
                   isTodayCell && styles.dayCircleToday,
                   future && styles.dayCircleFuture,
                 ]}
               >
                 {studied ? (
                   <Flame size={15} color={tokens.colors.bgBase} fill={tokens.colors.bgBase} />
+                ) : rested ? (
+                  <Moon size={13} color={tokens.colors.accent} />
                 ) : (
                   <View style={styles.emptyDot} />
                 )}
@@ -111,6 +119,24 @@ export default function StreakModal({
             </View>
           );
         })}
+      </View>
+
+      {/* Rest days are invisible mechanics otherwise — spell out the rule and
+          what's left, so a skipped day doesn't feel like a bug. */}
+      <View style={styles.restBox}>
+        <View style={styles.restHead}>
+          <Moon size={14} color={tokens.colors.accent} />
+          <Text style={styles.restTitle}>Días de descanso</Text>
+          <View style={styles.restCounter}>
+            <Text style={styles.restCounterText}>
+              {restRemaining}/{MAX_REST_PER_WEEK}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.restBody}>
+          Puedes saltarte {MAX_REST_PER_WEEK} días por semana sin perder la racha. Se usan solos
+          cuando no estudias, y el contador se reinicia cada lunes.
+        </Text>
       </View>
 
       {/* dailyActivity comes back from checkDailyStreak and was going unused */}
@@ -231,9 +257,52 @@ const styles = StyleSheet.create({
   dayCircleToday: {
     borderColor: tokens.colors.accent,
   },
+  dayCircleRested: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
   dayCircleFuture: {
     backgroundColor: 'transparent',
     borderColor: tokens.colors.borderDefault,
+  },
+  restBox: {
+    marginTop: 20,
+    padding: 14,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  restHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  restTitle: {
+    flex: 1,
+    fontFamily: font.semibold,
+    fontSize: 13,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    color: tokens.colors.accent,
+  },
+  restCounter: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accent,
+  },
+  restCounterText: {
+    fontFamily: font.bold,
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  restBody: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
   },
   emptyDot: {
     width: 6,

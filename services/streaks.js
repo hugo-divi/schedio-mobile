@@ -1,9 +1,19 @@
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
-// Helper functions to replace date-fns
+/**
+ * Local civil date (YYYY-MM-DD).
+ *
+ * Deliberately not `toISOString()`: that converts to UTC first, so east of
+ * Greenwich every date built at local midnight slid back a day — and a session
+ * studied between 00:00 and 02:00 was filed under yesterday. A streak is about
+ * the user's own day, so it has to be computed in local time.
+ */
 const formatDate = (date) => {
-  return date.toISOString().split('T')[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 const isToday = (dateString) => {
@@ -22,6 +32,66 @@ const isYesterday = (dateString) => {
   const d = typeof dateString === 'string' ? dateString : formatDate(dateString);
   return d === yStr;
 };
+
+/**
+ * Rest days: a student doesn't study every day, and a streak that punishes that
+ * stops being motivating. Each week grants a couple of skips that don't break
+ * the run — spent automatically on the days actually missed, so nobody has to
+ * declare which days they rest.
+ */
+export const MAX_REST_PER_WEEK = 2;
+
+/** Monday-based week key, e.g. "2026-07-27". Weeks reset the allowance. */
+const weekKeyOf = (dateString) => {
+  const d = new Date(`${dateString}T00:00:00`);
+  const dayOfWeek = (d.getDay() + 6) % 7; // 0 = Monday
+  d.setDate(d.getDate() - dayOfWeek);
+  return formatDate(d);
+};
+
+const restUsedInWeekOf = (restDays, dateString) => {
+  const key = weekKeyOf(dateString);
+  return restDays.filter((d) => weekKeyOf(d) === key).length;
+};
+
+/** Dates strictly between two days, as YYYY-MM-DD. */
+const daysBetweenExclusive = (fromString, toString) => {
+  const out = [];
+  const cursor = new Date(`${fromString}T00:00:00`);
+  const end = new Date(`${toString}T00:00:00`);
+  cursor.setDate(cursor.getDate() + 1);
+  while (cursor < end) {
+    out.push(formatDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+};
+
+/**
+ * Try to absorb a gap in study days using the weekly rest allowance.
+ * Returns the updated rest-day list, or null when the gap is too wide.
+ */
+const spendRestDays = (missedDates, restDays) => {
+  const updated = [...restDays];
+  for (const day of missedDates) {
+    if (updated.includes(day)) continue; // already counted as rest
+    if (restUsedInWeekOf(updated, day) >= MAX_REST_PER_WEEK) return null;
+    updated.push(day);
+  }
+  return updated;
+};
+
+/** Keeps the stored list from growing without bound. */
+const pruneRestDays = (restDays, keepDays = 90) => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - keepDays);
+  const cutoffStr = formatDate(cutoff);
+  return restDays.filter((d) => d >= cutoffStr);
+};
+
+/** How many skips are still available in the week containing `date`. */
+export const restDaysRemaining = (restDays = [], date = new Date()) =>
+  Math.max(0, MAX_REST_PER_WEEK - restUsedInWeekOf(restDays, formatDate(date)));
 
 /**
  * Get user streak data
@@ -70,7 +140,14 @@ export const checkDailyStreak = async (userId) => {
         dailyActivity: 0, // minutes today
         updatedAt: new Date(),
       });
-      return { currentStreak: 0, maxStreak: 0, needsActivity: true, dailyActivity: 0 };
+      return {
+        currentStreak: 0,
+        maxStreak: 0,
+        needsActivity: true,
+        dailyActivity: 0,
+        restDays: [],
+        restRemaining: MAX_REST_PER_WEEK,
+      };
     }
 
     const streakData = streakDoc.data();
@@ -80,23 +157,37 @@ export const checkDailyStreak = async (userId) => {
     // If already checked in today, return current status
     if (lastCheckIn === today) {
       const needsActivity = (streakData.dailyActivity || 0) < 5;
+      const restDays = streakData.restDays || [];
       return {
         currentStreak: streakData.currentStreak,
         maxStreak: streakData.maxStreak || 0,
         needsActivity,
         dailyActivity: streakData.dailyActivity || 0,
+        restDays,
+        restRemaining: restDaysRemaining(restDays),
       };
     }
 
     // New day - check if streak should break
     let newStreak = streakData.currentStreak;
+    let restDays = pruneRestDays(streakData.restDays || []);
 
     if (lastStudy && isYesterday(lastStudy)) {
       // Streak continues (but needs activity today)
       // Don't increment yet, wait for activity
     } else if (lastStudy && !isToday(lastStudy)) {
-      // Streak broken
-      newStreak = 0;
+      // There's a gap. Spend the weekly rest allowance on the missed days
+      // before giving up on the streak; today doesn't count yet, it's still
+      // in progress.
+      const missed = daysBetweenExclusive(lastStudy, today);
+      const afterRest = spendRestDays(missed, restDays);
+
+      if (afterRest) {
+        restDays = afterRest;
+      } else {
+        newStreak = 0;
+        restDays = [];
+      }
     }
 
     // Update check-in and reset daily activity
@@ -104,6 +195,7 @@ export const checkDailyStreak = async (userId) => {
       lastCheckIn: today,
       dailyActivity: 0,
       currentStreak: newStreak,
+      restDays,
       updatedAt: new Date(),
     });
 
@@ -112,6 +204,8 @@ export const checkDailyStreak = async (userId) => {
       maxStreak: streakData.maxStreak || 0,
       needsActivity: true,
       dailyActivity: 0,
+      restDays,
+      restRemaining: restDaysRemaining(restDays),
     };
   } catch (error) {
     console.error('Error checking daily streak:', error);
@@ -153,10 +247,17 @@ export const recordActivity = async (userId, activityDuration) => {
     if (!wasComplete && isNowComplete) {
       let newStreak = streakData.currentStreak;
 
-      // If studied yesterday or this is first day, increment
+      // A gap already absorbed by rest days must not reset the streak here —
+      // checkDailyStreak spent the allowance to keep it alive, and restarting
+      // at 1 would undo that. (An empty gap trivially satisfies this, which is
+      // the ordinary "studied yesterday" case.)
+      const restDays = streakData.restDays || [];
+      const gapIsRest =
+        !!lastStudy && daysBetweenExclusive(lastStudy, today).every((d) => restDays.includes(d));
+
       if (!lastStudy || lastStudy === today) {
         newStreak = 1;
-      } else if (isYesterday(lastStudy)) {
+      } else if (isYesterday(lastStudy) || gapIsRest) {
         newStreak += 1;
       } else {
         newStreak = 1; // Streak broken, restart
