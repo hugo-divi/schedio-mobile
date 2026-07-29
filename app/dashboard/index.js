@@ -13,14 +13,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useRouter } from 'expo-router';
-import { HelpCircle, Plus, Trophy } from 'lucide-react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { ChevronRight, HelpCircle, Plus, Trophy } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
 import { db } from '../../services/firebase';
 import { auth } from '../../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkDailyStreak } from '../../services/streaks';
+import { calculateXpForLevel, calculateXpForNextLevel } from '../../services/gamification';
 import {
   getUpcomingExams,
   getPendingExams,
@@ -52,6 +53,10 @@ import IconButton from '../../components/ui/IconButton';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
 
+// How long the dashboard data stays fresh before returning to the tab
+// triggers a refetch.
+const FOCUS_REFETCH_MS = 60_000;
+
 // Main Dashboard component - Refactored for global subject sync
 export default function Dashboard() {
   const router = useRouter();
@@ -73,6 +78,7 @@ export default function Dashboard() {
   const calendarSectionRef = useRef(null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const lastFetchRef = useRef(0);
 
   // Modals state
   const [streakModalOpen, setStreakModalOpen] = useState(false);
@@ -184,6 +190,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
+      lastFetchRef.current = Date.now();
       setLoading(false);
       setRefreshing(false);
     }
@@ -229,6 +236,19 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
   }, [examRefreshTrigger]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Refresh when coming back to the tab, so the user doesn't have to pull.
+      // Mount is already covered by the effect above (lastFetchRef is still 0),
+      // and the staleness window keeps a quick glance from re-running the
+      // Firestore reads and the Gemini call every single time.
+      if (!lastFetchRef.current) return;
+      if (Date.now() - lastFetchRef.current < FOCUS_REFETCH_MS) return;
+      fetchData();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+  );
 
   // Session history feeds StreakModal's calendar. Kept out of fetchData so the
   // data/notification flow there stays untouched.
@@ -390,6 +410,16 @@ export default function Dashboard() {
 
   const visibleExams = examsExpanded ? exams : exams.slice(0, 3);
 
+  // Progress through the current level, as a percentage. The curve is
+  // XP = level² × 100, so each level spans a wider XP band than the last.
+  const levelProgress = (() => {
+    const floor = calculateXpForLevel(userData.level);
+    const ceiling = calculateXpForNextLevel(userData.level);
+    const span = ceiling - floor;
+    if (span <= 0) return 0;
+    return Math.min(100, Math.max(0, ((userData.xp - floor) / span) * 100));
+  })();
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
       {/* Header */}
@@ -463,6 +493,10 @@ export default function Dashboard() {
                 <Text style={[styles.statValue, { color: tokens.colors.accent }]}>
                   {userData.level}
                 </Text>
+                {/* How far into the current level the user is */}
+                <View style={styles.xpTrack}>
+                  <View style={[styles.xpFill, { width: `${levelProgress}%` }]} />
+                </View>
               </View>
             </TouchableOpacity>
           </StatsStrip>
@@ -505,17 +539,7 @@ export default function Dashboard() {
 
         {/* Calendar — month grid and upcoming exams share one card */}
         <View ref={calendarSectionRef}>
-          <SectionTitle
-            right={
-              !loading && exams.length > 3 ? (
-                <TouchableOpacity onPress={() => setExamsExpanded(!examsExpanded)}>
-                  <Text style={styles.link}>{examsExpanded ? 'Ver menos' : 'Ver más'}</Text>
-                </TouchableOpacity>
-              ) : null
-            }
-          >
-            Tu calendario
-          </SectionTitle>
+          <SectionTitle>Tu calendario</SectionTitle>
 
           {loading ? (
             <Skeleton width="100%" height={320} borderRadius={tokens.radius.card} />
@@ -548,7 +572,8 @@ export default function Dashboard() {
                 visibleExams.map((exam, index) => {
                   const subject = subjects.find((s) => s.id === exam.subjectId);
                   const urgent = isUrgent(exam);
-                  const isLast = index === visibleExams.length - 1;
+                  // The "show all" row acts as the last divider when collapsed.
+                  const isLast = index === visibleExams.length - 1 && exams.length <= 3;
 
                   return (
                     <TouchableOpacity
@@ -589,6 +614,20 @@ export default function Dashboard() {
                     </TouchableOpacity>
                   );
                 })
+              )}
+
+              {/* Sits with the list it controls, rather than up in the heading */}
+              {exams.length > 3 && (
+                <TouchableOpacity
+                  style={styles.showAllRow}
+                  onPress={() => setExamsExpanded(!examsExpanded)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.link}>
+                    {examsExpanded ? 'Ver menos' : `Ver los ${exams.length} exámenes`}
+                  </Text>
+                  <ChevronRight size={15} color={tokens.colors.accent} />
+                </TouchableOpacity>
               )}
             </Card>
           )}
@@ -808,6 +847,18 @@ const styles = StyleSheet.create({
     width: 1,
     backgroundColor: tokens.colors.borderDefault,
   },
+  xpTrack: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: tokens.colors.surfaceHover,
+    marginTop: 6,
+    overflow: 'hidden',
+  },
+  xpFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: tokens.colors.accent,
+  },
 
   // Scroll body
   scrollView: {
@@ -848,6 +899,13 @@ const styles = StyleSheet.create({
     fontFamily: font.semibold,
     fontSize: 13,
     color: tokens.colors.accent,
+  },
+  showAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingTop: 14,
   },
   cardDivider: {
     height: 1,

@@ -1,6 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import React, { useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react-native';
 import {
   format,
   startOfMonth,
@@ -13,28 +13,52 @@ import {
   isToday,
   addMonths,
   subMonths,
+  addWeeks,
+  subWeeks,
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import * as Haptics from 'expo-haptics';
 import { tokens } from '../theme/tokens';
 
 const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+const WEEK_OPTS = { weekStartsOn: 1 };
 
 /**
- * Month grid for the home screen. Renders bare (no surface of its own) — the
- * caller wraps it in a `Card`, matching the design system's calendar card.
+ * Calendar for the home screen. Opens on the current week — the horizon a
+ * student actually plans against — and expands to the full month on demand.
+ *
+ * Renders bare (no surface of its own); the caller wraps it in a `Card`.
  */
 const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
-  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [expanded, setExpanded] = useState(false);
+  const [cursor, setCursor] = useState(new Date());
 
-  const calendarDays = React.useMemo(() => {
-    const start = startOfWeek(startOfMonth(currentMonth), { weekStartsOn: 1 });
-    const end = endOfWeek(endOfMonth(currentMonth), { weekStartsOn: 1 });
-    return eachDayOfInterval({ start, end });
-  }, [currentMonth]);
+  const days = React.useMemo(() => {
+    if (expanded) {
+      return eachDayOfInterval({
+        start: startOfWeek(startOfMonth(cursor), WEEK_OPTS),
+        end: endOfWeek(endOfMonth(cursor), WEEK_OPTS),
+      });
+    }
+    return eachDayOfInterval({
+      start: startOfWeek(cursor, WEEK_OPTS),
+      end: endOfWeek(cursor, WEEK_OPTS),
+    });
+  }, [cursor, expanded]);
 
-  const nextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
-  const prevMonth = () => setCurrentMonth(subMonths(currentMonth, 1));
+  // The arrows always step by whatever the grid is showing.
+  const goBack = () => setCursor(expanded ? subMonths(cursor, 1) : subWeeks(cursor, 1));
+  const goForward = () => setCursor(expanded ? addMonths(cursor, 1) : addWeeks(cursor, 1));
+
+  const label = React.useMemo(() => {
+    if (expanded) return format(cursor, 'MMMM yyyy', { locale: es });
+    const from = days[0];
+    const to = days[days.length - 1];
+    // Only repeat the month when the week straddles two of them.
+    return isSameMonth(from, to)
+      ? `${format(from, 'd')} – ${format(to, 'd MMM', { locale: es })}`
+      : `${format(from, 'd MMM', { locale: es })} – ${format(to, 'd MMM', { locale: es })}`;
+  }, [cursor, days, expanded]);
 
   const getExamsForDay = (day) => exams.filter((exam) => isSameDay(new Date(exam.date), day));
 
@@ -44,23 +68,21 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
     if (Platform.OS !== 'web') Haptics.selectionAsync();
   };
 
+  const toggleExpanded = () => {
+    setExpanded((prev) => !prev);
+    // Snap back to today so collapsing never lands on an unrelated week.
+    setCursor(new Date());
+    if (Platform.OS !== 'web') Haptics.selectionAsync();
+  };
+
   return (
     <View>
-      {/* Month navigation — arrows flank a centred label */}
       <View style={styles.header}>
-        <TouchableOpacity
-          onPress={prevMonth}
-          style={styles.navBtn}
-          accessibilityLabel="Mes anterior"
-        >
+        <TouchableOpacity onPress={goBack} style={styles.navBtn} accessibilityLabel="Anterior">
           <ChevronLeft size={18} color={tokens.colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.monthLabel}>{format(currentMonth, 'MMMM yyyy', { locale: es })}</Text>
-        <TouchableOpacity
-          onPress={nextMonth}
-          style={styles.navBtn}
-          accessibilityLabel="Mes siguiente"
-        >
+        <Text style={styles.label}>{label}</Text>
+        <TouchableOpacity onPress={goForward} style={styles.navBtn} accessibilityLabel="Siguiente">
           <ChevronRight size={18} color={tokens.colors.textSecondary} />
         </TouchableOpacity>
       </View>
@@ -74,10 +96,11 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
       </View>
 
       <View style={styles.grid}>
-        {calendarDays.map((day, i) => {
-          const isCurrentMonth = isSameMonth(day, currentMonth);
+        {days.map((day, i) => {
           const dayExams = getExamsForDay(day);
           const isTodayDate = isToday(day);
+          // Only the month view spills into neighbouring months.
+          const isOutside = expanded && !isSameMonth(day, cursor);
 
           return (
             <View key={i} style={styles.cellSlot}>
@@ -89,14 +112,13 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
                 <Text
                   style={[
                     styles.dayText,
-                    !isCurrentMonth && styles.dayTextOutside,
+                    isOutside && styles.dayTextOutside,
                     isTodayDate && styles.dayTextToday,
                   ]}
                 >
                   {format(day, 'd')}
                 </Text>
 
-                {/* One dot per exam (max 3), tinted with the subject colour */}
                 {dayExams.length > 0 && (
                   <View style={styles.dotsContainer}>
                     {dayExams.slice(0, 3).map((exam, idx) => {
@@ -122,6 +144,20 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
           );
         })}
       </View>
+
+      <TouchableOpacity
+        style={styles.expandToggle}
+        onPress={toggleExpanded}
+        activeOpacity={0.7}
+        accessibilityRole="button"
+      >
+        <Text style={styles.expandText}>{expanded ? 'Ver semana' : 'Ver mes completo'}</Text>
+        {expanded ? (
+          <ChevronUp size={14} color={tokens.colors.textSecondary} />
+        ) : (
+          <ChevronDown size={14} color={tokens.colors.textSecondary} />
+        )}
+      </TouchableOpacity>
     </View>
   );
 };
@@ -138,7 +174,7 @@ const styles = StyleSheet.create({
   navBtn: {
     padding: 4,
   },
-  monthLabel: {
+  label: {
     fontFamily: tokens.typography.families.inter.semibold,
     fontSize: 15,
     color: tokens.colors.textPrimary,
@@ -158,7 +194,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  // Fixed 7-column layout; the visual box lives inside with a small inset.
+  // Fixed 7-column layout; the visual box sits inside with a small inset.
   cellSlot: {
     width: `${100 / 7}%`,
     alignItems: 'center',
@@ -197,5 +233,18 @@ const styles = StyleSheet.create({
     width: 4,
     height: 4,
     borderRadius: 2,
+  },
+  expandToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingTop: 10,
+    paddingBottom: 2,
+  },
+  expandText: {
+    fontFamily: tokens.typography.families.inter.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
   },
 });
