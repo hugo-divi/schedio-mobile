@@ -17,12 +17,21 @@ import Animated, {
   runOnJS,
   Easing,
 } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+  ScrollView,
+} from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tokens } from '../../theme/tokens';
 
 const font = tokens.typography.families.inter;
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Tall sheets (the event form with its calendar open, the rank ladder) must
+// stay reachable without pushing the buttons off-screen.
+const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
 
 // Past this much drag (or a fast enough flick) the sheet commits to closing.
 const DISMISS_DISTANCE = 110;
@@ -94,7 +103,7 @@ export function BottomSheet({
 
   const sheet = (
     <Pressable onPress={() => {}}>
-      <Animated.View style={[styles.sheet, { paddingBottom: 24 + insets.bottom }, sheetStyle]}>
+      <Animated.View style={[styles.sheet, sheetStyle]}>
         <GestureDetector gesture={pan}>
           {/* Padded so the 4px bar isn't the whole target */}
           <View style={styles.handleArea}>
@@ -102,27 +111,39 @@ export function BottomSheet({
           </View>
         </GestureDetector>
 
-        {title ? <Text style={styles.title}>{title}</Text> : null}
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-        {children}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {title ? <Text style={styles.title}>{title}</Text> : null}
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {children}
+        </ScrollView>
       </Animated.View>
     </Pressable>
   );
 
   return (
     <Modal animationType="fade" transparent visible={visible} onRequestClose={dismiss}>
-      <Pressable style={styles.overlay} onPress={dismiss}>
-        {avoidKeyboard ? (
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.keyboardView}
-          >
-            {sheet}
-          </KeyboardAvoidingView>
-        ) : (
-          sheet
-        )}
-      </Pressable>
+      {/* RN's Modal renders in its own view hierarchy, outside the root
+          GestureHandlerRootView, so gestures inside it need their own. */}
+      <GestureHandlerRootView style={styles.flex}>
+        <Pressable style={styles.overlay} onPress={dismiss}>
+          {avoidKeyboard ? (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.keyboardView}
+            >
+              {sheet}
+            </KeyboardAvoidingView>
+          ) : (
+            sheet
+          )}
+        </Pressable>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -155,6 +176,9 @@ export const sheetStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
@@ -169,12 +193,18 @@ const styles = StyleSheet.create({
     borderTopColor: tokens.colors.borderDefault,
     borderTopLeftRadius: tokens.radius.sheet,
     borderTopRightRadius: tokens.radius.sheet,
+    maxHeight: MAX_SHEET_HEIGHT,
+  },
+  scroll: {
+    // Keeps the sheet as short as its content until it hits the cap.
+    flexGrow: 0,
+  },
+  scrollContent: {
     paddingHorizontal: 24,
   },
   handleArea: {
     paddingTop: 12,
     paddingBottom: 16,
-    marginHorizontal: -24,
     alignItems: 'center',
   },
   handle: {

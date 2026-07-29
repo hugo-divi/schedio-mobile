@@ -77,6 +77,24 @@ const MESSAGES = {
 };
 
 /**
+ * Was this notification already delivered today?
+ *
+ * Everything here is scheduled from `fetchData`, which re-runs whenever the
+ * dashboard refreshes, so without this check a reminder fires again on every
+ * refresh. Exam reminders had it; panic mode and the inactivity nudge did not,
+ * and repeated on every pass.
+ */
+function sentToday(log = [], type, examId = null) {
+  const today = new Date().toDateString();
+  return log.some(
+    (entry) =>
+      entry.type === type &&
+      (examId === null || entry.examId === examId) &&
+      new Date(entry.sentAt).toDateString() === today
+  );
+}
+
+/**
  * Get a rotating message based on a log of sent notifications to avoid repetition
  */
 function getUniqueMessage(type, subject, log = []) {
@@ -115,15 +133,7 @@ export async function scheduleExamReminders(userId, exams, notificationLog = [])
 
     for (const target of targets) {
       if (diffDays === target.days) {
-        // Check if already sent in this specific instance (heuristic)
-        const alreadySent = notificationLog.some(
-          (l) =>
-            l.type === target.type &&
-            l.examId === exam.id &&
-            new Date(l.sentAt).toDateString() === now.toDateString()
-        );
-
-        if (!alreadySent) {
+        if (!sentToday(notificationLog, target.type, exam.id)) {
           const body = getUniqueMessage(target.type, exam.subject, notificationLog);
 
           await Notifications.scheduleNotificationAsync({
@@ -164,10 +174,11 @@ async function logNotification(userId, type, examId = null) {
 /**
  * Schedule Panic Mode alert
  */
-export async function schedulePanicModeAlert(userId, exam) {
+export async function schedulePanicModeAlert(userId, exam, log = []) {
   if (Platform.OS === 'web' || !userId) return;
+  if (sentToday(log, 'panic_mode', exam.id)) return;
 
-  const body = getUniqueMessage('panic_mode', exam.subject);
+  const body = getUniqueMessage('panic_mode', exam.subject, log);
   await Notifications.scheduleNotificationAsync({
     content: {
       title: '🔥 MODO PÁNICO',
@@ -191,6 +202,8 @@ export async function scheduleInactivityReminder(userId, lastLoginDate, hasActiv
   const diffDays = Math.floor((now - lastLogin) / (1000 * 60 * 60 * 24));
 
   if (diffDays >= 2) {
+    if (sentToday(log, 'inactivity')) return;
+
     const body = getUniqueMessage('inactivity', null, log);
     await Notifications.scheduleNotificationAsync({
       content: {

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Zap, BookOpen, Star, Crown, Lock, Check } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
 import {
@@ -74,8 +74,10 @@ export default function LevelProgressModal({ visible, onClose, gamification }) {
         {nextRank ? `Próximo rango: ${nextRank.title}` : 'Has alcanzado el rango máximo'}
       </Text>
 
-      {/* The whole ladder, so the milestones ahead are visible — not just the next one */}
-      <ScrollView style={styles.ladder} showsVerticalScrollIndicator={false}>
+      {/* The whole ladder, so the milestones ahead are visible — not just the
+          next one. No inner ScrollView: the sheet itself scrolls, and nesting
+          the two would make neither behave predictably. */}
+      <View>
         {RANKS.map((rank) => {
           const unlocked = level >= rank.minLevel;
           const isCurrent = rank.title === currentRank.title;
@@ -118,7 +120,7 @@ export default function LevelProgressModal({ visible, onClose, gamification }) {
             </View>
           );
         })}
-      </ScrollView>
+      </View>
 
       <Button
         title="Entendido"
@@ -209,7 +211,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   ladder: {
-    maxHeight: 220,
+    // No cap: the sheet scrolls, so the ladder can be as tall as it needs.
   },
   ladderRow: {
     flexDirection: 'row',

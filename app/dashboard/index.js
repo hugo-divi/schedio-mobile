@@ -177,7 +177,7 @@ export default function Dashboard() {
           const now = new Date();
           const diffDays = (examDate - now) / (1000 * 60 * 60 * 24);
           if (diffDays <= 2 && diffDays >= 0) {
-            schedulePanicModeAlert(user.uid, nearestExam);
+            schedulePanicModeAlert(user.uid, nearestExam, log);
           }
         }
       }
