@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'expo-router';
-import { Settings, HelpCircle, Trophy } from 'lucide-react-native';
+import { HelpCircle, Plus, Trophy } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
 import { db } from '../../services/firebase';
@@ -44,7 +44,6 @@ import LevelProgressModal from '../../components/LevelProgressModal';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
-import InfoTooltip from '../../components/InfoTooltip';
 import GuidedTour from '../../components/GuidedTour';
 import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
@@ -411,15 +410,26 @@ export default function Dashboard() {
             >
               <HelpCircle size={18} color={tokens.colors.textSecondary} />
             </IconButton>
-            <IconButton onPress={() => router.push('/settings')} accessibilityLabel="Ajustes">
-              <Settings size={18} color={tokens.colors.textSecondary} />
-            </IconButton>
             <PrimeBadge onPress={() => router.push('/plus')} />
           </View>
         </View>
+      </View>
 
-        {/* Streak / level strip — each half opens its explainer modal */}
-        <Animated.View entering={FadeInDown.duration(320)} style={styles.stripWrapper}>
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={tokens.colors.accent}
+          />
+        }
+      >
+        {/* Streak / level — scrolls with the content, each half opens its modal */}
+        <Animated.View entering={FadeInDown.duration(320)}>
           <StatsStrip>
             <TouchableOpacity
               style={styles.statCell}
@@ -438,11 +448,6 @@ export default function Dashboard() {
                   {userData.streak} {userData.streak === 1 ? 'día' : 'días'}
                 </Text>
               </View>
-              <InfoTooltip
-                title="Tu Racha 🔥"
-                content="Mantén tu racha estudiando al menos 5 minutos cada día. ¡No dejes que se apague!"
-                iconSize={13}
-              />
             </TouchableOpacity>
 
             <View style={styles.statDivider} />
@@ -459,29 +464,10 @@ export default function Dashboard() {
                   {userData.level}
                 </Text>
               </View>
-              <InfoTooltip
-                title="Nivel y XP ⚡"
-                content="Ganas XP por cada minuto de estudio y por completar objetivos. ¡Sube de nivel para desbloquear rangos!"
-                iconSize={13}
-              />
             </TouchableOpacity>
           </StatsStrip>
         </Animated.View>
-      </View>
 
-      <ScrollView
-        ref={scrollViewRef}
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={tokens.colors.accent}
-          />
-        }
-      >
         {/* Welcome / AI suggestion */}
         <View ref={heroCardRef}>
           <Card padding={20}>
@@ -494,14 +480,7 @@ export default function Dashboard() {
               </>
             ) : (
               <>
-                <View style={styles.welcomeHead}>
-                  <OverlineLabel>Hoy</OverlineLabel>
-                  <InfoTooltip
-                    title="Recomendación IA 🧠"
-                    content="Schedio Prime analiza tus próximos exámenes y tu historial para sugerirte qué estudiar en cada momento."
-                    iconSize={18}
-                  />
-                </View>
+                <OverlineLabel style={styles.welcomeOverline}>Hoy</OverlineLabel>
 
                 {aiLoading ? (
                   <View style={styles.aiLoadingRow}>
@@ -546,19 +525,25 @@ export default function Dashboard() {
 
               <View style={styles.cardDivider} />
 
-              <View style={styles.examsHead}>
-                <OverlineLabel>Próximos exámenes</OverlineLabel>
-                <InfoTooltip
-                  title="Gestión de Exámenes 🗓️"
-                  content="Mantén pulsado cualquier examen para editarlo o eliminarlo. Pulsa para ver el plan de estudio."
-                  iconSize={16}
-                />
-              </View>
+              <OverlineLabel style={styles.examsOverline}>Próximos exámenes</OverlineLabel>
 
               {exams.length === 0 ? (
-                <Text style={styles.emptyText}>
-                  Añade tus exámenes y tareas para mantener tu calendario organizado.
-                </Text>
+                <View>
+                  <Text style={styles.emptyText}>
+                    Añade tus exámenes y tareas para mantener tu calendario organizado.
+                  </Text>
+                  <Button
+                    title="Añadir examen o tarea"
+                    variant="secondary"
+                    fullWidth
+                    icon={<Plus size={16} color={tokens.colors.textPrimary} />}
+                    onPress={() => {
+                      setSelectedEvent(null);
+                      setSelectedDate(new Date());
+                      setEventModalVisible(true);
+                    }}
+                  />
+                </View>
               ) : (
                 visibleExams.map((exam, index) => {
                   const subject = subjects.find((s) => s.id === exam.subjectId);
@@ -612,14 +597,7 @@ export default function Dashboard() {
         {/* Exams waiting for a grade */}
         {!loading && pendingExams.length > 0 && (
           <View ref={pendingSectionRef}>
-            <SectionTitle>
-              <Text style={styles.sectionTitleText}>Por calificar</Text>
-              <InfoTooltip
-                title="Notas y Promedios ✍️"
-                content="Pon nota a tus exámenes pasados para que Schedio pueda calcular tu media y ajustar tus planes de estudio."
-                iconSize={16}
-              />
-            </SectionTitle>
+            <SectionTitle>Por calificar</SectionTitle>
 
             <Card padding={16}>
               {pendingExams.map((exam, index) => {
@@ -784,16 +762,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   logoPill: {
-    height: 34,
-    paddingHorizontal: 12,
+    height: 40,
+    paddingHorizontal: 14,
     borderRadius: tokens.radius.pill,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   logoImage: {
-    width: 96,
-    height: 22,
+    width: 128,
+    height: 30,
   },
   headerActions: {
     flexDirection: 'row',
@@ -802,9 +780,6 @@ const styles = StyleSheet.create({
   },
 
   // Streak / level strip
-  stripWrapper: {
-    marginTop: 14,
-  },
   statCell: {
     flex: 1,
     flexDirection: 'row',
@@ -845,10 +820,7 @@ const styles = StyleSheet.create({
   },
 
   // Welcome card
-  welcomeHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  welcomeOverline: {
     marginBottom: 6,
   },
   aiLoadingRow: {
@@ -872,11 +844,6 @@ const styles = StyleSheet.create({
   },
 
   // Shared rows
-  sectionTitleText: {
-    fontFamily: font.semibold,
-    fontSize: tokens.typography.sectionTitle.size,
-    color: tokens.colors.textPrimary,
-  },
   link: {
     fontFamily: font.semibold,
     fontSize: 13,
@@ -888,10 +855,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 16,
   },
-  examsHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  examsOverline: {
     marginBottom: 4,
   },
   rowMain: {
@@ -911,7 +875,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     color: tokens.colors.textSecondary,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 16,
   },
 
   // Upcoming exams

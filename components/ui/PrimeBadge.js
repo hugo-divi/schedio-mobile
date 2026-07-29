@@ -5,7 +5,6 @@ import Animated, {
   useAnimatedStyle,
   withRepeat,
   withTiming,
-  withDelay,
   Easing,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,10 +22,11 @@ export function PrimeBadge({ onPress }) {
   const progress = useSharedValue(0);
 
   useEffect(() => {
-    // 0 -> 1 over 60% of the cycle, then hold (the CSS keyframes park the
-    // sheen off-screen between 60% and 100%).
+    // One continuous sweep at constant speed. Linear easing on purpose: an
+    // ease-in-out reads as the highlight stalling at each end, and any delay
+    // inside withRepeat parks it mid-travel instead of pausing off-screen.
     progress.value = withRepeat(
-      withDelay(1280, withTiming(1, { duration: 1920, easing: Easing.inOut(Easing.ease) })),
+      withTiming(1, { duration: 2000, easing: Easing.linear }),
       -1,
       false
     );
