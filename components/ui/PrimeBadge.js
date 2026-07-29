@@ -13,10 +13,13 @@ import { tokens } from '../../theme/tokens';
 const BADGE_WIDTH = 74;
 const SHEEN_WIDTH = BADGE_WIDTH * 0.4;
 
+// Inverted against the design system's version: there the pill sat on the card
+// surface with blue lettering, which read as just another chip. Filling it with
+// that blue makes it the only solid non-accent surface on the screen.
+const PRIME_BLUE = '#7FA3E6';
+
 /**
- * "PRIME" pill with a sheen that sweeps across it on a loop.
- * Reproduces the `primeScan` keyframes from the design system's Home screen:
- * the highlight travels left→right, then rests before repeating.
+ * "PRIME" pill with a highlight sweeping across it on a continuous loop.
  */
 export function PrimeBadge({ onPress }) {
   const progress = useSharedValue(0);
@@ -51,19 +54,17 @@ export function PrimeBadge({ onPress }) {
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 6,
+        paddingVertical: 7,
         borderRadius: tokens.radius.pill,
-        backgroundColor: tokens.colors.surfaceCard,
-        borderWidth: 1,
-        borderColor: tokens.colors.borderDefault,
+        backgroundColor: PRIME_BLUE,
       }}
     >
       <Text
         style={{
-          fontFamily: tokens.typography.families.inter.semibold,
+          fontFamily: tokens.typography.families.inter.bold,
           fontSize: 12,
-          letterSpacing: 0.3,
-          color: '#7FA3E6',
+          letterSpacing: 0.4,
+          color: tokens.colors.bgBase,
         }}
       >
         PRIME
@@ -73,8 +74,9 @@ export function PrimeBadge({ onPress }) {
         pointerEvents="none"
         style={[{ position: 'absolute', top: 0, bottom: 0, width: SHEEN_WIDTH }, sheenStyle]}
       >
+        {/* White on the blue fill — the old blue-on-dark sheen would vanish now */}
         <LinearGradient
-          colors={['transparent', 'rgba(127, 163, 230, 0.35)', 'transparent']}
+          colors={['transparent', 'rgba(255, 255, 255, 0.55)', 'transparent']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={{ flex: 1 }}

@@ -70,6 +70,9 @@ export default function Dashboard() {
   const [exams, setExams] = useState([]);
   const [pendingExams, setPendingExams] = useState([]);
   const { subjects, loadUserData, sessionHistory, loadSessionHistory } = useUserStore();
+  // Already normalised by the store (raw doc keeps it under `profile.averageGrade`).
+  const averageGrade = useUserStore((state) => state.profile?.averageGrade) ?? 0;
+  const hasAverage = parseFloat(averageGrade) > 0;
   const [loading, setLoading] = useState(true);
 
   const scrollViewRef = useRef(null);
@@ -402,11 +405,11 @@ export default function Dashboard() {
       ? `Rompe el hielo${firstName ? `, ${firstName}` : ''}`
       : '¿Qué quieres aprender hoy? 🚀';
 
+  // Only the onboarding copy earns a second line. Any generic filler here just
+  // repeats what the AI headline (or the button right below) already says.
   const welcomeBody = isFreshAccount
     ? 'Añade tus asignaturas y haz una sesión corta de 15 min para activar tu racha y empezar a ganar XP.'
-    : exams.length > 0
-      ? 'Es lo más urgente ahora mismo.'
-      : 'Comienza una sesión de estudio cuando quieras: incluso 15 minutos cuentan.';
+    : null;
 
   const visibleExams = examsExpanded ? exams : exams.slice(0, 3);
 
@@ -426,10 +429,13 @@ export default function Dashboard() {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <View style={styles.logoPill}>
+            {/* The asset is square (1056x992) with the wordmark banded across
+                the middle, so it needs `cover` to crop to that band — `contain`
+                shrinks the whole square down to the pill height. */}
             <Image
               source={require('../../assets/images/schedio-icon.png')}
               style={styles.logoImage}
-              resizeMode="contain"
+              resizeMode="cover"
             />
           </View>
 
@@ -499,6 +505,24 @@ export default function Dashboard() {
                 </View>
               </View>
             </TouchableOpacity>
+
+            <View style={styles.statDivider} />
+
+            <TouchableOpacity
+              style={styles.statCell}
+              onPress={() => router.push('/dashboard/profile')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statEmoji}>📊</Text>
+              <View style={styles.statTextWrap}>
+                <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
+                <Text
+                  style={[styles.statValue, !hasAverage && { color: tokens.colors.textDisabled }]}
+                >
+                  {hasAverage ? String(averageGrade).replace('.', ',') : '—'}
+                </Text>
+              </View>
+            </TouchableOpacity>
           </StatsStrip>
         </Animated.View>
 
@@ -522,10 +546,12 @@ export default function Dashboard() {
                     <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
                   </View>
                 ) : (
-                  <Text style={styles.welcomeTitle}>{welcomeTitle}</Text>
+                  <Text style={[styles.welcomeTitle, !welcomeBody && styles.welcomeTitleAlone]}>
+                    {welcomeTitle}
+                  </Text>
                 )}
 
-                <Text style={styles.welcomeBody}>{welcomeBody}</Text>
+                {welcomeBody ? <Text style={styles.welcomeBody}>{welcomeBody}</Text> : null}
 
                 <Button
                   title="Comenzar sesión de estudio →"
@@ -794,6 +820,8 @@ const styles = StyleSheet.create({
   // Header
   header: {
     paddingHorizontal: 20,
+    // Breathing room so scrolling content doesn't appear to touch the pill.
+    paddingBottom: 10,
   },
   headerRow: {
     flexDirection: 'row',
@@ -801,16 +829,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   logoPill: {
-    height: 40,
+    height: 48,
     paddingHorizontal: 14,
     borderRadius: tokens.radius.pill,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   logoImage: {
-    width: 128,
-    height: 30,
+    width: 148,
+    height: 40,
   },
   headerActions: {
     flexDirection: 'row',
@@ -823,12 +852,12 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 11,
   },
   statEmoji: {
-    fontSize: 20,
+    fontSize: 17,
   },
   statTextWrap: {
     flex: 1,
@@ -885,6 +914,10 @@ const styles = StyleSheet.create({
     color: tokens.colors.textPrimary,
     marginBottom: 8,
     flexShrink: 1,
+  },
+  // Without a body line the title carries the gap before the CTA itself.
+  welcomeTitleAlone: {
+    marginBottom: 18,
   },
   welcomeBody: {
     fontFamily: font.regular,
