@@ -1,195 +1,240 @@
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Flame, X } from 'lucide-react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Flame } from 'lucide-react-native';
+import { startOfWeek, addDays, isSameDay, isAfter, format } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { tokens } from '../theme/tokens';
+import BottomSheet from './ui/BottomSheet';
+import Button from './ui/Button';
 
-// Helper functions to replace date-fns
-const subDays = (date, days) => {
-    const result = new Date(date);
-    result.setDate(result.getDate() - days);
-    return result;
+const font = tokens.typography.families.inter;
+const DAILY_GOAL_MIN = 5;
+
+const getMotivation = (streak) => {
+  if (streak === 0) return 'Cada día es una nueva oportunidad. Empieza hoy.';
+  if (streak < 3) return 'Buen comienzo. Mantén el ritmo.';
+  if (streak < 7) return 'Estás en racha: una semana completa está cerca.';
+  if (streak < 30) return 'Imparable. Tu disciplina ya es un hábito.';
+  return 'Nivel leyenda. Eres un ejemplo a seguir.';
 };
 
-const isSameDay = (date1, date2) => {
-    return date1.getDate() === date2.getDate() &&
-        date1.getMonth() === date2.getMonth() &&
-        date1.getFullYear() === date2.getFullYear();
-};
+/**
+ * Streak detail sheet.
+ *
+ * `studyHistory` accepts either dates or session objects — the store hands over
+ * full session documents, and the previous version called `new Date()` straight
+ * on those objects, which always produced an invalid date, so no day ever lit up.
+ */
+export default function StreakModal({
+  visible,
+  onClose,
+  currentStreak = 0,
+  studyHistory = [],
+  dailyActivity = 0,
+  onStartSession,
+}) {
+  const today = new Date();
+  const weekStart = startOfWeek(today, { weekStartsOn: 1 });
+  const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 
-const formatDay = (date) => {
-    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-    return days[date.getDay()];
-};
+  const studiedDates = studyHistory
+    .map((entry) => {
+      const raw = entry?.date ?? entry;
+      const parsed = new Date(raw);
+      return isNaN(parsed.getTime()) ? null : parsed;
+    })
+    .filter(Boolean);
 
-export default function StreakModal({ visible, onClose, currentStreak, studyHistory = [] }) {
-    const today = new Date();
-    const daysToShow = Array.from({ length: 5 }).map((_, i) => subDays(today, 4 - i));
+  const hasStudiedOn = (date) => studiedDates.some((d) => isSameDay(d, date));
 
-    const getMotivation = (streak) => {
-        if (streak === 0) return "¡Cada día es una nueva oportunidad! Empieza hoy.";
-        if (streak < 3) return "¡Buen comienzo! Mantén el ritmo.";
-        if (streak < 7) return "¡Estás en racha! Una semana completa está cerca.";
-        if (streak < 30) return "¡Imparable! Tu disciplina es legendaria.";
-        return "¡Modo Dios activado! Eres un ejemplo a seguir.";
-    };
+  const metToday = dailyActivity >= DAILY_GOAL_MIN;
+  const remaining = Math.max(0, DAILY_GOAL_MIN - dailyActivity);
+  const alight = currentStreak > 0;
 
-    const hasStudiedOn = (date) => {
-        return studyHistory.some(d => isSameDay(new Date(d), date));
-    };
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.hero}>
+        <View style={styles.flameWrap}>
+          <Flame
+            size={56}
+            color={alight ? tokens.colors.premiumText : tokens.colors.textDisabled}
+            fill={alight ? tokens.colors.premiumText : 'transparent'}
+            strokeWidth={1.5}
+          />
+        </View>
+        <Text style={styles.count}>{currentStreak}</Text>
+        <Text style={styles.countLabel}>
+          {currentStreak === 1 ? 'día en racha' : 'días en racha'}
+        </Text>
+        <Text style={styles.motivation}>{getMotivation(currentStreak)}</Text>
+      </View>
 
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <TouchableOpacity
-                style={styles.overlay}
-                activeOpacity={1}
-                onPress={onClose}
-            >
-                <TouchableOpacity
-                    style={styles.modalContent}
-                    activeOpacity={1}
-                    onPress={(e) => e.stopPropagation()}
-                >
-                    <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-                        <X size={24} color="#8E8E93" />
-                    </TouchableOpacity>
+      <View style={styles.weekRow}>
+        {week.map((day, i) => {
+          const studied = hasStudiedOn(day);
+          const isTodayCell = isSameDay(day, today);
+          const future = isAfter(day, today);
 
-                    <View style={styles.hero}>
-                        <View style={styles.flameContainer}>
-                            <Flame
-                                size={64}
-                                color={currentStreak > 0 ? "#FF9F0A" : "#48484A"}
-                                fill={currentStreak > 0 ? "#FF9F0A" : "transparent"}
-                            />
-                            <Text style={styles.countLarge}>{currentStreak}</Text>
-                        </View>
-                        <Text style={styles.title}>Días en racha</Text>
-                        <Text style={styles.motivation}>{getMotivation(currentStreak)}</Text>
-                    </View>
+          return (
+            <View key={i} style={styles.dayItem}>
+              <Text style={[styles.dayLabel, isTodayCell && styles.dayLabelToday]}>
+                {format(day, 'EEEEE', { locale: es }).toUpperCase()}
+              </Text>
+              <View
+                style={[
+                  styles.dayCircle,
+                  studied && styles.dayCircleStudied,
+                  isTodayCell && styles.dayCircleToday,
+                  future && styles.dayCircleFuture,
+                ]}
+              >
+                {studied ? (
+                  <Flame size={15} color={tokens.colors.bgBase} fill={tokens.colors.bgBase} />
+                ) : (
+                  <View style={styles.emptyDot} />
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </View>
 
-                    <View style={styles.calendarRow}>
-                        {daysToShow.map((date, idx) => {
-                            const isStudied = hasStudiedOn(date) || (isSameDay(date, today) && currentStreak > 0);
-                            const isToday = isSameDay(date, today);
+      {/* dailyActivity comes back from checkDailyStreak and was going unused */}
+      <View style={styles.goalBox}>
+        <Text style={styles.goalText}>
+          {metToday
+            ? `Objetivo de hoy cumplido: ${dailyActivity} min estudiados.`
+            : `Te faltan ${remaining} min hoy para mantener la racha.`}
+        </Text>
+        <View style={styles.goalTrack}>
+          <View
+            style={[
+              styles.goalFill,
+              { width: `${Math.min(100, (dailyActivity / DAILY_GOAL_MIN) * 100)}%` },
+            ]}
+          />
+        </View>
+      </View>
 
-                            return (
-                                <View key={idx} style={styles.dayItem}>
-                                    <Text style={styles.dayLabel}>
-                                        {formatDay(date)}
-                                    </Text>
-                                    <View style={[
-                                        styles.dayCircle,
-                                        isStudied && styles.dayCircleStudied,
-                                        isToday && styles.dayCircleToday
-                                    ]}>
-                                        {isStudied ? (
-                                            <Flame size={16} color="#FFFFFF" fill="#FFFFFF" />
-                                        ) : (
-                                            <View style={styles.emptyDot} />
-                                        )}
-                                    </View>
-                                </View>
-                            );
-                        })}
-                    </View>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-    );
+      {!metToday && onStartSession ? (
+        <Button
+          title="Estudiar ahora"
+          fullWidth
+          style={styles.cta}
+          onPress={() => {
+            onClose();
+            onStartSession();
+          }}
+        />
+      ) : (
+        <Button
+          title="Entendido"
+          variant="secondary"
+          fullWidth
+          style={styles.cta}
+          onPress={onClose}
+        />
+      )}
+    </BottomSheet>
+  );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 24,
-    },
-    modalContent: {
-        backgroundColor: '#1C1C1E',
-        borderRadius: 24,
-        padding: 32,
-        width: '100%',
-        maxWidth: 400,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    closeButton: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#2C2C2E',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10,
-    },
-    hero: {
-        alignItems: 'center',
-        marginBottom: 32,
-    },
-    flameContainer: {
-        position: 'relative',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-    },
-    countLarge: {
-        position: 'absolute',
-        fontSize: 32,
-        fontWeight: '700',
-        color: '#FFFFFF',
-    },
-    title: {
-        fontSize: 24,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        marginBottom: 8,
-    },
-    motivation: {
-        fontSize: 14,
-        color: '#8E8E93',
-        textAlign: 'center',
-    },
-    calendarRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-    },
-    dayItem: {
-        alignItems: 'center',
-        gap: 8,
-    },
-    dayLabel: {
-        fontSize: 12,
-        color: '#8E8E93',
-        textTransform: 'capitalize',
-    },
-    dayCircle: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#2C2C2E',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: 'transparent',
-    },
-    dayCircleStudied: {
-        backgroundColor: '#FF9F0A',
-        borderColor: '#FF9F0A',
-    },
-    dayCircleToday: {
-        borderColor: '#4A90E2',
-    },
-    emptyDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#48484A',
-    },
+  hero: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  flameWrap: {
+    marginBottom: 4,
+  },
+  count: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 56,
+    lineHeight: 60,
+    color: tokens.colors.textPrimary,
+  },
+  countLabel: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: tokens.colors.textSecondary,
+  },
+  motivation: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  weekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  dayItem: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  dayLabel: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+  },
+  dayLabelToday: {
+    color: tokens.colors.accent,
+  },
+  dayCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceHover,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  dayCircleStudied: {
+    backgroundColor: tokens.colors.premiumText,
+  },
+  dayCircleToday: {
+    borderColor: tokens.colors.accent,
+  },
+  dayCircleFuture: {
+    backgroundColor: 'transparent',
+    borderColor: tokens.colors.borderDefault,
+  },
+  emptyDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: tokens.colors.textDisabled,
+  },
+  goalBox: {
+    marginTop: 24,
+    padding: 14,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.background,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  goalText: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textPrimary,
+    marginBottom: 10,
+  },
+  goalTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: tokens.colors.surfaceHover,
+    overflow: 'hidden',
+  },
+  goalFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: tokens.colors.premiumText,
+  },
+  cta: {
+    marginTop: 20,
+  },
 });

@@ -2,8 +2,12 @@ import { TouchableOpacity, Text, ActivityIndicator } from 'react-native';
 import { tokens } from '../../theme/tokens';
 
 /**
- * Design-system button. `primary` is the solid accent action, `secondary` is
- * the bordered/transparent one. Flat by design — no gradients.
+ * Design-system button. `primary` is the solid accent action, `secondary` the
+ * bordered/transparent one, and `danger` the solid destructive one. Flat by
+ * design — no gradients.
+ *
+ * `textColor` tints the label of a `secondary` button, for destructive actions
+ * that shouldn't shout as loudly as a filled red one.
  *
  * Separate from PrimaryButton/SchedioButton, which screens awaiting redesign
  * still use with the old visual language.
@@ -16,10 +20,15 @@ export function Button({
   disabled = false,
   loading = false,
   icon = null,
+  textColor,
   style,
 }) {
   const isPrimary = variant === 'primary';
+  const isDanger = variant === 'danger';
+  const filled = isPrimary || isDanger;
   const inactive = disabled || loading;
+
+  const label = textColor ?? (filled ? '#FFFFFF' : tokens.colors.textPrimary);
 
   return (
     <TouchableOpacity
@@ -37,8 +46,12 @@ export function Button({
           paddingVertical: 12,
           paddingHorizontal: 20,
           borderRadius: tokens.radius.btn,
-          backgroundColor: isPrimary ? tokens.colors.accent : 'transparent',
-          borderWidth: isPrimary ? 0 : 1,
+          backgroundColor: isPrimary
+            ? tokens.colors.accent
+            : isDanger
+              ? tokens.colors.danger
+              : 'transparent',
+          borderWidth: filled ? 0 : 1,
           borderColor: tokens.colors.borderDefault,
           width: fullWidth ? '100%' : undefined,
           opacity: inactive ? 0.45 : 1,
@@ -47,7 +60,7 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator size="small" color={isPrimary ? '#FFFFFF' : tokens.colors.textPrimary} />
+        <ActivityIndicator size="small" color={label} />
       ) : (
         <>
           {icon}
@@ -55,7 +68,7 @@ export function Button({
             style={{
               fontFamily: tokens.typography.families.inter.semibold,
               fontSize: 15,
-              color: isPrimary ? '#FFFFFF' : tokens.colors.textPrimary,
+              color: label,
             }}
           >
             {title}

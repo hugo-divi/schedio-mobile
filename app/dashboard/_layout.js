@@ -80,8 +80,11 @@ export default function DashboardLayout() {
     const { createExam } = await import('../../services/exams');
     const user = auth.currentUser;
     if (!user) return;
+    // Drop `id` (always null when creating) so it isn't stored as a field.
+    const fields = { ...examData };
+    delete fields.id;
     await createExam({
-      ...examData,
+      ...fields,
       userId: user.uid,
       completed: false,
     });

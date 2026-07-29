@@ -20,6 +20,7 @@
     "@expo/metro-runtime": "~6.1.2",
     "@ide/backoff": "^1.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-community/slider": "5.0.1",
     "date-fns": "^4.1.0",
     "debug": "^4.4.3",

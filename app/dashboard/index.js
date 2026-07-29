@@ -65,7 +65,13 @@ export default function Dashboard() {
   const { updateAverageGrade } = useUserStore();
 
   const [refreshing, setRefreshing] = useState(false);
-  const [userData, setUserData] = useState({ streak: 0, level: 1, xp: 0, rank: 'Aprendiz' });
+  const [userData, setUserData] = useState({
+    streak: 0,
+    dailyActivity: 0,
+    level: 1,
+    xp: 0,
+    rank: 'Aprendiz',
+  });
   const [profile, setProfile] = useState(null);
   const [exams, setExams] = useState([]);
   const [pendingExams, setPendingExams] = useState([]);
@@ -139,6 +145,9 @@ export default function Dashboard() {
 
       setUserData({
         streak: streakData.currentStreak || 0,
+        // Minutes studied today, straight from checkDailyStreak. StreakModal
+        // uses it for the "N min left today" goal; it was being discarded.
+        dailyActivity: streakData.dailyActivity || 0,
         level: profileData?.gamification?.level || 1,
         xp: profileData?.gamification?.xp || 0,
         rank: profileData?.gamification?.rank || 'Aprendiz',
@@ -332,11 +341,17 @@ export default function Dashboard() {
       const user = auth.currentUser;
       if (!user) return;
 
+      // `id` identifies the document, it shouldn't also live inside it —
+      // createExam spreads whatever it gets, so this was storing `id: null`.
+      const fields = { ...eventData };
+      delete fields.id;
+
       const newEvent = {
-        ...eventData,
         userId: user.uid,
-        priority: 5,
         completed: false,
+        // Spread last: the modal now supplies type and priority, and hardcoding
+        // them after this would overwrite whatever the user picked.
+        ...fields,
       };
 
       if (selectedEvent) {
@@ -631,6 +646,7 @@ export default function Dashboard() {
                           </Text>
                         </View>
                         <Text style={styles.rowMeta}>
+                          {exam.type === 'task' ? 'Tarea · ' : ''}
                           {formatShortDate(exam.date)} ·{' '}
                           {calculateDaysLeft(exam.date).toLowerCase()}
                         </Text>
@@ -738,6 +754,8 @@ export default function Dashboard() {
         onClose={() => setStreakModalOpen(false)}
         currentStreak={userData.streak}
         studyHistory={sessionHistory}
+        dailyActivity={userData.dailyActivity}
+        onStartSession={() => router.push('/dashboard/study')}
       />
 
       <LevelProgressModal
