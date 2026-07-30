@@ -374,9 +374,15 @@ export default function StudySessionScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { user } = useAuthStore();
-  const { subjects, loading: subjectsLoading, stats } = useUserStore();
-  const { hideFocusReminder, setHideFocusReminder } = usePreferencesStore();
+  const user = useAuthStore((state) => state.user);
+  // Per-slice selectors, same as the other screens: destructuring the store
+  // resubscribes this screen to every write in it, including the ones its own
+  // session makes.
+  const subjects = useUserStore((state) => state.subjects);
+  const subjectsLoading = useUserStore((state) => state.loading);
+  const stats = useUserStore((state) => state.stats);
+  const hideFocusReminder = usePreferencesStore((state) => state.hideFocusReminder);
+  const setHideFocusReminder = usePreferencesStore((state) => state.setHideFocusReminder);
 
   const params = useLocalSearchParams();
   const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
