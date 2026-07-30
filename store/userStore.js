@@ -126,9 +126,10 @@ const useUserStore = create((set, get) => ({
   loadUserData: async (uid) => {
     set({ loading: true, error: null });
     try {
-      const subjectsData = await getUserSubjects(uid);
+      // Independent reads — awaiting them in sequence cost a round trip on
+      // every cold start.
       const userRef = doc(db, 'users', uid);
-      const userSnap = await getDoc(userRef);
+      const [subjectsData, userSnap] = await Promise.all([getUserSubjects(uid), getDoc(userRef)]);
 
       let profileData = null;
       let statsData = initialState.stats;

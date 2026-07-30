@@ -116,20 +116,22 @@ function NotesSection({ userId }) {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user } = useAuthStore();
-  const {
-    profile,
-    gamification,
-    subjects,
-    loadUserData,
-    updateProfile,
-    setUserPhoto,
-    updateAverageGrade,
-    addSubject,
-    editSubject,
-    removeSubject,
-    updateExam,
-  } = useUserStore();
+  const user = useAuthStore((state) => state.user);
+
+  // One selector per key rather than destructuring the store: destructuring
+  // subscribed this screen — the biggest in the app — to every write, so it
+  // redrew whenever anything at all changed. Action references are stable.
+  const profile = useUserStore((state) => state.profile);
+  const gamification = useUserStore((state) => state.gamification);
+  const subjects = useUserStore((state) => state.subjects);
+  const loadUserData = useUserStore((state) => state.loadUserData);
+  const updateProfile = useUserStore((state) => state.updateProfile);
+  const setUserPhoto = useUserStore((state) => state.setUserPhoto);
+  const updateAverageGrade = useUserStore((state) => state.updateAverageGrade);
+  const addSubject = useUserStore((state) => state.addSubject);
+  const editSubject = useUserStore((state) => state.editSubject);
+  const removeSubject = useUserStore((state) => state.removeSubject);
+  const updateExam = useUserStore((state) => state.updateExam);
 
   const [showRankModal, setShowRankModal] = useState(false);
   const [showInsightsModal, setShowInsightsModal] = useState(false);

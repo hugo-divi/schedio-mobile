@@ -62,8 +62,7 @@ const FOCUS_REFETCH_MS = 60_000;
 export default function Dashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { autoGradePrompt } = usePreferencesStore();
-  const { updateAverageGrade } = useUserStore();
+  const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
 
   const [refreshing, setRefreshing] = useState(false);
   const [userData, setUserData] = useState({
@@ -79,7 +78,11 @@ export default function Dashboard() {
   const [profile, setProfile] = useState(null);
   const [exams, setExams] = useState([]);
   const [pendingExams, setPendingExams] = useState([]);
-  const { subjects, loadUserData, sessionHistory, loadSessionHistory } = useUserStore();
+  // One selector per slice: destructuring the store subscribed this screen to
+  // every write in it, so unrelated changes redrew the whole dashboard. The
+  // actions are stable, so they're read through getState() at the call site.
+  const subjects = useUserStore((state) => state.subjects);
+  const sessionHistory = useUserStore((state) => state.sessionHistory);
   // Already normalised by the store (raw doc keeps it under `profile.averageGrade`).
   const averageGrade = useUserStore((state) => state.profile?.averageGrade) ?? 0;
   const hasAverage = parseFloat(averageGrade) > 0;
@@ -131,7 +134,10 @@ export default function Dashboard() {
       const user = auth.currentUser;
       if (!user) return;
 
-      if (!refreshing) setLoading(true);
+      // Skeletons are for a screen with nothing on it. Coming back to the tab
+      // refetches in the background, and swapping the content out for
+      // placeholders while it does read as the tab being slow.
+      if (!refreshing && !lastFetchRef.current) setLoading(true);
 
       // Fetch user profile
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
@@ -145,7 +151,7 @@ export default function Dashboard() {
       ]);
 
       // Load subjects and user details via store
-      await loadUserData(user.uid);
+      await useUserStore.getState().loadUserData(user.uid);
 
       setUserData({
         streak: streakData.currentStreak || 0,
@@ -273,8 +279,8 @@ export default function Dashboard() {
   // data/notification flow there stays untouched.
   useEffect(() => {
     const user = auth.currentUser;
-    if (user) loadSessionHistory(user.uid);
-  }, [loadSessionHistory]);
+    if (user) useUserStore.getState().loadSessionHistory(user.uid);
+  }, []);
 
   // Independent effect for the tour to prevent render loops
   useEffect(() => {
@@ -397,7 +403,7 @@ export default function Dashboard() {
       // 2. Trigger Average Recalculation (Global & Subject)
       const user = auth.currentUser;
       if (user) {
-        await updateAverageGrade(user.uid);
+        await useUserStore.getState().updateAverageGrade(user.uid);
       }
 
       await fetchData();
