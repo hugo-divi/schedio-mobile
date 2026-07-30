@@ -21,7 +21,15 @@
       },
       "package": "com.schedio.mobile",
       "versionCode": 1,
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "NOTIFICATIONS"]
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "blockedPermissions": [
+        "android.permission.CAMERA",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ]
     },
     "ios": {
       "supportsTablet": true,
@@ -50,6 +58,14 @@
             "targetSdkVersion": 36,
             "usesCleartextTraffic": false
           }
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Schedio necesita acceder a tus fotos para que puedas guardar apuntes en tu mochila.",
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ],
       "expo-font",
