@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, HelpCircle, Plus, Trophy } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -29,6 +29,7 @@ import {
   updateExam,
   deleteExam,
 } from '../../services/exams';
+import { rankExams, summarizeStudyLoad, HIGH_PRIORITY_SCORE } from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
 import usePreferencesStore from '../../store/preferencesStore';
 import {
@@ -406,11 +407,22 @@ export default function Dashboard() {
     }
   };
 
-  // Priority chip reflects real urgency instead of the stored default of 5.
-  const isUrgent = (exam) => {
-    const days = Math.ceil((new Date(exam.date) - new Date()) / (1000 * 60 * 60 * 24));
-    return days <= 3 || (exam.priority || 0) >= 8;
-  };
+  // Priority chip reads the computed score, not the stored `priority` field.
+  // That field held whatever the user picked in EventModal and never changed
+  // afterwards, so the chip couldn't react to an exam getting closer, to a bad
+  // grade landing, or to the subject going untouched for a fortnight.
+  const urgentExamIds = useMemo(() => {
+    const ctx = {
+      studiedMinutesBySubject: summarizeStudyLoad(sessionHistory),
+    };
+    return new Set(
+      rankExams(exams, subjects, ctx)
+        .filter((exam) => exam.priorityScore >= HIGH_PRIORITY_SCORE)
+        .map((exam) => exam.id)
+    );
+  }, [exams, subjects, sessionHistory]);
+
+  const isUrgent = (exam) => urgentExamIds.has(exam.id);
 
   const formatShortDate = (date) =>
     new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });

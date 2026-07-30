@@ -30,10 +30,75 @@ import { hasPrimeAccess } from '../services/permissions';
 import { logger } from '../utils/logger';
 import useAuthStore from './authStore';
 
+/**
+ * Record what the student did to a task, and reflect it immediately.
+ *
+ * Every mutation of the plan goes through here, because the plan itself is
+ * derived and gets rebuilt from the exam list every day. Writing only to
+ * `microplans` — which is what completing, postponing and deleting all used to do
+ * — meant the change lasted until the next rebuild and no longer.
+ *
+ * The in-memory plan is patched as well as the override map, so a tap shows up
+ * without waiting for a regeneration or for Firestore.
+ *
+ * @param {Object} patch - fields the student changed. `{ dismissed: true }`
+ *   removes the task; anything else is applied on top of the generated version.
+ * @param {Object} [extra] - additional state/document fields to write in the same
+ *   round trip (gamification after a tick, say).
+ */
+const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
+  const { planOverrides, microplans } = get();
+
+  const nextOverrides = {
+    ...planOverrides,
+    [taskId]: {
+      ...planOverrides[taskId],
+      ...patch,
+      // Drives pruning in reconcilePlan. Without it an override is immortal.
+      updatedAt: new Date().toISOString(),
+    },
+  };
+
+  const nextPlans = microplans
+    .filter((task) => !(task.id === taskId && patch.dismissed))
+    .map((task) => (task.id === taskId ? { ...task, ...patch } : task))
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  set({ planOverrides: nextOverrides, microplans: nextPlans, ...extra });
+
+  if (!uid) return true; // local-only update; nothing to persist against
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      planOverrides: nextOverrides,
+      microplans: nextPlans,
+      ...extra,
+    });
+    return true;
+  } catch (error) {
+    console.error('Error saving plan override:', error);
+    return false;
+  }
+};
+
 const initialState = {
   profile: null,
   subjects: [],
+  // The plan the UI renders. DERIVED — regenerated from exams and then merged
+  // with `manualTasks` + `planOverrides`. Still persisted so the first paint
+  // after a cold start doesn't need a round trip, but it is no longer the source
+  // of truth for anything the student did.
   microplans: [],
+  // Tasks the student typed in themselves. No exam regenerates these, so they
+  // need their own home — inside `microplans` they were wiped every morning.
+  manualTasks: [],
+  // What the student did to the plan, keyed by task id:
+  // `{ [taskId]: { completed?, date?, dismissed?, updatedAt } }`.
+  // Kept apart from the plan because the plan is disposable and this is not.
+  planOverrides: {},
+  // Why the last plan came out the way it did: daily capacity used, total effort,
+  // and any work that didn't fit. Not persisted — it's derived, and it's rebuilt
+  // every time the plan is.
+  planDiagnostics: null,
   resources: [],
   sessionHistory: [],
   stats: {
@@ -97,6 +162,10 @@ const useUserStore = create((set, get) => ({
           gamification: gameData,
           uploadsHistory: data?.uploadsHistory || [], // Load history
           microplans: microplansData,
+          // Both must load before any regeneration, or reconciliation runs with
+          // an empty override map and reverts everything the student did.
+          manualTasks: data.manualTasks || [],
+          planOverrides: data.planOverrides || {},
           loading: false,
         });
       } else {
@@ -399,7 +468,8 @@ const useUserStore = create((set, get) => ({
   },
 
   initDailyMicroplans: async (uid, force = false) => {
-    const { subjects, microplans, stats } = get();
+    const { subjects, microplans, stats, profile, sessionHistory, manualTasks, planOverrides } =
+      get();
     const today = new Date().toDateString();
 
     const shouldGenerate =
@@ -417,19 +487,61 @@ const useUserStore = create((set, get) => ({
         const { getUpcomingExams } = await import('../services/exams');
         const exams = await getUpcomingExams(uid, 20);
 
-        const { generateExamPlan } = await import('../services/microplanService');
-        const newPlans = generateExamPlan(exams, currentSubjects);
+        // History feeds two things now: the daily capacity the plan is budgeted
+        // against, and the coverage factor that pushes neglected subjects up.
+        // Load it if this ran before the dashboard did.
+        let currentSessions = sessionHistory;
+        if (currentSessions.length === 0) {
+          const { getSessionHistory } = await import('../services/sessions');
+          currentSessions = await getSessionHistory(uid, 50);
+          set({ sessionHistory: currentSessions });
+        }
+
+        const { generateStudyPlan, reconcilePlan } = await import('../services/microplanService');
+        const { tasks: generated, diagnostics } = generateStudyPlan(exams, currentSubjects, {
+          sessions: currentSessions,
+          profile,
+        });
+
+        // Generation is only half of it: the fresh plan then has to absorb
+        // everything the student already did to the previous one. Skipping this
+        // is what made every regeneration wipe ticks, manual tasks, postpones
+        // and deletions.
+        const {
+          tasks: newPlans,
+          overrides: keptOverrides,
+          pruned,
+        } = reconcilePlan({
+          generated,
+          manualTasks,
+          overrides: planOverrides,
+        });
+
+        if (pruned.length > 0) {
+          console.log(`Pruned ${pruned.length} stale plan override(s)`);
+        }
+
+        // The scheduler is work-conserving, so anything left over genuinely did
+        // not fit in the days available — that's a real finding about the
+        // student's week, not noise. Kept in state for the UI to surface;
+        // logged meanwhile so it isn't invisible.
+        if (diagnostics.unscheduled.length > 0) {
+          console.warn('Plan overloaded, work did not fit:', diagnostics.unscheduled);
+        }
 
         const newStats = { ...stats, lastPlanGenerationDate: today };
 
         set({
           microplans: newPlans,
+          planOverrides: keptOverrides,
+          planDiagnostics: diagnostics,
           stats: newStats,
         });
 
         const userRef = doc(db, 'users', uid);
         await updateDoc(userRef, {
           microplans: newPlans,
+          planOverrides: keptOverrides,
           'stats.lastPlanGenerationDate': today,
         });
       } catch (error) {
@@ -473,11 +585,18 @@ const useUserStore = create((set, get) => ({
 
   completeMicroTask: async (uid, taskId) => {
     const { microplans, gamification } = get();
-    const updatedPlans = microplans.map((task) =>
-      task.id === taskId ? { ...task, completed: !task.completed } : task
-    );
+    const task = microplans.find((t) => t.id === taskId);
+    if (!task) return;
 
-    set({ microplans: updatedPlans });
+    const nowCompleted = !task.completed;
+
+    // Un-ticking is just an override write — no XP involved. The previous version
+    // granted 50 XP on *every* call, so un-ticking paid out as well and tapping
+    // the checkbox back and forth minted XP indefinitely.
+    if (!nowCompleted) {
+      await writePlanOverride(get, set, uid, taskId, { completed: false });
+      return { bonusXp: 0 };
+    }
 
     const bonusXp = 50;
     const newXp = gamification.xp + bonusXp;
@@ -491,22 +610,21 @@ const useUserStore = create((set, get) => ({
       rank: newRank,
     };
 
-    set({ gamification: newGameData });
+    // Same write as the override, so a tick costs one Firestore round trip.
+    await writePlanOverride(
+      get,
+      set,
+      uid,
+      taskId,
+      { completed: true },
+      { gamification: newGameData }
+    );
 
-    try {
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, {
-        microplans: updatedPlans,
-        gamification: newGameData,
-      });
-      return { bonusXp, newLevel, newRank };
-    } catch (error) {
-      console.error('Error updating microtask:', error);
-    }
+    return { bonusXp, newLevel, newRank };
   },
 
   addManualTask: async (uid, taskData) => {
-    const { microplans } = get();
+    const { microplans, manualTasks } = get();
 
     const newTask = {
       id: `manual-${Date.now()}`,
@@ -522,73 +640,52 @@ const useUserStore = create((set, get) => ({
       subjectColor: taskData.subjectColor || '#A1A1AA',
     };
 
-    const updatedPlans = [...microplans, newTask].sort(
-      (a, b) => new Date(a.date) - new Date(b.date)
-    );
+    // Kept in its own persisted list, not just in `microplans`: nothing
+    // regenerates a manual task, so living only in the derived plan meant being
+    // erased by the next daily rebuild.
+    const nextManual = [...manualTasks, newTask];
+    const nextPlans = [...microplans, newTask].sort((a, b) => new Date(a.date) - new Date(b.date));
 
-    set({ microplans: updatedPlans });
+    set({ manualTasks: nextManual, microplans: nextPlans });
 
+    if (!uid) return newTask;
     try {
       const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, { microplans: updatedPlans });
+      await updateDoc(userRef, { manualTasks: nextManual, microplans: nextPlans });
       return newTask;
     } catch (error) {
       console.error('Error adding manual task:', error);
     }
   },
 
-  updateMicroTask: async (uid, taskId, updates) => {
-    const { microplans } = get();
-    const updatedPlans = microplans.map((task) =>
-      task.id === taskId ? { ...task, ...updates } : task
-    );
-    set({ microplans: updatedPlans });
-
-    try {
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, { microplans: updatedPlans });
-      return true;
-    } catch (error) {
-      console.error('Error updating microtask:', error);
-    }
-  },
+  updateMicroTask: async (uid, taskId, updates) =>
+    writePlanOverride(get, set, uid, taskId, updates),
 
   postponeMicroTask: async (uid, taskId) => {
     const { microplans } = get();
-    let targetTask = microplans.find((t) => t.id === taskId);
+    const targetTask = microplans.find((t) => t.id === taskId);
     if (!targetTask) return;
 
-    const currentTaskDate = new Date(targetTask.date);
-    const tomorrow = new Date(currentTaskDate);
+    const tomorrow = new Date(targetTask.date);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const updatedPlans = microplans
-      .map((task) => (task.id === taskId ? { ...task, date: tomorrow.toISOString() } : task))
-      .sort((a, b) => new Date(a.date) - new Date(b.date));
-
-    set({ microplans: updatedPlans });
-
-    try {
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, { microplans: updatedPlans });
-      return true;
-    } catch (error) {
-      console.error('Error postponing microtask:', error);
-    }
+    // Recorded as an override rather than by mutating the task. A task's id
+    // encodes the day it was generated for, so the generator re-emitted the
+    // original slot on the next rebuild and the postponed copy survived beside
+    // it — one postpone, two tasks.
+    return writePlanOverride(get, set, uid, taskId, { date: tomorrow.toISOString() });
   },
 
   deleteMicroTask: async (uid, taskId) => {
-    const { microplans } = get();
-    const updatedPlans = microplans.filter((task) => task.id !== taskId);
-    set({ microplans: updatedPlans });
+    const { manualTasks } = get();
 
-    try {
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, { microplans: updatedPlans });
-      return true;
-    } catch (error) {
-      console.error('Error deleting microtask:', error);
-    }
+    // A dismissal has to be remembered, not just applied: deleting a generated
+    // task only removed it from the array, so the next rebuild brought it back.
+    // Manual tasks are dropped from their own list too, so it can't grow forever.
+    const nextManual = manualTasks.filter((task) => task.id !== taskId);
+    const extra = nextManual.length !== manualTasks.length ? { manualTasks: nextManual } : {};
+
+    return writePlanOverride(get, set, uid, taskId, { dismissed: true }, extra);
   },
 
   addSubject: async (userId, subjectData) => {

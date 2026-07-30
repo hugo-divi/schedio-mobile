@@ -261,7 +261,11 @@ ${exams
   ?.slice(0, 5)
   .map(
     (e) =>
-      `- ID: ${e.id}, Nombre: ${e.name} (${subjects?.find((s) => s.id === e.subjectId)?.name}), Fecha: ${new Date(e.date).toLocaleDateString('es-ES')}, Prioridad: ${e.priority}/10`
+      // `e.priority` no longer exists on new exams — the student's pick moved to
+      // `manualPriority` when scoring was centralised in services/priority.js.
+      // Reading both keeps older docs working; without the fallback this line
+      // was about to start telling Gemini "Prioridad: undefined/10".
+      `- ID: ${e.id}, Nombre: ${e.name} (${subjects?.find((s) => s.id === e.subjectId)?.name}), Fecha: ${new Date(e.date).toLocaleDateString('es-ES')}, Prioridad elegida por el alumno: ${e.manualPriority ?? e.priority ?? 5}/10`
   )
   .join('\n')}
 

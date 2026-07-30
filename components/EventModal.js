@@ -21,8 +21,11 @@ const TYPES = [
   { key: 'task', label: 'Tarea' },
 ];
 
-// Stored on the exam as `priority` (1-10). The home screen flags anything from
-// 8 up as high priority, so the three options map onto that scale.
+// Stored as `manualPriority` (1-10) — the student's own pick, and the only
+// priority value that gets persisted. The computed score is derived at read time
+// in services/priority.js, where this becomes a multiplier (3 -> x0.9,
+// 5 -> x1.0, 9 -> x1.2) rather than an addend: it reorders the plan without
+// being able to flatten urgency, difficulty and grade risk on its own.
 const PRIORITIES = [
   { key: 3, label: 'Baja' },
   { key: 5, label: 'Normal' },
@@ -66,7 +69,9 @@ export default function EventModal({
     if (existingEvent) {
       setName(existingEvent.name || '');
       setType(existingEvent.type === 'task' ? 'task' : 'exam');
-      setPriority(existingEvent.priority ?? 5);
+      // Exams created before the split kept the pick in `priority`; read both so
+      // editing an old one doesn't silently reset it to Normal.
+      setPriority(existingEvent.manualPriority ?? existingEvent.priority ?? 5);
       setSubjectId(existingEvent.subjectId || UNASSIGNED);
     } else {
       setName('');
@@ -89,7 +94,7 @@ export default function EventModal({
       subjectId: subjectId || UNASSIGNED,
       date: date.toISOString(),
       type,
-      priority,
+      manualPriority: priority,
     });
     onClose();
   };
