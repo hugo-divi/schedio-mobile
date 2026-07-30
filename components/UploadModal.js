@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   Modal,
   TouchableOpacity,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   Alert,
@@ -19,11 +20,26 @@ import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import { auth } from '../services/firebase';
 
-const UploadModal = ({ visible, onClose, onUploadSuccess, pathPrefix }) => {
+const UploadModal = ({
+  visible,
+  onClose,
+  onUploadSuccess,
+  pathPrefix,
+  // Filing a file under a subject is what lets the Mochila group by subject.
+  // Opening the sheet from inside a subject pre-selects it.
+  subjects = [],
+  initialSubjectId = null,
+}) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const { canUpload, recordUpload } = useUserStore();
-  const { isPrime } = useAuthStore();
+  const [subjectId, setSubjectId] = useState(initialSubjectId);
+  const canUpload = useUserStore((state) => state.canUpload);
+  const recordUpload = useUserStore((state) => state.recordUpload);
+  const isPrime = useAuthStore((state) => state.isPrime);
+
+  useEffect(() => {
+    if (visible) setSubjectId(initialSubjectId);
+  }, [visible, initialSubjectId]);
 
   const handlePickImage = async () => {
     if (!canUpload()) {
@@ -93,12 +109,18 @@ const UploadModal = ({ visible, onClose, onUploadSuccess, pathPrefix }) => {
       await recordUpload(user.uid);
 
       if (onUploadSuccess) {
+        const subject = subjects.find((s) => s.id === subjectId) || null;
         onUploadSuccess({
           url: downloadURL,
           path: storagePath,
           type: type,
           name: name,
           createdAt: new Date().toISOString(),
+          // Null is a real answer here — the Mochila files those under
+          // "Sin materia" rather than hiding them.
+          subjectId: subject?.id ?? null,
+          subjectName: subject?.name ?? null,
+          subjectColor: subject?.color ?? null,
         });
       }
 
@@ -142,6 +164,41 @@ const UploadModal = ({ visible, onClose, onUploadSuccess, pathPrefix }) => {
               <Text style={styles.subtitle}>
                 Sube apuntes, fotos o PDFs para tenerlos siempre a mano.
               </Text>
+
+              {subjects.length > 0 && (
+                <View style={styles.subjectBlock}>
+                  <Text style={styles.subjectLabel}>Materia</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.subjectRow}
+                  >
+                    {subjects.map((subject) => {
+                      const active = subject.id === subjectId;
+                      return (
+                        <TouchableOpacity
+                          key={subject.id}
+                          activeOpacity={0.8}
+                          onPress={() => setSubjectId(active ? null : subject.id)}
+                          style={[styles.subjectChip, active && styles.subjectChipActive]}
+                        >
+                          <View
+                            style={[
+                              styles.subjectDot,
+                              { backgroundColor: subject.color || tokens.colors.accent },
+                            ]}
+                          />
+                          <Text
+                            style={[styles.subjectChipText, active && styles.subjectChipTextOn]}
+                          >
+                            {subject.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              )}
 
               <View style={styles.actions}>
                 <TouchableOpacity style={styles.actionButton} onPress={handlePickImage}>
@@ -223,6 +280,46 @@ const styles = StyleSheet.create({
   },
   closeButton: {
     padding: 4,
+  },
+  subjectBlock: {
+    marginBottom: 20,
+  },
+  subjectLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 8,
+  },
+  subjectRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  subjectChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  subjectChipActive: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  subjectDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  subjectChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#8E8E93',
+  },
+  subjectChipTextOn: {
+    color: '#FFFFFF',
   },
   actions: {
     flexDirection: 'row',

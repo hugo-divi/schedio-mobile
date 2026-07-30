@@ -164,8 +164,12 @@ export default function DashboardLayout() {
       <UploadModal
         visible={uploadModalVisible}
         onClose={() => setUploadModalVisible(false)}
+        subjects={subjects}
         onUploadSuccess={(fileData) => {
-          console.log('File uploaded via quick action:', fileData);
+          // This used to only log: the file reached Storage and then never got
+          // a Firestore row, so it never showed up in the Mochila.
+          const uid = auth.currentUser?.uid;
+          if (uid) useUserStore.getState().addResource(uid, fileData);
         }}
       />
     </>
