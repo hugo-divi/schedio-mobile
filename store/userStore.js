@@ -272,7 +272,7 @@ const useUserStore = create((set, get) => ({
       const userRef = doc(db, 'users', uid);
 
       // Parallel writes for efficiency
-      await Promise.all([
+      const [, createdSession] = await Promise.all([
         updateDoc(userRef, {
           stats: newStats,
           gamification: newGameData,
@@ -288,10 +288,48 @@ const useUserStore = create((set, get) => ({
         }),
       ]);
 
-      return { xpEarned, newLevel, unlockedBadges, newRank };
+      // Swap the optimistic id for the real one so a later patch (notes, mood)
+      // has something to write to.
+      if (createdSession?.id) {
+        set((state) => ({
+          sessionHistory: state.sessionHistory.map((s) =>
+            s.id === newLocalSession.id ? { ...s, id: createdSession.id } : s
+          ),
+        }));
+      }
+
+      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: createdSession?.id ?? null };
     } catch (error) {
       console.error('Error saving session:', error);
-      return { xpEarned, newLevel, unlockedBadges, newRank };
+      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: null };
+    }
+  },
+
+  /**
+   * Attach what the student wrote after the timer stopped. Kept separate from
+   * `addSession` because that one runs the moment the session ends — waiting
+   * for the summary screen would risk losing the streak and the XP if the app
+   * went away first.
+   */
+  updateSessionFeedback: async (sessionId, { notes, focusScore }) => {
+    if (!sessionId) return;
+
+    const fields = {};
+    if (typeof notes === 'string') fields.notes = notes;
+    if (typeof focusScore === 'number') fields.focusScore = focusScore;
+    if (Object.keys(fields).length === 0) return;
+
+    set((state) => ({
+      sessionHistory: state.sessionHistory.map((s) =>
+        s.id === sessionId ? { ...s, ...fields } : s
+      ),
+    }));
+
+    try {
+      const { updateSession } = await import('../services/sessions');
+      await updateSession(sessionId, fields);
+    } catch (error) {
+      console.error('Error saving session feedback:', error);
     }
   },
 

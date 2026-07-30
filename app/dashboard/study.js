@@ -1,1305 +1,1495 @@
-
-
-
-
-
-
-import { View, Image } from 'react-native';
-import { Text } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { StyleSheet, TouchableOpacity, ScrollView, TextInput, Dimensions, Platform, StatusBar, Modal, TouchableWithoutFeedback, PanResponder, Animated } from 'react-native';
-import { ImageBackground } from 'react-native';
-import { ActivityIndicator } from 'react-native';
-import { useState, useMemo } from 'react';
-// SHIFTED LINE 14
-import { useEffect } from 'react';
-import { useRef } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  StyleSheet,
+  Platform,
+  StatusBar,
+  ActivityIndicator,
+  Dimensions,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Play, Pause, X, Check, Timer, Target, Award, ArrowLeft, MoreHorizontal, AlertCircle, Trash2, Brain, ChevronDown, Plus, Clock, BookOpen, Trophy } from 'lucide-react-native';
-import { tokens } from '../../theme/tokens';
-import { GlassCard } from '../../components/GlassView';
-import InfoTooltip from '../../components/InfoTooltip';
-import useAuthStore from '../../store/authStore';
-import useThemeStore from '../../store/themeStore';
-import useUserStore from '../../store/userStore';
-import { db } from '../../services/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Circle as SvgCircle } from 'react-native-svg';
-import Svg from 'react-native-svg';
-import * as Haptics from 'expo-haptics';
+import { Play, Pause, X, Check, Plus, Trash2, BellOff } from 'lucide-react-native';
+import Svg, {
+  Circle as SvgCircle,
+  Path,
+  Line,
+  Rect as SvgRect,
+  Defs,
+  RadialGradient,
+  Stop,
+} from 'react-native-svg';
 import Slider from '@react-native-community/slider';
+import * as Haptics from 'expo-haptics';
+import Animated, {
+  FadeIn,
+  FadeOut,
+  FadeInDown,
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  interpolate,
+  Easing,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+
+import { tokens } from '../../theme/tokens';
+import { BASE_XP_PER_MINUTE } from '../../services/gamification';
+import { getUpcomingExams } from '../../services/exams';
+import useAuthStore from '../../store/authStore';
+import useUserStore from '../../store/userStore';
+import usePreferencesStore from '../../store/preferencesStore';
+import Card from '../../components/ui/Card';
+import Button from '../../components/ui/Button';
+import BottomSheet from '../../components/ui/BottomSheet';
+import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
+import SchedioLogoReveal from '../../components/SchedioLogoReveal';
+
+const font = tokens.typography.families.inter;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const MIN_MINUTES = 15;
+const MAX_MINUTES = 120;
+const MINUTE_STEP = 5;
+const DEFAULT_MINUTES = 25;
+
+// Timer ring geometry, scaled from the 220px circle in the design.
+const RING_SIZE = Math.min(220, SCREEN_WIDTH - 96);
+const RING_STROKE = 6;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+// Drag the session screen down this far to ask about stopping.
+const DRAG_TO_STOP = 120;
+
+// Swipe an objective this far left to delete it.
+const SWIPE_REVEAL = 96;
+const SWIPE_COMMIT = 64;
 
 // Only use KeepAwake on native to avoid web WakeLock errors
 const activateKeepAwake = () => {
-    if (Platform.OS !== 'web') {
-        try {
-            const { activateKeepAwakeAsync } = require('expo-keep-awake');
-            activateKeepAwakeAsync();
-        } catch (e) {
-            console.warn('KeepAwake error:', e);
-        }
+  if (Platform.OS !== 'web') {
+    try {
+      const { activateKeepAwakeAsync } = require('expo-keep-awake');
+      activateKeepAwakeAsync();
+    } catch (e) {
+      console.warn('KeepAwake error:', e);
     }
+  }
 };
 
 const deactivateKeepAwake = () => {
-    if (Platform.OS !== 'web') {
-        try {
-            const { deactivateKeepAwake } = require('expo-keep-awake');
-            deactivateKeepAwake();
-        } catch (e) {
-            console.warn('KeepAwake deactivate error:', e);
-        }
+  if (Platform.OS !== 'web') {
+    try {
+      const { deactivateKeepAwake } = require('expo-keep-awake');
+      deactivateKeepAwake();
+    } catch (e) {
+      console.warn('KeepAwake deactivate error:', e);
     }
+  }
 };
 
-const { width } = Dimensions.get('window');
+const formatTime = (seconds) => {
+  const safe = Math.max(0, seconds);
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
 
-// Messages
-const CONGRATS_MESSAGES = [
-    "¡Increíble trabajo!",
-    "Sesión legendaria.",
-    "¡Lo has logrado!",
-    "Gran enfoque hoy.",
-    "Imparable."
+const sessionPhrase = (mins) => {
+  if (mins < 30) return '😌 Estudio de chill';
+  if (mins < 45) return '🎯 Alto foco';
+  if (mins < 60) return '🧠 Deep work';
+  return '⚡️ Modo Schedio activado';
+};
+
+// The four faces map onto the 1–5 focusScore that history.js renders as stars.
+const MOODS = [
+  { key: 'frown', score: 2, label: 'Ha ido mal' },
+  { key: 'meh', score: 3, label: 'Regular' },
+  { key: 'smile', score: 4, label: 'Bien' },
+  { key: 'laugh', score: 5, label: 'Muy bien' },
 ];
 
-// Simple Confetti Component
-const ConfettiPiece = ({ index }) => {
-    const anim = useRef(new Animated.Value(-100)).current;
+/**
+ * The four faces from the design (`Face` in ui_kits/app/Study.html): one ring,
+ * two dot eyes, and a mouth that carries the whole expression. Traced in the
+ * same 24x24 space, so the geometry matches the mock exactly.
+ */
+function Face({ type, size = 36, color }) {
+  const mouth = {
+    frown: (
+      <Path
+        d="M16 16s-1.5-2-4-2-4 2-4 2"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        fill="none"
+      />
+    ),
+    meh: (
+      <Line x1={8} y1={15} x2={16} y2={15} stroke={color} strokeWidth={2} strokeLinecap="round" />
+    ),
+    smile: (
+      <Path
+        d="M8 14s1.5 2 4 2 4-2 4-2"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        fill="none"
+      />
+    ),
+    laugh: <Path d="M7 13a5 5 0 0 0 10 0z" fill={color} />,
+  }[type];
 
-    useEffect(() => {
-        const delay = Math.random() * 1000;
-        const duration = 2000 + Math.random() * 1000;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <SvgCircle cx={12} cy={12} r={10} stroke={color} strokeWidth={2} fill="none" />
+      <SvgCircle cx={9} cy={9.5} r={1.1} fill={color} />
+      <SvgCircle cx={15} cy={9.5} r={1.1} fill={color} />
+      {mouth}
+    </Svg>
+  );
+}
 
-        Animated.loop(
-            Animated.sequence([
-                Animated.timing(anim, {
-                    toValue: Dimensions.get('window').height,
-                    duration: duration,
-                    delay: delay,
-                    useNativeDriver: true // Change to false if transform issues occur depending on RN version for layout props, but transform is fine
-                }),
-                Animated.timing(anim, {
-                    toValue: -100,
-                    duration: 0,
-                    useNativeDriver: true
-                })
-            ])
-        ).start();
-    }, []);
-
-    const left = Math.random() * Dimensions.get('window').width;
-    const bg = [tokens.colors.primary, tokens.colors.secondary, '#FFD700', '#FF3B30'][index % 4];
-
-    return (
-        <Animated.View
-            style={{
-                position: 'absolute',
-                top: 0,
-                left: left,
-                width: 10,
-                height: 10,
-                backgroundColor: bg,
-                borderRadius: 5,
-                transform: [{ translateY: anim }]
-            }}
-        />
-    );
+const daysUntil = (date) => {
+  const now = new Date();
+  const target = new Date(date);
+  now.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  return Math.ceil((target - now) / (1000 * 60 * 60 * 24));
 };
 
-export default function StudySessionScreen() {
-    const router = useRouter();
-    const navigation = useNavigation();
-    const { user } = useAuthStore();
-    const { isDarkMode } = useThemeStore();
+/** "Examen en 5 días" under the selected subject, when there's one coming. */
+const examReason = (exam) => {
+  if (!exam) return null;
+  const days = daysUntil(exam.date);
+  if (days < 0) return null;
+  if (days === 0) return 'Examen hoy';
+  if (days === 1) return 'Examen mañana';
+  return `Examen en ${days} días`;
+};
 
-    // ── Store Data ──
-    const { subjects, loading: subjectsLoading } = useUserStore();
+// ── Pieces ──────────────────────────────────────────────────────────────────
 
-    // ── State Declarations ──
-    const [step, setStep] = useState('setup');
-    const [selectedSubject, setSelectedSubject] = useState(null);
-    const [duration, setDuration] = useState(25);
-    const [sessionGoals, setSessionGoals] = useState([]);
-    const [newGoalText, setNewGoalText] = useState('');
-    const [timeLeft, setTimeLeft] = useState(25 * 60);
-    const [isActive, setIsActive] = useState(false);
-    const [isPaused, setIsPaused] = useState(false);
-    const [isZenMode, setIsZenMode] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const [isPanicMode, setIsPanicMode] = useState(false);
-    const [showStopConfirm, setShowStopConfirm] = useState(false);
-    const [isStopOverlayVisible, setIsStopOverlayVisible] = useState(false);
-    const [sessionStats, setSessionStats] = useState(null);
-    const [sessionNotes, setSessionNotes] = useState('');
+function SubjectChip({ subject, reason, selected, onPress }) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.8}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      style={[styles.subjectChip, selected && styles.subjectChipSelected]}
+    >
+      <View
+        style={[styles.subjectAvatar, { backgroundColor: subject.color || tokens.colors.accent }]}
+      >
+        <Text style={styles.subjectInitial}>{(subject.name || '?').charAt(0).toUpperCase()}</Text>
+      </View>
+      <View>
+        <Text style={styles.subjectName} numberOfLines={1}>
+          {subject.name}
+        </Text>
+        {selected && reason ? <Text style={styles.subjectReason}>{reason}</Text> : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
 
-    // ── Refs & Animations ──
-    const timerRef = useRef(null);
-    const translateY = useRef(new Animated.Value(0)).current;
-    const scaleAnim = useRef(new Animated.Value(0)).current;
-    const fadeAnim = useRef(new Animated.Value(0)).current;
+function Checkbox({ checked, onPress, size = 20 }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      style={[
+        styles.checkbox,
+        { width: size, height: size },
+        checked ? styles.checkboxOn : styles.checkboxOff,
+      ]}
+    >
+      {checked ? <Check size={size * 0.65} color="#FFFFFF" strokeWidth={3} /> : null}
+    </TouchableOpacity>
+  );
+}
 
-    // ── Params ──
-    const params = useLocalSearchParams();
-    const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
-    // ── Handlers & Logic ──
+function CheckRow({ label, checked, onToggle, strike = true }) {
+  return (
+    <View style={styles.checkRow}>
+      <Checkbox checked={checked} onPress={onToggle} />
+      <Text
+        style={[styles.checkRowLabel, checked && strike && styles.checkRowLabelDone]}
+        numberOfLines={2}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
 
-    const formatTime = (seconds) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    };
+/** Objective row that slides left to reveal a delete action. */
+function SwipeToDelete({ onDelete, children }) {
+  const dx = useSharedValue(0);
 
-    const getDurationMessage = (mins) => {
-        if (mins <= 30) return "Estudio de chill 🍵";
-        if (mins <= 45) return "Alto foco ⚡";
-        if (mins <= 60) return "Deep work 🧠";
-        return "¡Modo Schedio activado! 🚀";
-    };
-
-    const handleStart = () => {
-        if (!selectedSubject) return;
-        setTimeLeft(duration * 60);
-        setIsActive(true);
-        setIsPaused(false);
-        setStep('timer');
-        setIsZenMode(true);
-        if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    };
-
-    const handleStopPress = () => {
-        setIsPaused(true);
-        setIsStopOverlayVisible(true);
-    };
-
-    const confirmStop = () => {
-        setIsStopOverlayVisible(false);
-        handleComplete(true);
-    };
-
-    const cancelStop = () => {
-        setIsStopOverlayVisible(false);
-        setIsPaused(false); // Resume
-    };
-
-    const handleComplete = (early = false) => {
-        clearInterval(timerRef.current);
-        setIsActive(false);
-        setIsZenMode(false);
-        setIsPaused(false);
-
-        const totalTime = duration * 60;
-        const timeSpent = totalTime - timeLeft;
-        const timeInMins = Math.floor(timeSpent / 60);
-        const subject = subjects.find(s => s.id === selectedSubject);
-        const completedGoalsCount = sessionGoals.filter(g => g.completed).length;
-        const xpEarned = timeInMins * 10 + (completedGoalsCount * 50);
-
-        setSessionStats({
-            subject: subject?.name || 'Estudio',
-            subjectColor: subject?.color || tokens.colors.primary,
-            timeDeducted: timeInMins,
-            completed: !early,
-            xpEarned,
-            completedGoalsCount,
-            totalGoals: sessionGoals.length,
-            message: CONGRATS_MESSAGES[Math.floor(Math.random() * CONGRATS_MESSAGES.length)]
+  const pan = Gesture.Pan()
+    // Only claim the gesture once it's clearly horizontal, so the surrounding
+    // ScrollView keeps its vertical drag.
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-10, 10])
+    .onUpdate((event) => {
+      dx.value = Math.min(0, Math.max(event.translationX, -SWIPE_REVEAL));
+    })
+    .onEnd(() => {
+      if (dx.value < -SWIPE_COMMIT) {
+        dx.value = withTiming(-SCREEN_WIDTH, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onDelete)();
         });
+      } else {
+        dx.value = withSpring(0, { damping: 20, stiffness: 220 });
+      }
+    });
 
-        if (early) {
-            setStep('summary');
-        } else {
-            setStep('celebration');
-            Animated.sequence([
-                Animated.spring(scaleAnim, {
-                    toValue: 1,
-                    friction: 4,
-                    useNativeDriver: true,
-                }),
-                Animated.timing(fadeAnim, {
-                    toValue: 1,
-                    duration: 500,
-                    useNativeDriver: true,
-                })
-            ]).start();
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: dx.value }] }));
 
-            setTimeout(() => {
-                setStep('summary');
-            }, 3500);
-        }
+  return (
+    <View style={styles.swipeWrap}>
+      <View style={styles.swipeAction}>
+        <Trash2 size={16} color="#FFFFFF" />
+      </View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[styles.swipeContent, rowStyle]}>{children}</Animated.View>
+      </GestureDetector>
+    </View>
+  );
+}
 
-        if (!early && Platform.OS !== 'web') {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
+function AddObjectiveRow({ value, onChangeText, onAdd }) {
+  return (
+    <View style={styles.addRow}>
+      <TextInput
+        style={styles.addInput}
+        placeholder="Añadir objetivo"
+        placeholderTextColor={tokens.colors.textDisabled}
+        value={value}
+        onChangeText={onChangeText}
+        onSubmitEditing={onAdd}
+        returnKeyType="done"
+      />
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={onAdd}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel="Añadir objetivo"
+      >
+        <Plus size={18} color="#FFFFFF" />
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-        if (!early && taskId) {
-            const { completeMicroTask } = useUserStore.getState();
-            completeMicroTask(user.uid, taskId);
-        }
-
-        if (!early || timeInMins >= 1) {
-            const { addSession } = useUserStore.getState();
-            addSession(user.uid, {
-                subjectId: selectedSubject,
-                duration: timeInMins,
-                goals: sessionGoals,
-                focusScore: 5,
-                notes: sessionNotes || ''
-            });
-        }
-    };
-
-    const addGoal = () => {
-        if (!newGoalText.trim()) return;
-        setSessionGoals([...sessionGoals, { id: Date.now(), text: newGoalText, completed: false }]);
-        setNewGoalText('');
-    };
-
-    const toggleGoal = (id) => {
-        setSessionGoals(sessionGoals.map(g =>
-            g.id === id ? { ...g, completed: !g.completed } : g
-        ));
-        if (Platform.OS !== 'web') Haptics.selectionAsync();
-    };
-
-    // ── Gestures & Memos ──
-
-    const panResponder = useMemo(
-        () => PanResponder.create({
-            onMoveShouldSetPanResponder: (_, gestureState) => {
-                return isActive && !isStopOverlayVisible && gestureState.dy > 20;
-            },
-            onPanResponderMove: (_, gestureState) => {
-                if (gestureState.dy > 0) {
-                    translateY.setValue(gestureState.dy);
-                }
-            },
-            onPanResponderRelease: (_, gestureState) => {
-                if (gestureState.dy > 120) {
-                    handleStopPress();
-                    Animated.spring(translateY, {
-                        toValue: 0,
-                        useNativeDriver: true,
-                    }).start();
-                } else {
-                    Animated.spring(translateY, {
-                        toValue: 0,
-                        useNativeDriver: true,
-                    }).start();
-                }
-            },
-        }),
-        [isActive, isStopOverlayVisible]
-    );
-
-    // ── Effects ──
-
-    useEffect(() => {
-        activateKeepAwake();
-        return () => deactivateKeepAwake();
-    }, []);
-
-    useEffect(() => {
-        if (autoStart === 'true' && subjects.length > 0 && subjectId) {
-            const sub = subjects.find(s => s.id === subjectId);
-            if (sub) {
-                setSelectedSubject(sub.id);
-                if (paramDuration) setDuration(parseInt(paramDuration));
-                if (goal) setSessionGoals([{ id: Date.now(), text: goal, completed: false }]);
-                setTimeout(() => {
-                    handleStart();
-                }, 500);
-            }
-        }
-    }, [autoStart, subjectId, subjects]);
-
-    useEffect(() => {
-        if (user?.uid && subjects.length === 0) {
-            useUserStore.getState().loadUserData(user.uid);
-        }
-    }, [user?.uid]);
-
-    useEffect(() => {
-        const theme = isDarkMode ? tokens.colors.dark : tokens.colors.light;
-        if (isZenMode || step === 'timer') {
-            navigation.setOptions({
-                tabBarStyle: { display: 'none' },
-                headerShown: false
-            });
-        } else {
-            navigation.setOptions({
-                tabBarStyle: {
-                    height: 85,
-                    paddingBottom: 25,
-                    backgroundColor: theme.tabBar,
-                    elevation: 0,
-                    borderTopWidth: 0,
-                    shadowColor: 'transparent',
-                    shadowOpacity: 0,
-                    borderTopColor: 'transparent',
-                    display: 'flex'
-                },
-                headerShown: false
-            });
-        }
-    }, [isZenMode, step, navigation, isDarkMode]);
-
-    useEffect(() => {
-        if (isActive && !isPaused && timeLeft > 0) {
-            timerRef.current = setInterval(() => {
-                setTimeLeft((prev) => prev - 1);
-            }, 1000);
-        } else if (timeLeft === 0 && isActive) {
-            handleComplete();
-        }
-        return () => clearInterval(timerRef.current);
-    }, [isActive, isPaused, timeLeft]);
-
-    // --- Render Components ---
-
-    const renderSetup = () => (
-        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-            {/* Custom Header */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, marginTop: 10 }}>
-                <View style={{
-                    width: 144,
-                    height: 48,
-                    borderRadius: 24,
-                    backgroundColor: '#FFF',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    overflow: 'hidden'
-                }}>
-                    <Image
-                        source={require('../../assets/images/schedio-icon.png')}
-                        style={{ width: 130, height: 42 }}
-                        resizeMode="cover"
-                    />
-                </View>
-                <Text style={styles.headerTitle}>Enfocar</Text>
-                <View style={{ width: 44 }} />
-            </View>
-
-            <Text style={styles.title}>Nueva Sesión</Text>
-
-            <View style={{ marginBottom: 32 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <BookOpen size={18} color={tokens.colors.blue} />
-                    <Text style={styles.conceptLabel}>MATERIA</Text>
-                    <InfoTooltip
-                        title="Selecciona Materia 📖"
-                        content="Elige en qué vas a enfocar tu tiempo. Si no ves tu materia, puedes añadirla en tu perfil."
-                        style={{ marginLeft: 'auto' }}
-                    />
-                </View>
-
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.subjectScroll} contentContainerStyle={{ paddingRight: 24 }}>
-                    {subjectsLoading ? (
-                        <View style={styles.emptySubjectsContainer}>
-                            <ActivityIndicator color={tokens.colors.primary} />
-                        </View>
-                    ) : subjects.length === 0 ? (
-                        <TouchableOpacity
-                            style={styles.emptySubjectsContainer}
-                            onPress={() => router.push('/dashboard/profile')}
-                        >
-                            <Plus size={20} color={tokens.colors.textSecondary} />
-                            <Text style={styles.emptySubjectsText}>Añadir Materias</Text>
-                        </TouchableOpacity>
-                    ) : (
-                        subjects.map(sub => (
-                            <TouchableOpacity
-                                key={sub.id}
-                                activeOpacity={0.8}
-                                onPress={() => setSelectedSubject(sub.id)}
-                                style={{ marginRight: 12 }}
-                            >
-                                <GlassCard
-                                    style={[
-                                        styles.subjectCard,
-                                        selectedSubject === sub.id && { borderColor: tokens.colors.blue, borderWidth: 1 }
-                                    ]}
-                                >
-                                    <View style={[styles.subjectIcon, { backgroundColor: sub.color + '30' }]}>
-                                        <Text style={[styles.subjectInitial, { color: sub.color }]}>{sub.name.charAt(0)}</Text>
-                                    </View>
-                                    <Text
-                                        style={[
-                                            styles.subjectName,
-                                            selectedSubject === sub.id && { color: '#FFF', fontWeight: '800' }
-                                        ]}
-                                        numberOfLines={1}
-                                    >
-                                        {sub.name}
-                                    </Text>
-                                    {selectedSubject === sub.id && (
-                                        <View style={[styles.checkBadge, { backgroundColor: tokens.colors.blue }]}>
-                                            <Check size={10} color="#FFF" strokeWidth={3} />
-                                        </View>
-                                    )}
-                                </GlassCard>
-                            </TouchableOpacity>
-                        ))
-                    )}
-                </ScrollView>
-
-                <View style={{ marginBottom: 32 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                        <Clock size={18} color={tokens.colors.blue} />
-                        <Text style={styles.conceptLabel}>TIEMPO</Text>
-                        <InfoTooltip
-                            title="Gestion del Tiempo ⏳"
-                            content="Ajusta cuánto tiempo quieres estar en zona de foco. Ganarás XP proporcional al tiempo que aguantes sin distraerte."
-                            style={{ marginLeft: 'auto' }}
-                        />
-                    </View>
-
-                    <GlassCard style={styles.sliderWrapper}>
-                        <Text style={styles.durationLabelCentered}>
-                            {duration}<Text style={styles.durationUnit}> min</Text>
-                        </Text>
-                        <Slider
-                            style={{ width: '100%', height: 40 }}
-                            minimumValue={15}
-                            maximumValue={120}
-                            step={5}
-                            value={duration}
-                            onValueChange={setDuration}
-                            minimumTrackTintColor={tokens.colors.blue}
-                            maximumTrackTintColor="#333"
-                            thumbTintColor="#FFF"
-                        />
-                        <Text style={styles.durationMessage}>{getDurationMessage(duration)}</Text>
-                    </GlassCard>
-                </View>
-
-                <View style={{ marginBottom: 32 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                        <Target size={18} color={tokens.colors.blue} />
-                        <Text style={styles.conceptLabel}>OBJETIVOS</Text>
-                    </View>
-
-                    <GlassCard style={{ padding: 12 }}>
-                        <View style={styles.inputRow}>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="¿Qué quieres lograr?"
-                                placeholderTextColor="#666"
-                                value={newGoalText}
-                                onChangeText={setNewGoalText}
-                                onSubmitEditing={addGoal}
-                            />
-                            <TouchableOpacity style={styles.addBtn} onPress={addGoal}>
-                                <Plus size={24} color="#FFF" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {sessionGoals.length > 0 && (
-                            <View style={styles.goalsList}>
-                                {sessionGoals.map(g => (
-                                    <View key={g.id} style={styles.goalItem}>
-                                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: tokens.colors.blue, marginRight: 12 }} />
-                                        <Text style={styles.goalText}>{g.text}</Text>
-                                        <TouchableOpacity onPress={() => setSessionGoals(doc => doc.filter(x => x.id !== g.id))}>
-                                            <X size={18} color="#666" />
-                                        </TouchableOpacity>
-                                    </View>
-                                ))}
-                            </View>
-                        )}
-                    </GlassCard>
-                </View>
-            </View>
-
-            <TouchableOpacity
-                style={[styles.startBtn, !selectedSubject && styles.disabledBtn]}
-                disabled={!selectedSubject}
-                onPress={handleStart}
-            >
-                <Text style={styles.startBtnText}>Empezar sesión</Text>
-                <Play size={20} color="#FFF" fill="#FFF" />
-            </TouchableOpacity>
-        </ScrollView>
-    );
-
-    const renderTimer = () => {
-        const progress = 100 - (timeLeft / (duration * 60)) * 100;
-        const radius = width * 0.28; // Further reduced from 0.32
-        const circumference = 2 * Math.PI * radius;
-        const strokeDashoffset = circumference - (progress / 100) * circumference;
-        const activeColor = tokens.colors.blue;
-
+function MoodPicker({ value, onChange }) {
+  return (
+    <View style={styles.moodRow}>
+      {MOODS.map(({ key, label }) => {
+        const active = value === key;
         return (
-            <Animated.View
-                style={[
-                    styles.timerContainer,
-                    { transform: [{ translateY: translateY }] }
-                ]}
-                {...panResponder.panHandlers}
-            >
-                <StatusBar hidden={isZenMode} />
-
-                {/* Background Glow */}
-                <View style={[styles.timerGlow, { backgroundColor: activeColor + '08' }]} />
-
-                <View style={styles.timerHeader}>
-                    <ChevronDown size={24} color={tokens.colors.textSecondary} style={{ marginBottom: 4, opacity: 0.5 }} />
-                    <Text style={styles.timerSubjectName}>
-                        {subjects.find(s => s.id === selectedSubject)?.name || 'Estudio'}
-                    </Text>
-                </View>
-
-                <View style={styles.circleContainer}>
-                    <Svg height={radius * 2 + 24} width={radius * 2 + 24}>
-                        {/* Outer Soft Glow */}
-                        <SvgCircle
-                            cx={radius + 12}
-                            cy={radius + 12}
-                            r={radius}
-                            stroke={activeColor}
-                            strokeWidth="12"
-                            strokeOpacity="0.04"
-                            fill="transparent"
-                        />
-                        {/* Track */}
-                        <SvgCircle
-                            cx={radius + 12}
-                            cy={radius + 12}
-                            r={radius}
-                            stroke="#1A1A1A"
-                            strokeWidth="8"
-                            fill="transparent"
-                        />
-                        {/* Progress Glow (Behind) */}
-                        <SvgCircle
-                            cx={radius + 12}
-                            cy={radius + 12}
-                            r={radius}
-                            stroke={activeColor}
-                            strokeWidth="12"
-                            strokeOpacity="0.1"
-                            fill="transparent"
-                            strokeDasharray={circumference}
-                            strokeDashoffset={strokeDashoffset}
-                            strokeLinecap="round"
-                            rotation="-90"
-                            origin={`${radius + 12}, ${radius + 12}`}
-                        />
-                        {/* Active Progress */}
-                        <SvgCircle
-                            cx={radius + 12}
-                            cy={radius + 12}
-                            r={radius}
-                            stroke={activeColor}
-                            strokeWidth="8"
-                            fill="transparent"
-                            strokeDasharray={circumference}
-                            strokeDashoffset={strokeDashoffset}
-                            strokeLinecap="round"
-                            rotation="-90"
-                            origin={`${radius + 12}, ${radius + 12}`}
-                        />
-                    </Svg>
-                    <View style={styles.timeTextContainer}>
-                        <Text style={styles.timeDisplay}>{formatTime(timeLeft)}</Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 1 }}>
-                            {!isPaused && <View style={styles.liveIndicator} />}
-                            <Text style={styles.timeLabel}>{isPaused ? 'EN PAUSA' : 'ENFOQUE'}</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {/* Goals */}
-                <View style={styles.timerGoals}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                        <Target size={16} color={activeColor} />
-                        <Text style={styles.timerGoalsTitle}>OBJETIVOS ACTIVOS</Text>
-                    </View>
-                    <ScrollView style={{ maxHeight: 150 }} showsVerticalScrollIndicator={false}>
-                        {sessionGoals.map(g => (
-                            <TouchableOpacity key={g.id} activeOpacity={0.7} style={styles.timerGoalItem} onPress={() => toggleGoal(g.id)}>
-                                <GlassCard style={[styles.timerGoalCard, g.completed && { opacity: 0.5 }]}>
-                                    <View style={[styles.checkbox, g.completed && { backgroundColor: activeColor, borderColor: activeColor }]}>
-                                        {g.completed && <Check size={12} color="#FFF" strokeWidth={3} />}
-                                    </View>
-                                    <Text style={[styles.timerGoalText, g.completed && styles.completedText]}>{g.text}</Text>
-                                </GlassCard>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-
-                {/* Controls */}
-                <View style={styles.controls}>
-                    <TouchableOpacity activeOpacity={0.8} style={styles.controlBtnSmall} onPress={handleStopPress}>
-                        <X size={24} color="#666" />
-                    </TouchableOpacity>
-
-                    <TouchableOpacity activeOpacity={0.9} onPress={() => setIsPaused(!isPaused)}>
-                        <LinearGradient
-                            colors={[activeColor, '#1A73E8']}
-                            style={styles.controlBtnLarge}
-                        >
-                            {isPaused ? <Play size={36} color="#FFF" fill="#FFF" /> : <Pause size={36} color="#FFF" fill="#FFF" />}
-                        </LinearGradient>
-                    </TouchableOpacity>
-
-                    <View style={{ width: 56 }} />
-                </View>
-
-                {/* Stop Overlay */}
-                {isStopOverlayVisible && (
-                    <View style={styles.overlayContainer}>
-                        <GlassCard style={styles.overlayContent}>
-                            <View style={styles.warningIcon}>
-                                <X size={28} color={tokens.colors.error} />
-                            </View>
-                            <Text style={styles.modalTitle}>¿Terminar sesión?</Text>
-                            <Text style={styles.modalText}>
-                                El progreso actual se guardará, pero tu racha podría verse afectada.
-                            </Text>
-                            <View style={styles.modalButtons}>
-                                <TouchableOpacity style={styles.modalBtnCancel} onPress={cancelStop}>
-                                    <Text style={styles.modalBtnCancelText}>Continuar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.modalBtnDestructive} onPress={confirmStop}>
-                                    <Text style={styles.modalBtnDestructiveText}>Terminar</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </GlassCard>
-                    </View>
-                )}
-            </Animated.View>
-        );
-    };
-
-    const renderCelebration = () => (
-        <View style={styles.celebrationContainer}>
-            <LinearGradient
-                colors={['#000', tokens.colors.blue + '20', '#000']}
-                style={StyleSheet.absoluteFill}
+          <TouchableOpacity
+            key={key}
+            onPress={() => onChange(key)}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={label}
+            accessibilityState={{ selected: active }}
+            style={styles.moodButton}
+          >
+            <Face
+              type={key}
+              size={36}
+              color={active ? tokens.colors.accent : tokens.colors.textSecondary}
             />
-            {/* Confetti Effect Background */}
-            {[...Array(20)].map((_, i) => (
-                <ConfettiPiece key={i} index={i} />
-            ))}
-
-            <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
-                <LinearGradient
-                    colors={[tokens.colors.blue, '#1A73E8']}
-                    style={styles.celebrationCircle}
-                >
-                    <Trophy size={100} color="#FFF" />
-                </LinearGradient>
-            </Animated.View>
-            <Animated.Text style={[styles.celebrationText, { opacity: fadeAnim }]}>
-                ¡MISIÓN CUMPLIDA!
-            </Animated.Text>
-            <Animated.Text style={[styles.celebrationSubText, { opacity: fadeAnim }]}>
-                Has ganado <Text style={{ color: tokens.colors.blue, fontWeight: '900' }}>{sessionStats?.xpEarned || 0} XP</Text>
-            </Animated.Text>
-        </View>
-    );
-
-    const renderSummary = () => {
-        if (!sessionStats) return null;
-
-        return (
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-                <View style={{ marginTop: 40, alignItems: 'center', marginBottom: 32 }}>
-                    <LinearGradient
-                        colors={[tokens.colors.blue, '#1A73E8']}
-                        style={styles.dopamineGradient}
-                    >
-                        <Trophy size={48} color="#FFF" />
-                    </LinearGradient>
-                    <Text style={styles.summaryTitle}>Resumen de sesión</Text>
-                </View>
-
-                <GlassCard style={styles.summaryCard}>
-                    <Text style={styles.congratsTitle}>{sessionStats.message}</Text>
-
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 24 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: sessionStats.subjectColor }} />
-                        <Text style={[styles.summarySubject, { color: sessionStats.subjectColor }]}>{sessionStats.subject}</Text>
-                    </View>
-
-                    <View style={styles.statsGrid}>
-                        <View style={styles.statBox}>
-                            <Clock size={20} color={tokens.colors.blue} style={{ marginBottom: 8 }} />
-                            <Text style={styles.statLabelAesthetic}>TIEMPO</Text>
-                            <Text style={styles.statValueAesthetic}>{sessionStats.timeDeducted} <Text style={styles.unitText}>min</Text></Text>
-                        </View>
-                        <View style={styles.verticalDivider} />
-                        <View style={styles.statBox}>
-                            <Check size={20} color={tokens.colors.success} style={{ marginBottom: 8 }} />
-                            <Text style={styles.statLabelAesthetic}>OBJETIVOS</Text>
-                            <Text style={styles.statValueAesthetic}>{sessionStats.completedGoalsCount}/{sessionStats.totalGoals}</Text>
-                        </View>
-                        <View style={styles.verticalDivider} />
-                        <View style={styles.statBox}>
-                            <Trophy size={20} color="#FFD700" style={{ marginBottom: 8 }} />
-                            <Text style={styles.statLabelAesthetic}>RECOMPENSA</Text>
-                            <Text style={[styles.statValueAesthetic, { color: tokens.colors.blue }]}>+{sessionStats.xpEarned} <Text style={styles.unitText}>XP</Text></Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.divider} />
-
-                    <View style={{ width: '100%', marginBottom: 16 }}>
-                        <Text style={styles.label}>NOTAS DE LA SESIÓN</Text>
-                        <TextInput
-                            style={styles.summaryInput}
-                            multiline
-                            placeholder="¿Qué has aprendido hoy?"
-                            placeholderTextColor="#666"
-                            value={sessionNotes}
-                            onChangeText={setSessionNotes}
-                        />
-                    </View>
-
-                    <TouchableOpacity
-                        style={[styles.startBtn, { backgroundColor: tokens.colors.success, width: '100%', marginTop: 8 }]}
-                        onPress={() => {
-                            setStep('setup');
-                            router.replace('/dashboard');
-                        }}
-                    >
-                        <Text style={styles.startBtnText}>Finalizar sesión</Text>
-                    </TouchableOpacity>
-                </GlassCard>
-            </ScrollView>
+          </TouchableOpacity>
         );
+      })}
+    </View>
+  );
+}
+
+function StatTile({ value, label, accent = false }) {
+  return (
+    <View style={styles.statTile}>
+      <Text
+        style={[styles.statValue, accent && { color: tokens.colors.accent }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
+        {value}
+      </Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Reminder shown before a session starts. An app can't silence the phone for
+ * the student, so this only asks — hence no "activar", just an acknowledgement.
+ */
+function FocusReminderSheet({ visible, onClose, onStart, dontShow, onToggleDontShow }) {
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.sheetIcon}>
+        <BellOff size={24} color={tokens.colors.accent} />
+      </View>
+      <Text style={styles.sheetTitle}>Silencia las notificaciones</Text>
+      <Text style={styles.sheetBody}>
+        Pon el móvil en silencio antes de empezar. Es la diferencia entre una sesión enfocada y
+        media hora de interrupciones.
+      </Text>
+
+      <CheckRow
+        label="No volver a mostrar"
+        checked={dontShow}
+        onToggle={onToggleDontShow}
+        strike={false}
+      />
+
+      <View style={{ marginTop: 20 }}>
+        <Button title="Empezar sesión" onPress={onStart} fullWidth />
+      </View>
+    </BottomSheet>
+  );
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
+
+export default function StudySessionScreen() {
+  const router = useRouter();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
+  const { subjects, loading: subjectsLoading, stats } = useUserStore();
+  const { hideFocusReminder, setHideFocusReminder } = usePreferencesStore();
+
+  const params = useLocalSearchParams();
+  const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
+
+  const [step, setStep] = useState('setup');
+  const [selectedSubject, setSelectedSubject] = useState(null);
+  const [duration, setDuration] = useState(DEFAULT_MINUTES);
+  const [goals, setGoals] = useState([]);
+  const [newGoalText, setNewGoalText] = useState('');
+
+  const [timeLeft, setTimeLeft] = useState(DEFAULT_MINUTES * 60);
+  const [isActive, setIsActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+
+  const [focusSheetVisible, setFocusSheetVisible] = useState(false);
+  const [dontShowReminder, setDontShowReminder] = useState(false);
+  const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
+
+  const [summary, setSummary] = useState(null);
+  // 'draw' while the mark is being traced, 'settled' once the summary can land.
+  const [endPhase, setEndPhase] = useState('draw');
+  const [mood, setMood] = useState(null);
+  const [notes, setNotes] = useState('');
+  const [upcomingExams, setUpcomingExams] = useState([]);
+
+  const timerRef = useRef(null);
+  const autoStartedRef = useRef(null);
+  // The write kicked off when the timer stopped. Held as a promise, not an id,
+  // so a student who types fast and taps "Volver a Inicio" before Firestore
+  // answers still gets their notes attached.
+  const savedSessionRef = useRef(null);
+
+  const dragY = useSharedValue(0);
+  const flash = useSharedValue(0);
+
+  // ── Derived ──
+
+  const currentSubject = useMemo(
+    () => subjects.find((s) => s.id === selectedSubject) || null,
+    [subjects, selectedSubject]
+  );
+
+  // Nearest upcoming exam per subject, for the reason line on the chip.
+  const reasonBySubject = useMemo(() => {
+    const map = {};
+    for (const exam of upcomingExams) {
+      if (!exam.subjectId || map[exam.subjectId]) continue;
+      const reason = examReason(exam);
+      if (reason) map[exam.subjectId] = reason;
+    }
+    return map;
+  }, [upcomingExams]);
+
+  // ── Session lifecycle ──
+
+  const startSession = useCallback((minutes) => {
+    const total = Math.round(minutes) * 60;
+    setTimeLeft(total);
+    setIsActive(true);
+    setIsPaused(false);
+    setStep('timer');
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, []);
+
+  const handleStartPress = () => {
+    if (!selectedSubject) return;
+    if (hideFocusReminder) {
+      startSession(duration);
+      return;
+    }
+    setDontShowReminder(false);
+    setFocusSheetVisible(true);
+  };
+
+  const confirmFocusSheet = () => {
+    if (dontShowReminder) setHideFocusReminder(true);
+    setFocusSheetVisible(false);
+    startSession(duration);
+  };
+
+  /**
+   * Ends the session: writes it (streak + XP) straight away, then hands the
+   * student the summary screen. Notes and mood are patched on afterwards.
+   */
+  const handleComplete = useCallback(
+    (early = false) => {
+      clearInterval(timerRef.current);
+      setIsActive(false);
+      setIsPaused(false);
+      setStopConfirmVisible(false);
+
+      const totalSeconds = duration * 60;
+      const secondsSpent = Math.max(0, totalSeconds - timeLeft);
+      const minutesSpent = Math.floor(secondsSpent / 60);
+      const subject = subjects.find((s) => s.id === selectedSubject);
+
+      // Same formula the store awards with, so the number on screen is the
+      // number the student actually receives.
+      const xpEarned = minutesSpent * BASE_XP_PER_MINUTE;
+
+      setSummary({
+        subjectName: subject?.name || 'Estudio',
+        subjectColor: subject?.color || tokens.colors.accent,
+        minutes: minutesSpent,
+        completed: !early,
+        xpEarned,
+        completedGoals: goals.filter((g) => g.completed).length,
+        totalGoals: goals.length,
+      });
+      setStep('end');
+
+      if (!early && Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+
+      if (!user?.uid) return;
+
+      if (!early && taskId) {
+        useUserStore.getState().completeMicroTask(user.uid, taskId);
+      }
+
+      // A session shorter than a minute earns nothing and isn't worth a row.
+      if (minutesSpent >= 1) {
+        savedSessionRef.current = useUserStore
+          .getState()
+          .addSession(user.uid, {
+            subjectId: selectedSubject,
+            duration: minutesSpent,
+            goals,
+            focusScore: 5,
+            notes: '',
+          })
+          .then((result) => result?.sessionId ?? null)
+          .catch((error) => {
+            console.error('Error saving session:', error);
+            return null;
+          });
+      }
+    },
+    [duration, timeLeft, subjects, selectedSubject, goals, user?.uid, taskId]
+  );
+
+  const handleFinish = () => {
+    const focusScore = MOODS.find((m) => m.key === mood)?.score;
+    const trimmed = notes.trim();
+    const pending = savedSessionRef.current;
+
+    // Fire-and-forget: the student is already on their way to the dashboard,
+    // and nothing here changes their streak or their XP.
+    if (pending && (trimmed || focusScore)) {
+      pending
+        .then((sessionId) => {
+          if (!sessionId) return;
+          return useUserStore
+            .getState()
+            .updateSessionFeedback(sessionId, { notes: trimmed, focusScore });
+        })
+        .catch((error) => console.error('Error saving session feedback:', error));
+    }
+
+    savedSessionRef.current = null;
+    setStep('setup');
+    setSummary(null);
+    setMood(null);
+    setNotes('');
+    setGoals([]);
+    router.replace('/dashboard');
+  };
+
+  // ── Goals ──
+
+  const addGoal = () => {
+    const text = newGoalText.trim();
+    if (!text) return;
+    setGoals((prev) => [...prev, { id: Date.now(), text, completed: false }]);
+    setNewGoalText('');
+  };
+
+  const toggleGoal = (id) => {
+    setGoals((prev) => prev.map((g) => (g.id === id ? { ...g, completed: !g.completed } : g)));
+    if (Platform.OS !== 'web') Haptics.selectionAsync();
+  };
+
+  const removeGoal = (id) => setGoals((prev) => prev.filter((g) => g.id !== id));
+
+  // ── Gestures ──
+
+  const dragToStop = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(isActive && !stopConfirmVisible)
+        .activeOffsetY([-20, 20])
+        .onUpdate((event) => {
+          if (event.translationY > 0) dragY.value = event.translationY;
+        })
+        .onEnd((event) => {
+          if (event.translationY > DRAG_TO_STOP) {
+            runOnJS(setIsPaused)(true);
+            runOnJS(setStopConfirmVisible)(true);
+          }
+          dragY.value = withSpring(0, { damping: 20, stiffness: 200 });
+        }),
+    [isActive, stopConfirmVisible, dragY]
+  );
+
+  const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dragY.value }] }));
+
+  // Mirrors the design's `blueFlash`: a hard bloom that peaks fast and drifts
+  // outwards as it fades.
+  const flashStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(flash.value, [0, 0.3, 1], [0, 1, 0]),
+    transform: [{ scale: interpolate(flash.value, [0, 0.3, 1], [0.55, 1.05, 1.3]) }],
+  }));
+
+  const handleBurst = useCallback(() => {
+    flash.value = 0;
+    flash.value = withTiming(1, { duration: 600, easing: Easing.bezier(0.22, 0.61, 0.36, 1) });
+  }, [flash]);
+
+  const handleSettled = useCallback(() => setEndPhase('settled'), []);
+
+  // ── Effects ──
+
+  useEffect(() => {
+    activateKeepAwake();
+    return () => deactivateKeepAwake();
+  }, []);
+
+  useEffect(() => {
+    if (user?.uid && subjects.length === 0) {
+      useUserStore.getState().loadUserData(user.uid);
+    }
+  }, [user?.uid, subjects.length]);
+
+  // Exams only drive the "Examen en N días" hint — a failure here must not
+  // stop the student from studying.
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    getUpcomingExams(user.uid, 20)
+      .then((exams) => {
+        if (!cancelled) setUpcomingExams(exams || []);
+      })
+      .catch((error) => console.warn('Could not load exams for the study screen', error));
+    return () => {
+      cancelled = true;
     };
+  }, [user?.uid]);
+
+  // Deep link from the quick actions and the plan's micro-tasks.
+  useEffect(() => {
+    if (autoStart !== 'true' || !subjectId || subjects.length === 0) return;
+
+    // The tab keeps this screen mounted, so the guard is keyed on the params
+    // rather than a plain flag: a second launch with a different subject or
+    // duration has to start its own session.
+    const signature = `${subjectId}|${paramDuration}|${goal}|${taskId}`;
+    if (autoStartedRef.current === signature) return;
+
+    const subject = subjects.find((s) => s.id === subjectId);
+    if (!subject) return;
+
+    autoStartedRef.current = signature;
+
+    // Read the duration from the param rather than from state: the setState
+    // below hasn't landed yet when the session starts.
+    const parsed = parseInt(paramDuration, 10);
+    const minutes = Number.isFinite(parsed) ? parsed : DEFAULT_MINUTES;
+
+    setSelectedSubject(subject.id);
+    setDuration(minutes);
+    if (goal) setGoals([{ id: Date.now(), text: String(goal), completed: false }]);
+    startSession(minutes);
+  }, [autoStart, subjectId, paramDuration, goal, taskId, subjects, startSession]);
+
+  // Zen mode: the tab bar would be an exit ramp mid-session.
+  useEffect(() => {
+    const hidden = step === 'timer';
+    navigation.setOptions({
+      headerShown: false,
+      tabBarStyle: hidden
+        ? { display: 'none' }
+        : {
+            height: 85,
+            paddingBottom: 25,
+            backgroundColor: tokens.colors.surfaceCard,
+            elevation: 0,
+            borderTopWidth: 1,
+            borderTopColor: tokens.colors.borderDefault,
+            shadowColor: 'transparent',
+            shadowOpacity: 0,
+            display: 'flex',
+          },
+    });
+  }, [step, navigation]);
+
+  useEffect(() => {
+    if (isActive && !isPaused && timeLeft > 0) {
+      timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+    } else if (isActive && timeLeft === 0) {
+      handleComplete(false);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [isActive, isPaused, timeLeft, handleComplete]);
+
+  // Rewind the reveal whenever a new session ends, so the second one animates
+  // exactly like the first.
+  useEffect(() => {
+    if (step !== 'end') {
+      setEndPhase('draw');
+      flash.value = 0;
+    }
+  }, [step, flash]);
+
+  // ── Render: setup ──
+
+  const renderSetup = () => (
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Animated.View entering={FadeInDown.duration(320)}>
+        <Text style={styles.screenTitle}>Estudiar</Text>
+        <Text style={styles.screenSubtitle}>Elige materia, tiempo y objetivos de hoy.</Text>
+      </Animated.View>
+
+      {/* Materia */}
+      <View style={styles.section}>
+        <SectionTitle>Materia</SectionTitle>
+
+        {subjectsLoading ? (
+          <View style={styles.subjectsPlaceholder}>
+            <ActivityIndicator color={tokens.colors.accent} />
+          </View>
+        ) : subjects.length === 0 ? (
+          <TouchableOpacity
+            style={styles.subjectsEmpty}
+            activeOpacity={0.8}
+            onPress={() => router.push('/dashboard/profile')}
+          >
+            <Plus size={20} color={tokens.colors.textSecondary} />
+            <Text style={styles.subjectsEmptyText}>Añadir materias</Text>
+          </TouchableOpacity>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.subjectsRow}
+          >
+            {subjects.map((subject) => (
+              <SubjectChip
+                key={subject.id}
+                subject={subject}
+                reason={reasonBySubject[subject.id]}
+                selected={selectedSubject === subject.id}
+                onPress={() => setSelectedSubject(subject.id)}
+              />
+            ))}
+          </ScrollView>
+        )}
+      </View>
+
+      {/* Tiempo */}
+      <View style={styles.section}>
+        <SectionTitle>Tiempo de sesión</SectionTitle>
+
+        <Card padding={20}>
+          <View style={styles.durationRow}>
+            <Text style={styles.durationValue}>{duration}</Text>
+            <Text style={styles.durationUnit}>min</Text>
+          </View>
+          <Slider
+            style={styles.slider}
+            minimumValue={MIN_MINUTES}
+            maximumValue={MAX_MINUTES}
+            step={MINUTE_STEP}
+            value={duration}
+            onValueChange={(value) => setDuration(Math.round(value))}
+            minimumTrackTintColor={tokens.colors.accent}
+            maximumTrackTintColor={tokens.colors.borderDefault}
+            thumbTintColor={tokens.colors.accent}
+          />
+          <Text style={styles.durationPhrase}>{sessionPhrase(duration)}</Text>
+        </Card>
+      </View>
+
+      {/* Objetivos */}
+      <View style={styles.section}>
+        <SectionTitle>Objetivos de hoy</SectionTitle>
+
+        <Card padding={16}>
+          <AddObjectiveRow value={newGoalText} onChangeText={setNewGoalText} onAdd={addGoal} />
+          {goals.length > 0 ? (
+            <View style={{ marginTop: 8 }}>
+              {goals.map((g) => (
+                <SwipeToDelete key={g.id} onDelete={() => removeGoal(g.id)}>
+                  <CheckRow
+                    label={g.text}
+                    checked={g.completed}
+                    onToggle={() => toggleGoal(g.id)}
+                  />
+                </SwipeToDelete>
+              ))}
+              <Text style={styles.swipeHint}>
+                Desliza un objetivo a la izquierda para borrarlo.
+              </Text>
+            </View>
+          ) : null}
+        </Card>
+      </View>
+
+      {/* Pushes the action to the bottom of the viewport when the content is
+          short, and keeps a clear gap when it isn't. */}
+      <View style={styles.bottomSpacer} />
+
+      <Button
+        title="Comenzar sesión"
+        onPress={handleStartPress}
+        disabled={!selectedSubject}
+        fullWidth
+      />
+    </ScrollView>
+  );
+
+  // ── Render: timer ──
+
+  const renderTimer = () => {
+    const totalSeconds = duration * 60;
+    const remainingFraction = totalSeconds > 0 ? Math.max(0, timeLeft) / totalSeconds : 0;
+    const dashOffset = RING_CIRCUMFERENCE * remainingFraction;
+    const reason = reasonBySubject[selectedSubject];
 
     return (
-        <View style={styles.mainContainer}>
-            {step === 'setup' && renderSetup()}
-            {step === 'timer' && renderTimer()}
-            {step === 'celebration' && renderCelebration()}
-            {step === 'summary' && renderSummary()}
-        </View>
+      <GestureDetector gesture={dragToStop}>
+        <Animated.View style={[styles.timerContainer, { paddingTop: insets.top + 24 }, dragStyle]}>
+          <StatusBar hidden />
+
+          <View style={styles.timerHeader}>
+            <Text style={styles.timerSubject}>{currentSubject?.name || 'Estudio'}</Text>
+            <Text style={styles.timerReason}>{reason || 'Sesión enfocada'}</Text>
+          </View>
+
+          <View style={styles.ringWrap}>
+            <Svg width={RING_SIZE} height={RING_SIZE} style={styles.ringSvg}>
+              <SvgCircle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_RADIUS}
+                stroke={tokens.colors.borderDefault}
+                strokeWidth={RING_STROKE}
+                fill="none"
+              />
+              <SvgCircle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_RADIUS}
+                stroke={tokens.colors.accent}
+                strokeWidth={RING_STROKE}
+                strokeLinecap="round"
+                fill="none"
+                strokeDasharray={RING_CIRCUMFERENCE}
+                strokeDashoffset={dashOffset}
+                rotation="-90"
+                origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
+              />
+            </Svg>
+            <View style={styles.ringCenter}>
+              <Text style={styles.timeDisplay}>{formatTime(timeLeft)}</Text>
+              <Text style={styles.timeState}>{isPaused ? 'EN PAUSA' : 'ENFOQUE'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.controls}>
+            <TouchableOpacity
+              style={styles.controlButton}
+              activeOpacity={0.7}
+              onPress={() => setIsPaused((p) => !p)}
+              accessibilityRole="button"
+              accessibilityLabel={isPaused ? 'Reanudar sesión' : 'Pausar sesión'}
+            >
+              {isPaused ? (
+                <Play
+                  size={24}
+                  color={tokens.colors.textPrimary}
+                  fill={tokens.colors.textPrimary}
+                />
+              ) : (
+                <Pause
+                  size={24}
+                  color={tokens.colors.textPrimary}
+                  fill={tokens.colors.textPrimary}
+                />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.controlButton}
+              activeOpacity={0.7}
+              onPress={() => {
+                setIsPaused(true);
+                setStopConfirmVisible(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Terminar sesión"
+            >
+              <X size={26} color={tokens.colors.textPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          {goals.length > 0 ? (
+            <View style={styles.timerGoals}>
+              <OverlineLabel>Objetivos</OverlineLabel>
+              <ScrollView style={styles.timerGoalsScroll} showsVerticalScrollIndicator={false}>
+                {goals.map((g) => (
+                  <CheckRow
+                    key={g.id}
+                    label={g.text}
+                    checked={g.completed}
+                    onToggle={() => toggleGoal(g.id)}
+                  />
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+
+          {stopConfirmVisible ? (
+            <Animated.View entering={FadeIn.duration(160)} style={styles.stopOverlay}>
+              <Card padding={24} style={styles.stopCard}>
+                <View style={styles.stopIcon}>
+                  <X size={26} color={tokens.colors.danger} />
+                </View>
+                <Text style={styles.stopTitle}>¿Terminar sesión?</Text>
+                <Text style={styles.stopBody}>
+                  Se guardará el tiempo que llevas, pero tu racha podría verse afectada.
+                </Text>
+                <View style={styles.stopActions}>
+                  <View style={{ flex: 1 }}>
+                    <Button
+                      title="Continuar"
+                      variant="secondary"
+                      fullWidth
+                      onPress={() => {
+                        setStopConfirmVisible(false);
+                        setIsPaused(false);
+                      }}
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Button
+                      title="Terminar"
+                      variant="danger"
+                      fullWidth
+                      onPress={() => handleComplete(true)}
+                    />
+                  </View>
+                </View>
+              </Card>
+            </Animated.View>
+          ) : null}
+        </Animated.View>
+      </GestureDetector>
     );
+  };
+
+  // ── Render: end ──
+
+  const renderEnd = () => {
+    if (!summary) return null;
+
+    const settled = endPhase === 'settled';
+
+    return (
+      <View style={styles.endRoot}>
+        {/* Night sky behind the trace, gone by the time the summary lands. */}
+        {settled ? null : (
+          <Animated.View
+            exiting={FadeOut.duration(620)}
+            pointerEvents="none"
+            style={StyleSheet.absoluteFill}
+          >
+            <Svg width="100%" height="100%">
+              <Defs>
+                <RadialGradient id="study-end-sky" cx="50%" cy="16%" rx="120%" ry="80%">
+                  <Stop offset="0" stopColor="#17233D" />
+                  <Stop offset="0.55" stopColor="#0B1020" />
+                  <Stop offset="1" stopColor="#06070D" />
+                </RadialGradient>
+              </Defs>
+              <SvgRect width="100%" height="100%" fill="url(#study-end-sky)" />
+            </Svg>
+          </Animated.View>
+        )}
+
+        {/* The flash that hides the hand-off from the stroke to the flat mark. */}
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, styles.flash, flashStyle]}
+        >
+          <Svg width="100%" height="100%">
+            <Defs>
+              <RadialGradient id="study-end-flash" cx="66%" cy="14%" r="100%">
+                <Stop offset="0" stopColor="#FFFFFF" />
+                <Stop offset="0.38" stopColor={tokens.colors.accent} />
+                <Stop offset="1" stopColor={tokens.colors.accent} />
+              </RadialGradient>
+            </Defs>
+            <SvgRect width="100%" height="100%" fill="url(#study-end-flash)" />
+          </Svg>
+        </Animated.View>
+
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.endContent, { paddingTop: insets.top + 32 }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={settled}
+        >
+          <SchedioLogoReveal size={140} onBurst={handleBurst} onSettled={handleSettled} />
+
+          {settled ? (
+            <>
+              <Animated.View entering={FadeInDown.duration(460)} style={styles.endBlock}>
+                <Text style={styles.endTitle}>¿Cómo te ha ido?</Text>
+                <MoodPicker value={mood} onChange={setMood} />
+              </Animated.View>
+
+              <Animated.View entering={FadeInDown.duration(460).delay(90)} style={styles.statRow}>
+                <StatTile value={`+${summary.xpEarned}`} label="XP ganado" accent />
+                <StatTile value={String(stats?.streak ?? 0)} label="Días de racha" />
+              </Animated.View>
+
+              <Animated.Text
+                entering={FadeInDown.duration(460).delay(180)}
+                style={styles.endSummaryLine}
+              >
+                {summary.subjectName} · {summary.minutes} min estudiados · {summary.completedGoals}/
+                {summary.totalGoals} objetivos completados
+              </Animated.Text>
+
+              <Animated.View
+                entering={FadeInDown.duration(460).delay(260)}
+                style={styles.notesWrap}
+              >
+                <TextInput
+                  style={styles.notesInput}
+                  placeholder="Anota algo rápido (opcional)"
+                  placeholderTextColor={tokens.colors.textDisabled}
+                  value={notes}
+                  onChangeText={setNotes}
+                  multiline
+                />
+              </Animated.View>
+
+              <View style={styles.bottomSpacer} />
+
+              <Animated.View
+                entering={FadeInDown.duration(460).delay(340)}
+                style={{ width: '100%' }}
+              >
+                <Button title="Volver a Inicio" onPress={handleFinish} fullWidth />
+              </Animated.View>
+            </>
+          ) : null}
+        </ScrollView>
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      {step === 'setup' && renderSetup()}
+      {step === 'timer' && renderTimer()}
+      {step === 'end' && renderEnd()}
+
+      <FocusReminderSheet
+        visible={focusSheetVisible}
+        onClose={() => setFocusSheetVisible(false)}
+        onStart={confirmFocusSheet}
+        dontShow={dontShowReminder}
+        onToggleDontShow={() => setDontShowReminder((v) => !v)}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    mainContainer: {
-        flex: 1,
-        backgroundColor: tokens.colors.background,
-        paddingTop: 50,
-    },
-    container: {
-        flex: 1,
-        paddingHorizontal: 24,
-    },
-    title: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-        marginBottom: 32,
-        marginTop: 16,
-    },
-    label: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: tokens.colors.textSecondary,
-        marginBottom: 8,
-        letterSpacing: 1,
-    },
-    conceptLabel: {
-        fontSize: 10,
-        fontWeight: '900',
-        color: tokens.colors.blue,
-        letterSpacing: 2,
-        textTransform: 'uppercase',
-    },
-    backButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#1A1A1A',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#333',
-    },
-    headerTitle: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#FFF',
-        textTransform: 'uppercase',
-        letterSpacing: 2,
-    },
-    emptySubjectsContainer: {
-        width: width - 48,
-        height: 110,
-        backgroundColor: tokens.colors.card,
-        borderRadius: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: tokens.colors.border,
-        borderStyle: 'dashed',
-        flexDirection: 'row',
-        gap: 12,
-    },
-    emptySubjectsText: {
-        color: tokens.colors.textSecondary,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    labelCenter: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: tokens.colors.textSecondary,
-        marginBottom: 8,
-        letterSpacing: 1,
-        textAlign: 'center',
-        width: '100%',
-    },
-    subjectScroll: {
-        marginBottom: 32,
-        maxHeight: 120,
-    },
-    subjectCard: {
-        width: 100,
-        height: 110,
-        backgroundColor: tokens.colors.card,
-        borderRadius: 16,
-        padding: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: 12,
-        borderWidth: 2,
-        borderColor: 'transparent',
-    },
-    subjectIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 8,
-    },
-    subjectInitial: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#FFF',
-    },
-    subjectName: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: tokens.colors.text,
-        textAlign: 'center',
-    },
-    checkBadge: {
-        position: 'absolute',
-        top: 8,
-        right: 8,
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#FFF',
-    },
-    // Slider & Duration
-    durationLabelCentered: {
-        fontSize: 48,
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-        textAlign: 'center',
-        marginBottom: 4,
-        fontVariant: ['tabular-nums'],
-        width: '100%',
-    },
-    durationUnit: {
-        fontSize: 18,
-        color: tokens.colors.textSecondary,
-        fontWeight: '600',
-    },
-    sliderWrapper: {
-        backgroundColor: tokens.colors.card,
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 24,
-    },
-    durationMessage: {
-        textAlign: 'center',
-        marginTop: 12,
-        fontSize: 14,
-        fontWeight: '600',
-        color: tokens.colors.primary,
-        fontStyle: 'italic',
-    },
-    // Inputs/Buttons
-    inputRow: {
-        flexDirection: 'row',
-        gap: 12,
-        marginBottom: 16,
-    },
-    input: {
-        flex: 1,
-        backgroundColor: tokens.colors.card,
-        borderRadius: 12,
-        padding: 16,
-        color: tokens.colors.text,
-        fontSize: 16,
-    },
-    addBtn: {
-        width: 56,
-        height: 56,
-        borderRadius: 16,
-        backgroundColor: tokens.colors.primary,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    goalsList: {
-        marginBottom: 32,
-    },
-    goalItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: tokens.colors.border,
-    },
-    goalText: {
-        flex: 1,
-        fontSize: 16,
-        color: tokens.colors.text,
-    },
-    startBtn: {
-        backgroundColor: tokens.colors.primary,
-        borderRadius: 16,
-        paddingVertical: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 12,
-        shadowColor: tokens.colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-    },
-    disabledBtn: {
-        opacity: 0.5,
-    },
-    startBtnText: {
-        color: '#FFF',
-        fontSize: 18,
-        fontWeight: 'bold',
-    },
-    // Timer
-    timerContainer: {
-        flex: 1,
-        alignItems: 'center',
-        paddingHorizontal: 24,
-    },
-    circleContainer: {
-        position: 'relative',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 24, // Reduced from 40
-    },
-    timeTextContainer: {
-        position: 'absolute',
-        alignItems: 'center',
-    },
-    timeDisplay: {
-        fontSize: 34, // Further reduced from 40
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-        fontVariant: ['tabular-nums'],
-    },
-    timeLabel: {
-        fontSize: 12, // Reduced from 14
-        color: tokens.colors.textSecondary,
-        marginTop: 2,
-        fontWeight: '600',
-        letterSpacing: 2,
-    },
-    timerGoals: {
-        width: '100%',
-        marginBottom: 32,
-    },
-    timerGoalsTitle: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: tokens.colors.textSecondary,
-        marginBottom: 12,
-        letterSpacing: 1,
-    },
-    timerGoalItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        marginBottom: 8,
-    },
-    checkbox: {
-        width: 20,
-        height: 20,
-        borderRadius: 6,
-        borderWidth: 2,
-        borderColor: tokens.colors.border,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    timerGoalText: {
-        fontSize: 14,
-        color: tokens.colors.text,
-    },
-    completedText: {
-        textDecorationLine: 'line-through',
-        color: tokens.colors.textSecondary,
-    },
-    controls: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 24,
-    },
-    controlBtnLarge: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        alignItems: 'center',
-        justifyContent: 'center',
-        shadowColor: tokens.colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-    },
-    controlBtnSmall: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
-        backgroundColor: tokens.colors.card,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: tokens.colors.border,
-    },
-    timerGlow: {
-        position: 'absolute',
-        top: '10%',
-        width: width * 1.2,
-        height: width * 1.2,
-        borderRadius: width * 0.6,
-        zIndex: -1,
-    },
-    timerHeader: {
-        marginTop: 4, // Reduced from 10
-        marginBottom: 16, // Reduced from 24
-        alignItems: 'center',
-    },
-    timerSubjectName: {
-        fontSize: 14,
-        fontWeight: '900',
-        color: tokens.colors.blue,
-        letterSpacing: 2,
-        textTransform: 'uppercase',
-    },
-    liveIndicator: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: tokens.colors.success,
-    },
-    timerGoalCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 12,
-        marginBottom: 8,
-        borderRadius: 16,
-    },
-    warningIcon: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: tokens.colors.error + '20',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-    },
-    overlayContainer: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.4)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-        padding: 24,
-    },
-    overlayContent: {
-        width: '100%',
-        borderRadius: 32,
-        padding: 32,
-        alignItems: 'center',
-    },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-        marginBottom: 12,
-    },
-    modalText: {
-        fontSize: 14,
-        color: tokens.colors.textSecondary,
-        textAlign: 'center',
-        marginBottom: 24,
-        lineHeight: 20,
-    },
-    modalButtons: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    modalBtnCancel: {
-        flex: 1,
-        paddingVertical: 12,
-        alignItems: 'center',
-    },
-    modalBtnCancelText: {
-        color: tokens.colors.textSecondary,
-        fontWeight: '600',
-    },
-    modalBtnDestructive: {
-        flex: 1,
-        backgroundColor: tokens.colors.error,
-        paddingVertical: 12,
-        borderRadius: 12,
-        alignItems: 'center',
-    },
-    modalBtnDestructiveText: {
-        color: '#FFF',
-        fontWeight: 'bold',
-    },
-    celebrationContainer: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    celebrationCircle: {
-        width: 160,
-        height: 160,
-        borderRadius: 80,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 32,
-    },
-    celebrationText: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-        letterSpacing: 2,
-        marginBottom: 8,
-    },
-    celebrationSubText: {
-        fontSize: 16,
-        color: tokens.colors.textSecondary,
-    },
-    dopamineHeader: {
-        alignItems: 'center',
-        marginTop: 40,
-        marginBottom: 24,
-    },
-    dopamineGradient: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    summaryTitle: {
-        fontSize: 18,
-        fontWeight: '900',
-        color: '#FFF',
-        marginTop: 16,
-        letterSpacing: 3,
-        textTransform: 'uppercase',
-    },
-    summaryCard: {
-        borderRadius: 32,
-        padding: 24,
-        alignItems: 'center',
-    },
-    congratsTitle: {
-        fontSize: 28,
-        fontWeight: '900',
-        color: '#FFF',
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    summarySubject: {
-        fontSize: 12,
-        fontWeight: '800',
-        textTransform: 'uppercase',
-        letterSpacing: 2,
-    },
-    summaryInput: {
-        width: '100%',
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderRadius: 16,
-        padding: 16,
-        color: '#FFF',
-        fontSize: 14,
-        height: 100,
-        textAlignVertical: 'top',
-        marginTop: 8,
-    },
-    statsRow: {
-        marginBottom: 32,
-    },
-    statItemBig: {
-        alignItems: 'center',
-    },
-    statValueBig: {
-        fontSize: 48,
-        fontWeight: 'bold',
-    },
-    statLabelBig: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: tokens.colors.textSecondary,
-        letterSpacing: 2,
-    },
-    statsGrid: {
-        flexDirection: 'row',
-        width: '100%',
-        justifyContent: 'space-around',
-        marginBottom: 32,
-    },
-    statBox: {
-        alignItems: 'center',
-        flex: 1,
-    },
-    statLabelAesthetic: {
-        fontSize: 10,
-        fontWeight: '700',
-        color: tokens.colors.textSecondary,
-        letterSpacing: 1,
-        marginBottom: 4,
-    },
-    statValueAesthetic: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: tokens.colors.text,
-    },
-    unitText: {
-        fontSize: 12,
-        color: tokens.colors.textSecondary,
-    },
-    verticalDivider: {
-        width: 1,
-        height: '60%',
-        backgroundColor: tokens.colors.border,
-        alignSelf: 'center',
-    },
-    divider: {
-        width: '100%',
-        height: 1,
-        backgroundColor: tokens.colors.border,
-        marginBottom: 24,
-    },
+  container: {
+    flex: 1,
+    backgroundColor: tokens.colors.background,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  // Eats the leftover height so the primary action sits at the bottom, with a
+  // floor that keeps it off the block above on a short screen.
+  bottomSpacer: {
+    flex: 1,
+    minHeight: 40,
+  },
+
+  // Setup header
+  screenTitle: {
+    fontFamily: font.bold,
+    fontSize: tokens.typography.screenTitle.size,
+    color: tokens.colors.textPrimary,
+    marginBottom: 4,
+  },
+  screenSubtitle: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textSecondary,
+  },
+  section: {
+    marginTop: tokens.spacing.sectionGapMin,
+    marginBottom: 0,
+  },
+  // Subjects
+  subjectsRow: {
+    gap: 10,
+    paddingRight: 20,
+  },
+  subjectChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  subjectChipSelected: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderColor: tokens.colors.accent,
+  },
+  subjectAvatar: {
+    width: 26,
+    height: 26,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subjectInitial: {
+    fontFamily: font.bold,
+    fontSize: 12,
+    color: '#FFFFFF',
+  },
+  subjectName: {
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: tokens.colors.textPrimary,
+  },
+  subjectReason: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: tokens.colors.accent,
+    marginTop: 1,
+  },
+  subjectsPlaceholder: {
+    height: 66,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subjectsEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    height: 66,
+    borderRadius: tokens.radius.card,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: tokens.colors.borderDefault,
+  },
+  subjectsEmptyText: {
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+  },
+
+  // Duration
+  durationRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  durationValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 44,
+    letterSpacing: 0.5,
+    color: tokens.colors.textPrimary,
+  },
+  durationUnit: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textSecondary,
+  },
+  slider: {
+    width: '100%',
+    height: 40,
+  },
+  durationPhrase: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  // Objectives
+  addRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  addInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.background,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  addButton: {
+    width: 40,
+    height: 40,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  checkRowLabel: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  checkRowLabelDone: {
+    color: tokens.colors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
+  checkbox: {
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: {
+    backgroundColor: tokens.colors.accent,
+  },
+  checkboxOff: {
+    borderWidth: 1.5,
+    borderColor: tokens.colors.borderDefault,
+  },
+  swipeWrap: {
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  swipeAction: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: tokens.colors.danger,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingRight: 18,
+  },
+  swipeContent: {
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  swipeHint: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+    marginTop: 8,
+  },
+
+  // Sheet
+  sheetIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  sheetTitle: {
+    fontFamily: font.bold,
+    fontSize: 20,
+    color: tokens.colors.textPrimary,
+    marginBottom: 6,
+  },
+  sheetBody: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    marginBottom: 12,
+  },
+
+  // Timer
+  timerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  timerHeader: {
+    alignItems: 'center',
+    marginBottom: 36,
+  },
+  timerSubject: {
+    fontFamily: font.semibold,
+    fontSize: 20,
+    color: tokens.colors.textPrimary,
+  },
+  timerReason: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+    marginTop: 2,
+  },
+  ringWrap: {
+    width: RING_SIZE,
+    height: RING_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringSvg: {
+    position: 'absolute',
+  },
+  ringCenter: {
+    alignItems: 'center',
+  },
+  timeDisplay: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 56,
+    letterSpacing: 0.5,
+    color: tokens.colors.textPrimary,
+  },
+  timeState: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    letterSpacing: 2,
+    color: tokens.colors.textSecondary,
+  },
+  controls: {
+    flexDirection: 'row',
+    gap: 24,
+    marginTop: 36,
+  },
+  controlButton: {
+    width: 60,
+    height: 60,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timerGoals: {
+    width: '100%',
+    marginTop: 36,
+    flex: 1,
+  },
+  timerGoalsScroll: {
+    marginTop: 4,
+  },
+  stopOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  stopCard: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  stopIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: 'rgba(216, 96, 74, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  stopTitle: {
+    fontFamily: font.bold,
+    fontSize: 20,
+    color: tokens.colors.textPrimary,
+    marginBottom: 8,
+  },
+  stopBody: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
+  stopActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 24,
+    width: '100%',
+  },
+
+  // End
+  endRoot: {
+    flex: 1,
+  },
+  endContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
+    alignItems: 'center',
+  },
+  flash: {
+    // Above the sky and the mark, below nothing — it is the hand-off.
+    zIndex: 10,
+  },
+  endBlock: {
+    marginTop: 28,
+    width: '100%',
+    alignItems: 'center',
+  },
+  endTitle: {
+    fontFamily: font.bold,
+    fontSize: 20,
+    color: tokens.colors.textPrimary,
+    marginBottom: 14,
+  },
+  moodRow: {
+    flexDirection: 'row',
+    gap: 18,
+    justifyContent: 'center',
+  },
+  moodButton: {
+    padding: 4,
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    marginTop: 26,
+  },
+  statTile: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  statValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 30,
+    letterSpacing: 0.5,
+    color: tokens.colors.textPrimary,
+  },
+  statLabel: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    marginTop: 2,
+  },
+  endSummaryLine: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 26,
+  },
+  notesWrap: {
+    width: '100%',
+    marginTop: 26,
+  },
+  notesInput: {
+    width: '100%',
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+    textAlignVertical: 'top',
+  },
 });
