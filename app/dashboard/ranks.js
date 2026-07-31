@@ -1,135 +1,300 @@
-
-
-
-
-
-
-
-
-
-
-import { View } from 'react-native';
-import { Text } from 'react-native';
-import { ScrollView } from 'react-native';
-import { TouchableOpacity } from 'react-native';
-import { Dimensions } from 'react-native';
-import { Trophy } from 'lucide-react-native';
-import { Medal } from 'lucide-react-native';
-import { Crown } from 'lucide-react-native';
-import { Search } from 'lucide-react-native';
-import { BookOpen } from 'lucide-react-native';
-import { Star } from 'lucide-react-native';
-import { Zap } from 'lucide-react-native';
-import { ArrowLeft } from 'lucide-react-native';
-// SHIFTED LINE 14
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMemo } from 'react';
 import { useRouter } from 'expo-router';
-import { tokens } from '../../theme/tokens';
-import { GlassCard } from '../../components/GlassView';
-import { Circle } from 'react-native-svg';
-import Svg from 'react-native-svg';
+import { ChevronLeft, Award } from 'lucide-react-native';
 
-const RANKS = [
-    { minLevel: 1, title: 'Novato', color: '#8E8E93', icon: Zap, description: '¡El comienzo de tu viaje!' },
-    { minLevel: 5, title: 'Aprendiz', color: '#32ADE6', icon: BookOpen, description: 'Tus bases se están fortaleciendo.' },
-    { minLevel: 10, title: 'Estudiante', color: '#30D158', icon: Star, description: 'Has demostrado constancia.' },
-    { minLevel: 20, title: 'Erudito', color: '#FF9500', icon: Crown, description: 'Eres un referente del saber.' },
-    { minLevel: 30, title: 'Maestro', color: '#FF2D55', icon: Zap, description: 'Dominas el arte del aprendizaje.' },
-    { minLevel: 50, title: 'Leyenda', color: '#BF5AF2', icon: Crown, description: 'Has alcanzado la cima.' },
-];
+import { tokens } from '../../theme/tokens';
+import useUserStore from '../../store/userStore';
+import { RANKS, getRankForLevel, calculateXpForLevel } from '../../services/gamification';
+
+const font = tokens.typography.families.inter;
+
+const formatXp = (value) => Math.round(value).toLocaleString('es-ES');
+
+/**
+ * Ranks are gated by level, and level is a function of XP
+ * (`xp = level² × 100`), so the XP threshold of a rank is exactly the XP of
+ * its `minLevel`. Showing the threshold in XP rather than in levels matches
+ * the design and is the currency the student actually watches go up.
+ */
+const buildLadder = () =>
+  RANKS.map((rank, index) => {
+    const from = calculateXpForLevel(rank.minLevel);
+    const next = RANKS[index + 1];
+    const to = next ? calculateXpForLevel(next.minLevel) : null;
+    return {
+      ...rank,
+      from,
+      to,
+      range: to ? `${formatXp(from)} – ${formatXp(to - 1)} XP` : `${formatXp(from)}+ XP`,
+    };
+  });
+
+function RankRow({ rank, state }) {
+  const locked = state === 'locked';
+  const current = state === 'current';
+  const iconColor = locked ? tokens.colors.textDisabled : rank.color;
+
+  return (
+    <View style={[styles.row, current && styles.rowCurrent]}>
+      <View style={[styles.rowIcon, locked && styles.rowIconLocked]}>
+        <Award
+          size={20}
+          color={iconColor}
+          fill={locked ? 'none' : iconColor}
+          strokeWidth={locked ? 1.75 : 1.5}
+        />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowName, locked && { color: tokens.colors.textDisabled }]}>
+          {rank.title}
+        </Text>
+        <Text style={[styles.rowRange, locked && { color: tokens.colors.textDisabled }]}>
+          {rank.range}
+        </Text>
+      </View>
+      {current ? <Text style={styles.rowBadge}>Actual</Text> : null}
+    </View>
+  );
+}
 
 export default function RanksScreen() {
-    const router = useRouter();
-    const currentLevel = 42; // Mock logic for now
-    const progressPercent = Math.min(Math.round((currentLevel / 50) * 100), 100);
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const gamification = useUserStore((state) => state.gamification);
 
-    const radius = 40;
-    const circumference = 2 * Math.PI * radius;
+  const level = gamification?.level || 1;
+  const xp = gamification?.xp || 0;
 
-    return (
-        <View className="flex-1 bg-background pt-16 px-6">
-            <View className="flex-row justify-between items-center mb-10">
-                <View className="flex-row items-center">
-                    <TouchableOpacity onPress={() => router.back()} className="mr-4">
-                        <ArrowLeft size={24} color="white" />
-                    </TouchableOpacity>
-                    <View>
-                        <Text className="text-textSecondary text-[10px] font-black uppercase tracking-[3px] mb-1">Escalera de</Text>
-                        <Text className="text-4xl font-black text-text tracking-tighter">Rangos</Text>
-                    </View>
-                </View>
-                <TouchableOpacity className="w-11 h-11 rounded-full bg-surface2 border border-white/10 items-center justify-center">
-                    <Search size={20} color="white" />
-                </TouchableOpacity>
+  const ladder = useMemo(buildLadder, []);
+  const current = useMemo(() => getRankForLevel(level), [level]);
+  const currentIndex = ladder.findIndex((rank) => rank.title === current.title);
+  const next = currentIndex >= 0 ? ladder[currentIndex + 1] : null;
+
+  const from = currentIndex >= 0 ? ladder[currentIndex].from : 0;
+  const span = next ? Math.max(1, next.from - from) : 1;
+  const percent = next ? Math.min(100, Math.max(0, ((xp - from) / span) * 100)) : 100;
+
+  return (
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.back}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        >
+          <ChevronLeft size={24} color={tokens.colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Rango del Estudiante</Text>
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.hero}>
+          <View style={styles.heroBadge}>
+            <Award
+              size={48}
+              color={tokens.colors.accent}
+              fill={tokens.colors.accent}
+              strokeWidth={1.5}
+            />
+          </View>
+          <Text style={styles.heroRank}>{current.title}</Text>
+
+          <View style={{ width: '100%' }}>
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${percent}%` }]} />
             </View>
+            <View style={styles.trackLabels}>
+              <Text style={styles.trackValue}>
+                {next ? `${formatXp(xp)} / ${formatXp(next.from)} XP` : `${formatXp(xp)} XP`}
+              </Text>
+              <Text style={styles.trackNext}>
+                {next ? `Siguiente: ${next.title}` : 'Rango máximo'}
+              </Text>
+            </View>
+          </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-                {/* Progress Header - 1:1 with Ranks.jsx */}
-                <View className="items-center mb-12">
-                    <View className="relative items-center justify-center mb-4">
-                        <Svg width={100} height={100}>
-                            <Circle
-                                cx="50" cy="50" r={radius}
-                                stroke="rgba(255,255,255,0.05)" strokeWidth="8" fill="none"
-                            />
-                            <Circle
-                                cx="50" cy="50" r={radius}
-                                stroke={tokens.colors.primary} strokeWidth="8" fill="none"
-                                strokeDasharray={circumference}
-                                strokeDashoffset={circumference * (1 - progressPercent / 100)}
-                                strokeLinecap="round"
-                                transform="rotate(-90 50 50)"
-                            />
-                        </Svg>
-                        <View className="absolute inset-0 items-center justify-center">
-                            <Text className="text-2xl font-black text-white">{progressPercent}%</Text>
-                        </View>
-                    </View>
-                    <Text className="text-textSecondary font-bold">Estás en el nivel <Text className="text-primary font-black">{currentLevel}</Text>. ¡Casi Leyenda!</Text>
-                </View>
-
-                {/* Rank Staircase - Mobile implementation of staircase */}
-                <Text className="text-textTertiary text-[11px] font-black uppercase tracking-[2px] mb-6">Camino a la Maestría</Text>
-
-                {RANKS.map((rank, index) => {
-                    const isLocked = currentLevel < rank.minLevel;
-                    const isActive = currentLevel >= rank.minLevel &&
-                        (!RANKS[index + 1] || currentLevel < RANKS[index + 1].minLevel);
-                    const Icon = rank.icon;
-
-                    return (
-                        <View key={rank.title} className="mb-4">
-                            <GlassCard
-                                className={`rounded-[28px] ${isActive ? 'border-2' : 'border'} ${isActive ? '' : 'opacity-40'}`}
-                                style={isActive ? { borderColor: rank.color } : { borderColor: 'rgba(255,255,255,0.05)' }}
-                                intensity={isActive ? 20 : 5}
-                            >
-                                <View className="flex-row items-center">
-                                    <View
-                                        className="w-12 h-12 rounded-2xl items-center justify-center mr-4"
-                                        style={{ backgroundColor: rank.color }}
-                                    >
-                                        <Icon size={24} color="white" fill={isActive ? "white" : "transparent"} />
-                                    </View>
-                                    <View className="flex-1">
-                                        <View className="flex-row justify-between items-center mb-1">
-                                            <Text className="text-white font-black text-lg">{rank.title}</Text>
-                                            <Text className="text-textTertiary text-[10px] font-bold">NIVEL {rank.minLevel}+</Text>
-                                        </View>
-                                        <Text className="text-textSecondary text-xs font-medium">{rank.description}</Text>
-                                    </View>
-                                    {isActive && (
-                                        <View className="ml-2 bg-white/10 px-3 py-1 rounded-full border border-white/10">
-                                            <Text className="text-white text-[10px] font-black uppercase">ACTIVO</Text>
-                                        </View>
-                                    )}
-                                </View>
-                            </GlassCard>
-                        </View>
-                    );
-                })}
-
-                <View className="h-40" />
-            </ScrollView>
+          <Text style={styles.heroNote}>
+            {next
+              ? 'Sube de rango acumulando XP en tus sesiones de estudio.'
+              : 'Has llegado al final de la escalera. Nada mal.'}
+          </Text>
         </View>
-    );
+
+        <Text style={styles.ladderTitle}>Escalera de rangos</Text>
+        <View style={styles.ladder}>
+          {ladder.map((rank, index) => (
+            <RankRow
+              key={rank.title}
+              rank={rank}
+              state={
+                index === currentIndex ? 'current' : index < currentIndex ? 'reached' : 'locked'
+              }
+            />
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: tokens.colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  back: {
+    width: 40,
+    height: 40,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    textAlign: 'center',
+    fontFamily: font.semibold,
+    fontSize: 17,
+    color: tokens.colors.textPrimary,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+
+  // Hero
+  hero: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
+  heroBadge: {
+    width: 96,
+    height: 96,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accentSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  heroRank: {
+    fontFamily: font.bold,
+    fontSize: 26,
+    color: tokens.colors.textPrimary,
+    marginBottom: 20,
+  },
+  track: {
+    height: 8,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceHover,
+    overflow: 'hidden',
+  },
+  fill: {
+    height: '100%',
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accent,
+  },
+  trackLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    gap: 12,
+    marginTop: 8,
+  },
+  trackValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 16,
+    letterSpacing: 0.5,
+    color: tokens.colors.textPrimary,
+  },
+  trackNext: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  heroNote: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 20,
+  },
+
+  // Ladder
+  ladderTitle: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: tokens.colors.textSecondary,
+    marginTop: 28,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+  ladder: {
+    gap: 10,
+    paddingHorizontal: 20,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    borderRadius: tokens.radius.card,
+  },
+  rowCurrent: {
+    borderColor: tokens.colors.accent,
+  },
+  rowIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accentSoftBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowIconLocked: {
+    backgroundColor: tokens.colors.surfaceHover,
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rowName: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  rowRange: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 14,
+    letterSpacing: 0.5,
+    color: tokens.colors.textSecondary,
+  },
+  rowBadge: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.accent,
+  },
+});

@@ -42,7 +42,6 @@ import useUserStore from '../../store/userStore';
 import Skeleton from '../../components/Skeleton';
 import GradeModal from '../../components/GradeModal';
 import StreakModal from '../../components/StreakModal';
-import LevelProgressModal from '../../components/LevelProgressModal';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
@@ -98,7 +97,6 @@ export default function Dashboard() {
 
   // Modals state
   const [streakModalOpen, setStreakModalOpen] = useState(false);
-  const [levelModalOpen, setLevelModalOpen] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [dayOptionsVisible, setDayOptionsVisible] = useState(false);
   const [gradeModalVisible, setGradeModalVisible] = useState(false);
@@ -529,7 +527,7 @@ export default function Dashboard() {
 
             <TouchableOpacity
               style={styles.statCell}
-              onPress={() => setLevelModalOpen(true)}
+              onPress={() => router.push('/dashboard/ranks')}
               activeOpacity={0.7}
             >
               <Text style={styles.statEmoji}>⚡</Text>
@@ -783,16 +781,6 @@ export default function Dashboard() {
         restDays={userData.restDays}
         restRemaining={userData.restRemaining}
         onStartSession={() => router.push('/dashboard/study')}
-      />
-
-      <LevelProgressModal
-        visible={levelModalOpen}
-        onClose={() => setLevelModalOpen(false)}
-        gamification={{
-          level: userData.level,
-          xp: userData.xp,
-          rank: userData.rank,
-        }}
       />
 
       <EventModal
