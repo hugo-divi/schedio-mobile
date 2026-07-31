@@ -22,7 +22,6 @@ import {
   TrendingUp,
   Check,
   X,
-  Zap,
   User as UserIcon,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -39,7 +38,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import useAuthStore from '../../store/authStore';
 import useUserStore from '../../store/userStore';
-import { RANKS, calculateXpForLevel, calculateXpForNextLevel } from '../../services/gamification';
+import { calculateXpForLevel, calculateXpForNextLevel } from '../../services/gamification';
 import {
   calculateGoldenHour,
   recommendTechnique,
@@ -232,7 +231,6 @@ export default function ProfileScreen() {
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(true);
 
-  const [rankSheet, setRankSheet] = useState(false);
   const [analysisSheet, setAnalysisSheet] = useState(false);
   const [noteSheet, setNoteSheet] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
@@ -565,7 +563,7 @@ export default function ProfileScreen() {
 
             <TouchableOpacity
               activeOpacity={0.8}
-              onPress={() => setRankSheet(true)}
+              onPress={() => router.push('/dashboard/ranks')}
               style={styles.rankPill}
             >
               <Star size={13} color={tokens.colors.accent} fill={tokens.colors.accent} />
@@ -701,44 +699,6 @@ export default function ProfileScreen() {
           </View>
         </View>
       </ScrollView>
-
-      {/* ── Rank ladder ── */}
-      <BottomSheet
-        visible={rankSheet}
-        onClose={() => setRankSheet(false)}
-        title="Camino a la Maestría"
-      >
-        <View style={{ marginTop: 16 }}>
-          {RANKS.map((rank) => {
-            const reached = level >= rank.minLevel;
-            return (
-              <View
-                key={rank.title}
-                style={[styles.rankRow, gamification?.rank === rank.title && styles.rankRowActive]}
-              >
-                <View style={[styles.rankIcon, { backgroundColor: rank.color + '20' }]}>
-                  <Star size={20} color={rank.color} fill={reached ? rank.color : 'transparent'} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text
-                    style={[styles.rankRowTitle, !reached && { color: tokens.colors.textDisabled }]}
-                  >
-                    {rank.title}
-                  </Text>
-                  <Text style={styles.rankRowMeta}>{rank.requirements}</Text>
-                </View>
-                {reached ? (
-                  <Zap
-                    size={16}
-                    color={tokens.colors.premiumText}
-                    fill={tokens.colors.premiumText}
-                  />
-                ) : null}
-              </View>
-            );
-          })}
-        </View>
-      </BottomSheet>
 
       {/* ── Analysis detail ── */}
       <BottomSheet visible={analysisSheet} onClose={() => setAnalysisSheet(false)} title="Análisis">
@@ -1336,39 +1296,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: tokens.colors.textPrimary,
     textAlignVertical: 'top',
-  },
-
-  // Rank sheet
-  rankRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: tokens.radius.card,
-    marginBottom: 8,
-  },
-  rankRowActive: {
-    backgroundColor: tokens.colors.accentSoftBg,
-    borderWidth: 1,
-    borderColor: tokens.colors.accentSoftBorder,
-  },
-  rankIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: tokens.radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rankRowTitle: {
-    fontFamily: font.semibold,
-    fontSize: 15,
-    color: tokens.colors.textPrimary,
-  },
-  rankRowMeta: {
-    fontFamily: font.regular,
-    fontSize: 13,
-    color: tokens.colors.textSecondary,
-    marginTop: 2,
   },
 
   // Analysis sheet
