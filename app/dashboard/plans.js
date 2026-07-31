@@ -82,6 +82,22 @@ const formatTotal = (minutes) => {
   return `${h}h ${m}min`;
 };
 
+/**
+ * `planDiagnostics.unscheduled` holds exams with the minutes still owed after
+ * the scheduler ran out of room — not tasks. Naming the exam and the shortfall
+ * is the whole value of the diagnostic; a bare count told the student nothing
+ * they could act on.
+ */
+const shortfallNote = (unscheduled) => {
+  if (unscheduled.length === 1) {
+    const [only] = unscheduled;
+    const subject = only.subjectName ? ` (${only.subjectName})` : '';
+    return `Faltan ${formatTotal(only.minutesShort)} para cubrir ${only.examName}${subject}.`;
+  }
+  const total = unscheduled.reduce((sum, item) => sum + (item.minutesShort || 0), 0);
+  return `Faltan ${formatTotal(total)} para cubrir ${unscheduled.length} exámenes en los días disponibles.`;
+};
+
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
 function NavArrow({ direction, disabled, onPress, label }) {
@@ -636,11 +652,7 @@ export default function PlansScreen() {
         {/* The scheduler is work-conserving, so leftovers are a real finding
             about the week rather than noise. It was only ever logged. */}
         {weekOffset === 0 && planDiagnostics?.unscheduled?.length > 0 ? (
-          <Text style={styles.diagnosticsNote}>
-            {planDiagnostics.unscheduled.length}{' '}
-            {planDiagnostics.unscheduled.length === 1 ? 'tarea no cupo' : 'tareas no cupieron'} en
-            los días disponibles.
-          </Text>
+          <Text style={styles.diagnosticsNote}>{shortfallNote(planDiagnostics.unscheduled)}</Text>
         ) : null}
       </Card>
 
