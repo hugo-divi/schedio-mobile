@@ -26,6 +26,15 @@ import {
   User as UserIcon,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+  runOnJS,
+  LinearTransition,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { tokens } from '../../theme/tokens';
 import useAuthStore from '../../store/authStore';
@@ -49,6 +58,12 @@ import SectionTitle from '../../components/ui/SectionTitle';
 const font = tokens.typography.families.inter;
 
 const SUBJECT_FALLBACK_COLOR = tokens.colors.textDisabled;
+
+/** The design system's closed subject palette, in the order it defines them. */
+const SUBJECT_PALETTE = Object.values(tokens.colors.subjects);
+
+const SWIPE_REVEAL = 88;
+const SWIPE_COMMIT = 56;
 
 const initialOf = (name) => (name || '?').charAt(0).toUpperCase();
 
@@ -100,13 +115,56 @@ function SubjectTile({ subject, onPress }) {
   );
 }
 
-function NoteRow({ note, last, onDelete }) {
+/** Row that slides left to reveal a delete action. */
+function SwipeToDelete({ onDelete, children }) {
+  const dx = useSharedValue(0);
+
+  const pan = Gesture.Pan()
+    // Only claim the gesture once it's clearly horizontal, so the sheet's own
+    // scroll keeps its vertical drag.
+    .activeOffsetX([-14, 14])
+    .failOffsetY([-10, 10])
+    .onUpdate((event) => {
+      dx.value = Math.min(0, Math.max(event.translationX, -SWIPE_REVEAL));
+    })
+    .onEnd(() => {
+      if (dx.value < -SWIPE_COMMIT) {
+        dx.value = withTiming(-400, { duration: 180 }, (finished) => {
+          if (finished) runOnJS(onDelete)();
+        });
+      } else {
+        dx.value = withSpring(0, { damping: 20, stiffness: 220 });
+      }
+    });
+
+  const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: dx.value }] }));
+
+  return (
+    <View style={styles.swipeWrap}>
+      <View style={styles.swipeAction}>
+        <Trash2 size={16} color="#FFFFFF" />
+      </View>
+      <GestureDetector gesture={pan}>
+        <Animated.View style={[styles.swipeContent, rowStyle]}>{children}</Animated.View>
+      </GestureDetector>
+    </View>
+  );
+}
+
+function NoteRow({ note, last, onDelete, onEdit }) {
   return (
     <View style={[styles.noteRow, last && { borderBottomWidth: 0 }]}>
-      <View style={styles.noteBody}>
+      <TouchableOpacity
+        style={styles.noteBody}
+        activeOpacity={0.7}
+        onLongPress={onEdit}
+        delayLongPress={400}
+        accessibilityRole="button"
+        accessibilityHint="Mantén pulsado para editar el apunte"
+      >
         <Text style={styles.noteText}>{note.content}</Text>
         <Text style={styles.noteDate}>{formatNoteDate(note.createdAt)}</Text>
-      </View>
+      </TouchableOpacity>
       <TouchableOpacity
         onPress={onDelete}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -178,12 +236,14 @@ export default function ProfileScreen() {
   const [analysisSheet, setAnalysisSheet] = useState(false);
   const [noteSheet, setNoteSheet] = useState(false);
   const [noteDraft, setNoteDraft] = useState('');
+  const [editingNote, setEditingNote] = useState(null);
   const [savingNote, setSavingNote] = useState(false);
 
   const [subjectSheet, setSubjectSheet] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [editSubName, setEditSubName] = useState('');
   const [editSubDifficulty, setEditSubDifficulty] = useState('5');
+  const [editSubColor, setEditSubColor] = useState(SUBJECT_PALETTE[0]);
   const [subjectExams, setSubjectExams] = useState([]);
   const [editingExamId, setEditingExamId] = useState(null);
   const [tempGrade, setTempGrade] = useState('');
@@ -334,6 +394,9 @@ export default function ProfileScreen() {
     setSelectedSubject(subject);
     setEditSubName(subject?.name ?? '');
     setEditSubDifficulty(String(subject?.difficulty ?? 5));
+    // A subject created before the palette existed keeps whatever colour it
+    // has; the picker just doesn't show any of the eight as selected.
+    setEditSubColor(subject?.color ?? SUBJECT_PALETTE[0]);
     setSubjectExams([]);
     setEditingExamId(null);
     setSubjectSheet(true);
@@ -343,18 +406,11 @@ export default function ProfileScreen() {
     if (!editSubName.trim() || !user?.uid) return;
     const difficulty = parseInt(editSubDifficulty, 10) || 5;
     try {
+      const fields = { name: editSubName.trim(), difficulty, color: editSubColor };
       if (selectedSubject) {
-        await useUserStore
-          .getState()
-          .editSubject(user.uid, selectedSubject.id, { name: editSubName.trim(), difficulty });
+        await useUserStore.getState().editSubject(user.uid, selectedSubject.id, fields);
       } else {
-        await useUserStore
-          .getState()
-          .addSubject(user.uid, {
-            name: editSubName.trim(),
-            difficulty,
-            color: tokens.colors.accent,
-          });
+        await useUserStore.getState().addSubject(user.uid, fields);
       }
       setSubjectSheet(false);
     } catch (error) {
@@ -392,19 +448,49 @@ export default function ProfileScreen() {
     }
   };
 
+  const openNoteSheet = (note = null) => {
+    setEditingNote(note);
+    setNoteDraft(note?.content ?? '');
+    setNoteSheet(true);
+  };
+
   const saveNote = async () => {
     const content = noteDraft.trim();
     if (!content || !user?.uid) return;
     setSavingNote(true);
     try {
-      await useUserStore.getState().addQuickNote(user.uid, content);
+      if (editingNote) {
+        await useUserStore.getState().updateQuickNote(user.uid, editingNote.id, content);
+      } else {
+        await useUserStore.getState().addQuickNote(user.uid, content);
+      }
       setNoteDraft('');
+      setEditingNote(null);
       setNoteSheet(false);
       await loadNotes();
     } catch {
       Alert.alert('Error', 'No se pudo guardar el apunte.');
     } finally {
       setSavingNote(false);
+    }
+  };
+
+  const deleteExamFromHistory = async (exam) => {
+    if (!user?.uid) return;
+    // Optimistic: the row has already slid away by the time this runs.
+    setSubjectExams((prev) => prev.filter((e) => e.id !== exam.id));
+    try {
+      const { deleteExam } = await import('../../services/exams');
+      await deleteExam(exam.id);
+      // The exam carried a grade, so the subject average and anything derived
+      // from the exam list have to be rebuilt.
+      await useUserStore.getState().updateAverageGrade(user.uid);
+      useUserStore.getState().triggerExamRefresh();
+    } catch {
+      setSubjectExams((prev) =>
+        [...prev, exam].sort((a, b) => new Date(b.date) - new Date(a.date))
+      );
+      Alert.alert('Error', 'No se pudo eliminar el examen.');
     }
   };
 
@@ -583,7 +669,7 @@ export default function ProfileScreen() {
           <View>
             <SectionTitle
               right={
-                <IconButton onPress={() => setNoteSheet(true)} accessibilityLabel="Nuevo apunte">
+                <IconButton onPress={() => openNoteSheet()} accessibilityLabel="Nuevo apunte">
                   <FileText size={18} color={tokens.colors.textSecondary} />
                 </IconButton>
               }
@@ -607,6 +693,7 @@ export default function ProfileScreen() {
                     note={note}
                     last={index === notes.length - 1}
                     onDelete={() => deleteNote(note.id)}
+                    onEdit={() => openNoteSheet(note)}
                   />
                 ))
               )}
@@ -726,8 +813,11 @@ export default function ProfileScreen() {
       {/* ── New note ── */}
       <BottomSheet
         visible={noteSheet}
-        onClose={() => setNoteSheet(false)}
-        title="Nuevo apunte"
+        onClose={() => {
+          setNoteSheet(false);
+          setEditingNote(null);
+        }}
+        title={editingNote ? 'Editar apunte' : 'Nuevo apunte'}
         avoidKeyboard
       >
         <TextInput
@@ -741,7 +831,7 @@ export default function ProfileScreen() {
         />
         <View style={{ marginTop: 20 }}>
           <Button
-            title="Guardar apunte"
+            title={editingNote ? 'Guardar cambios' : 'Guardar apunte'}
             fullWidth
             loading={savingNote}
             disabled={!noteDraft.trim()}
@@ -777,6 +867,28 @@ export default function ProfileScreen() {
           placeholderTextColor={tokens.colors.textDisabled}
         />
 
+        {/* A closed palette on purpose: these colours categorise subjects
+            across the whole app, so a free colour wheel would let two subjects
+            end up indistinguishable. */}
+        <Text style={styles.fieldLabel}>Color</Text>
+        <View style={styles.colorRow}>
+          {SUBJECT_PALETTE.map((color) => {
+            const active = color === editSubColor;
+            return (
+              <TouchableOpacity
+                key={color}
+                onPress={() => setEditSubColor(color)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.colorDot, { backgroundColor: color }, active && styles.colorDotOn]}
+              >
+                {active ? <Check size={15} color="#FFFFFF" strokeWidth={3} /> : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
         {selectedSubject ? (
           <>
             <View style={styles.divider} />
@@ -790,56 +902,65 @@ export default function ProfileScreen() {
             {subjectExams.length === 0 ? (
               <Text style={styles.emptyText}>No hay exámenes registrados aún.</Text>
             ) : (
-              subjectExams.map((exam) => (
-                <View key={exam.id} style={styles.examRow}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={styles.examName} numberOfLines={1}>
-                      {exam.name}
-                    </Text>
-                    <Text style={styles.examDate}>
-                      {new Date(exam.date).toLocaleDateString('es-ES', {
-                        day: 'numeric',
-                        month: 'short',
-                      })}
-                    </Text>
-                  </View>
+              <>
+                {subjectExams.map((exam) => (
+                  <Animated.View key={exam.id} layout={LinearTransition.duration(200)}>
+                    <SwipeToDelete onDelete={() => deleteExamFromHistory(exam)}>
+                      <View style={styles.examRow}>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={styles.examName} numberOfLines={1}>
+                            {exam.name}
+                          </Text>
+                          <Text style={styles.examDate}>
+                            {new Date(exam.date).toLocaleDateString('es-ES', {
+                              day: 'numeric',
+                              month: 'short',
+                            })}
+                          </Text>
+                        </View>
 
-                  {editingExamId === exam.id ? (
-                    <View style={styles.examEdit}>
-                      <TextInput
-                        style={styles.gradeInput}
-                        value={tempGrade}
-                        onChangeText={setTempGrade}
-                        keyboardType="numeric"
-                        autoFocus
-                      />
-                      <TouchableOpacity
-                        onPress={() => saveExamGrade(exam.id)}
-                        style={styles.examBtn}
-                      >
-                        <Check size={18} color={tokens.colors.trendUp} />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => setEditingExamId(null)}
-                        style={styles.examBtn}
-                      >
-                        <X size={18} color={tokens.colors.danger} />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={styles.examGrade}
-                      onPress={() => {
-                        setEditingExamId(exam.id);
-                        setTempGrade(String(exam.grade || ''));
-                      }}
-                    >
-                      <Text style={styles.examGradeText}>{exam.grade || '—'}</Text>
-                      <Pencil size={12} color={tokens.colors.textSecondary} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))
+                        {editingExamId === exam.id ? (
+                          <View style={styles.examEdit}>
+                            <TextInput
+                              style={styles.gradeInput}
+                              value={tempGrade}
+                              onChangeText={setTempGrade}
+                              keyboardType="numeric"
+                              autoFocus
+                            />
+                            <TouchableOpacity
+                              onPress={() => saveExamGrade(exam.id)}
+                              style={styles.examBtn}
+                            >
+                              <Check size={18} color={tokens.colors.trendUp} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              onPress={() => setEditingExamId(null)}
+                              style={styles.examBtn}
+                            >
+                              <X size={18} color={tokens.colors.danger} />
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <TouchableOpacity
+                            style={styles.examGrade}
+                            onPress={() => {
+                              setEditingExamId(exam.id);
+                              setTempGrade(String(exam.grade || ''));
+                            }}
+                          >
+                            <Text style={styles.examGradeText}>{exam.grade || '—'}</Text>
+                            <Pencil size={12} color={tokens.colors.textSecondary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </SwipeToDelete>
+                  </Animated.View>
+                ))}
+                <Text style={styles.swipeHint}>
+                  Desliza un examen a la izquierda para eliminarlo.
+                </Text>
+              </>
             )}
           </>
         ) : null}
@@ -1341,6 +1462,43 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 15,
     color: tokens.colors.textPrimary,
+  },
+  colorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  colorDot: {
+    width: 34,
+    height: 34,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorDotOn: {
+    borderColor: tokens.colors.textPrimary,
+  },
+  swipeWrap: {
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  swipeAction: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: tokens.colors.danger,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingRight: 18,
+  },
+  swipeContent: {
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  swipeHint: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+    marginTop: 8,
   },
   gradesHead: {
     flexDirection: 'row',
