@@ -32,6 +32,7 @@ import {
   X,
   FileText,
   Trash2,
+  Settings as Gear,
 } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import * as ImagePicker from 'expo-image-picker';
@@ -271,6 +272,17 @@ export default function ProfileScreen() {
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 40 }}>
       {/* Header / Avatar Section */}
       <View style={styles.header}>
+        {/* Settings existed as a screen but nothing linked to it, which meant
+            there was no way to sign out anywhere in the app. */}
+        <TouchableOpacity
+          onPress={() => router.push('/settings')}
+          style={styles.settingsBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Ajustes"
+        >
+          <Gear size={22} color="#8E8E93" />
+        </TouchableOpacity>
+
         <TouchableOpacity onPress={pickImage} style={styles.avatarContainer}>
           {profile?.photoURL ? (
             <Image source={{ uri: profile.photoURL }} style={styles.avatar} />
@@ -776,6 +788,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 60,
     paddingBottom: 30,
+  },
+  settingsBtn: {
+    position: 'absolute',
+    top: 56,
+    right: 24,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
   avatarContainer: {
     position: 'relative',
