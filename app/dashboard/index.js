@@ -810,15 +810,16 @@ export default function Dashboard() {
         onClose={() => setDayOptionsVisible(false)}
         date={selectedDate}
         events={eventsForSelectedDay}
+        subjects={subjects}
         onAddNew={() => {
           setDayOptionsVisible(false);
           setSelectedEvent(null);
-          setTimeout(() => setEventModalVisible(true), 100);
+          setTimeout(() => setEventModalVisible(true), 220);
         }}
         onEditEvent={(event) => {
           setDayOptionsVisible(false);
           setSelectedEvent(event);
-          setTimeout(() => setEventModalVisible(true), 100);
+          setTimeout(() => setEventModalVisible(true), 220);
         }}
       />
 
