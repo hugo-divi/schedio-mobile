@@ -114,8 +114,11 @@ export default function Login() {
         >
           <Animated.View entering={FadeIn.duration(400)} style={styles.brand}>
             <View style={styles.logoBadge}>
+              {/* The brand mark, not the launcher icon: assets/icon.png is the
+                  rounded app tile and reads as a screenshot of the app inside
+                  its own login screen. */}
               <Image
-                source={require('../assets/icon.png')}
+                source={require('../assets/images/schedio-mark.png')}
                 style={styles.logo}
                 resizeMode="contain"
               />
@@ -235,8 +238,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   logo: {
-    width: 42,
-    height: 42,
+    width: 34,
+    height: 34,
   },
   brandName: {
     fontFamily: font.bold,
