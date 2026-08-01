@@ -1,77 +1,139 @@
+import { useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   Switch,
-  StyleSheet,
-  Alert,
   Modal,
   TextInput,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
-import { useState } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import {
   ChevronLeft,
-  User,
+  ChevronRight,
+  Crown,
   Mail,
-  Lock,
+  KeyRound,
   CreditCard,
-  LogOut,
+  Bell,
+  Star,
+  Shield,
+  ScrollText,
   MessageSquare,
   Briefcase,
-  Moon,
-  Bell,
-  ChevronRight,
-  Star,
-  Sliders,
-  TrendingUp,
   Trash2,
+  LogOut,
 } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+
 import { auth } from '../services/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { deleteAccount, usesPasswordSignIn } from '../services/account';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
-import useThemeStore from '../store/themeStore';
 import usePreferencesStore from '../store/preferencesStore';
 import { tokens } from '../theme/tokens';
+import { openLegal } from '../constants/legal';
 import CustomAlert from '../components/CustomAlert';
+
+const font = tokens.typography.families.inter;
+
+const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
+
+// ── Pieces ──────────────────────────────────────────────────────────────────
+
+function Group({ title, children }) {
+  const rows = (Array.isArray(children) ? children : [children]).filter(Boolean);
+  return (
+    <View style={styles.group}>
+      {title ? <Text style={styles.groupTitle}>{title}</Text> : null}
+      <View style={styles.groupBody}>
+        {rows.map((row, index) => (
+          <View key={index} style={index ? styles.rowDivider : null}>
+            {row}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function Row({ icon: Icon, label, sub, control, danger, onPress }) {
+  const colour = danger ? tokens.colors.danger : tokens.colors.textPrimary;
+  return (
+    <TouchableOpacity
+      activeOpacity={onPress ? 0.7 : 1}
+      onPress={onPress}
+      disabled={!onPress}
+      style={styles.row}
+      accessibilityRole="button"
+    >
+      <View style={styles.rowIcon}>
+        <Icon
+          size={18}
+          strokeWidth={1.75}
+          color={danger ? tokens.colors.danger : tokens.colors.textSecondary}
+        />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowLabel, { color: colour }]}>{label}</Text>
+        {sub ? (
+          <Text style={styles.rowSub} numberOfLines={1}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      {control ||
+        (onPress ? (
+          <ChevronRight
+            size={18}
+            strokeWidth={1.75}
+            color={danger ? tokens.colors.danger : tokens.colors.textSecondary}
+          />
+        ) : null)}
+    </TouchableOpacity>
+  );
+}
+
+function Toggle({ value, onValueChange }) {
+  return (
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      trackColor={{ false: tokens.colors.surfaceHover, true: tokens.colors.accent }}
+      thumbColor="#FFFFFF"
+    />
+  );
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const clearUser = useAuthStore((state) => state.clearUser);
-  const { isDarkMode } = useThemeStore();
-  const { autoGradePrompt, toggleAutoGradePrompt } = usePreferencesStore();
+  const insets = useSafeAreaInsets();
   const user = auth.currentUser;
 
-  const theme = isDarkMode ? tokens.colors.dark : tokens.colors.light;
+  const clearUser = useAuthStore((state) => state.clearUser);
+  const isPrime = useAuthStore((state) => state.isPrime);
+  const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
+  const setAutoGradePrompt = usePreferencesStore((state) => state.setAutoGradePrompt);
+  const notificationsEnabled = usePreferencesStore((state) => state.notificationsEnabled);
+  const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
 
-  const [alertConfig, setAlertConfig] = useState({
-    visible: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-    cancelText: 'Cancelar',
-    confirmText: 'OK',
-    isDestructive: false,
-    singleButton: false,
-  });
+  const [alertConfig, setAlertConfig] = useState({ visible: false });
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
-  const showAlert = (config) => {
-    setAlertConfig({
-      ...config,
-      visible: true,
-    });
-  };
+  const showAlert = (config) => setAlertConfig({ ...config, visible: true });
+  const closeAlert = () => setAlertConfig((prev) => ({ ...prev, visible: false }));
 
-  const closeAlert = () => {
-    setAlertConfig((prev) => ({ ...prev, visible: false }));
-  };
-
-  const handleLogout = async () => {
+  const handleLogout = () =>
     showAlert({
       title: 'Cerrar sesión',
       message: '¿Estás seguro de que quieres salir?',
@@ -88,13 +150,51 @@ export default function SettingsScreen() {
         }
       },
     });
+
+  const handleResetPassword = () => {
+    if (!user?.email) return;
+    showAlert({
+      title: 'Cambiar contraseña',
+      message: `¿Enviar un correo a ${user.email} para restablecerla?`,
+      confirmText: 'Enviar correo',
+      onConfirm: async () => {
+        closeAlert();
+        try {
+          await sendPasswordResetEmail(auth, user.email);
+          setTimeout(
+            () =>
+              showAlert({
+                title: 'Correo enviado',
+                message: 'Revisa tu bandeja de entrada para restablecer la contraseña.',
+                singleButton: true,
+                onConfirm: closeAlert,
+              }),
+            300
+          );
+        } catch (error) {
+          console.error('Error resetting password:', error);
+          setTimeout(
+            () =>
+              showAlert({
+                title: 'Error',
+                message: 'No se pudo enviar el correo. Inténtalo de nuevo.',
+                singleButton: true,
+                onConfirm: closeAlert,
+              }),
+            300
+          );
+        }
+      },
+    });
   };
 
-  // ── Borrado de cuenta (Checkpoint 1) ──
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deletePassword, setDeletePassword] = useState('');
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState('');
+  const comingSoon = (what) =>
+    showAlert({
+      title: what,
+      message: 'Estará disponible próximamente.',
+      singleButton: true,
+      onConfirm: closeAlert,
+    });
 
   const openDelete = () => {
     setDeletePassword('');
@@ -111,8 +211,8 @@ export default function SettingsScreen() {
     setDeleteError('');
     try {
       await deleteAccount(deletePassword);
-      // The auth user is gone; drop the cached data so the next account
-      // to sign in on this device doesn't inherit it.
+      // The auth user is gone; drop the cached data so the next account to
+      // sign in on this device doesn't inherit it.
       useUserStore.getState().clearData();
       clearUser();
       setDeleteOpen(false);
@@ -131,223 +231,100 @@ export default function SettingsScreen() {
     }
   };
 
-  const handleResetPassword = async () => {
-    if (!user?.email) return;
-
-    showAlert({
-      title: 'Restablecer contraseña',
-      message: `¿Enviar un correo a ${user.email} para restablecer tu contraseña?`,
-      confirmText: 'Enviar correo',
-      onConfirm: async () => {
-        closeAlert();
-        try {
-          await sendPasswordResetEmail(auth, user.email);
-          setTimeout(() => {
-            showAlert({
-              title: 'Correo enviado',
-              message: 'Revisa tu bandeja de entrada para restablecer la contraseña.',
-              singleButton: true,
-              onConfirm: closeAlert,
-            });
-          }, 300);
-        } catch (error) {
-          console.error('Error resetting password:', error);
-          setTimeout(() => {
-            showAlert({
-              title: 'Error',
-              message: 'No se pudo enviar el correo. Inténtalo de nuevo.',
-              singleButton: true,
-              onConfirm: closeAlert,
-            });
-          }, 300);
-        }
-      },
-    });
-  };
-
-  const handleOpenLink = (url) => {
-    showAlert({
-      title: 'Próximamente',
-      message: 'Esta funcionalidad estará disponible en la versión web.',
-      singleButton: true,
-      onConfirm: closeAlert,
-    });
-  };
-
-  const SectionHeader = ({ title }) => (
-    <Text style={[styles.sectionHeader, { color: theme.textSecondary }]}>{title}</Text>
-  );
-
-  const SettingItem = ({ icon: Icon, title, subtitle, onPress, rightElement, isDestructive }) => (
-    <TouchableOpacity
-      style={styles.itemContainer}
-      onPress={onPress}
-      activeOpacity={onPress ? 0.7 : 1}
-    >
-      <View style={styles.itemLeft}>
-        <View
-          style={[
-            styles.iconBox,
-            isDestructive
-              ? styles.iconBoxDestructive
-              : { backgroundColor: isDarkMode ? '#2C2C2E' : '#E5E5EA' },
-          ]}
-        >
-          <Icon size={20} color={isDestructive ? '#FF453A' : theme.text} />
-        </View>
-        <View>
-          <Text style={[styles.itemTitle, { color: isDestructive ? '#FF453A' : theme.text }]}>
-            {title}
-          </Text>
-          {subtitle && (
-            <Text style={[styles.itemSubtitle, { color: theme.textSecondary }]}>{subtitle}</Text>
-          )}
-        </View>
-      </View>
-      <View style={styles.itemRight}>
-        {rightElement || <ChevronRight size={20} color={theme.textSecondary} />}
-      </View>
-    </TouchableOpacity>
-  );
+  const canConfirmDelete = usesPasswordSignIn(user) && !!deletePassword && !deleting;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Header */}
-      <View
-        style={[
-          styles.header,
-          { backgroundColor: theme.background, borderBottomColor: theme.border },
-        ]}
-      >
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={[styles.backButton, { backgroundColor: theme.cardSecondary }]}
+          style={styles.back}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
         >
-          <ChevronLeft size={24} color={theme.text} />
+          <ChevronLeft size={22} color={tokens.colors.textPrimary} strokeWidth={1.75} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: theme.text }]}>Configuración</Text>
-        <View style={{ width: 40 }} />
+        <Text style={styles.headerTitle}>Configuración</Text>
+        <View style={styles.back} />
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Schedio Prime CTA */}
-        <TouchableOpacity
-          style={styles.premiumCard}
-          activeOpacity={0.9}
-          onPress={() => router.push('/plus')}
-        >
-          <LinearGradient
-            colors={['#FFD60A', '#FF9F0A']}
-            style={styles.premiumGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* No point selling Prime to somebody who already has it. */}
+        {isPrime ? null : (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/plus')}
+            style={styles.primeBanner}
           >
-            <View style={styles.premiumContent}>
-              <View style={styles.premiumIcon}>
-                <TrendingUp size={24} color="#000000" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.premiumTitle}>Actualizar a Schedio Prime</Text>
-                <Text style={styles.premiumSubtitle}>Organiza todo con IA</Text>
-              </View>
-              <ChevronRight size={20} color="#000000" />
+            <View style={styles.primeIcon}>
+              <Crown size={21} strokeWidth={1.75} color={tokens.colors.premiumText} />
             </View>
-          </LinearGradient>
-        </TouchableOpacity>
+            <View style={styles.rowBody}>
+              <Text style={styles.primeTitle}>Actualizar a Schedio Prime</Text>
+              <Text style={styles.primeSub}>Desbloquea todo el potencial de tu estudio</Text>
+            </View>
+            <ChevronRight size={18} strokeWidth={1.75} color={tokens.colors.premiumText} />
+          </TouchableOpacity>
+        )}
 
-        {/* Account Section */}
-        <SectionHeader title="Cuenta" />
-        <View style={[styles.sectionContainer, { backgroundColor: theme.card }]}>
-          <SettingItem
-            icon={Mail}
-            title="Correo electrónico"
-            subtitle={user?.email || 'No disponible'}
-            onPress={() =>
-              showAlert({
-                title: 'Correo',
-                message: 'Tu correo está vinculado a tu cuenta de Google/Firebase.',
-                singleButton: true,
-                onConfirm: closeAlert,
-              })
-            }
-          />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <SettingItem icon={Lock} title="Cambiar contraseña" onPress={handleResetPassword} />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <SettingItem
+        <Group title="Cuenta">
+          <Row icon={Mail} label="Correo electrónico" sub={user?.email || 'No disponible'} />
+          <Row icon={KeyRound} label="Cambiar contraseña" onPress={handleResetPassword} />
+          <Row
             icon={CreditCard}
-            title="Suscripción"
-            subtitle="Plan Gratuito"
-            onPress={() => {}}
+            label="Suscripción"
+            sub={isPrime ? 'Schedio Prime' : 'Plan Gratuito'}
+            onPress={() => router.push('/plus')}
           />
-        </View>
+        </Group>
 
-        {/* Preferences Section */}
-        <SectionHeader title="Preferencias" />
-        <View style={[styles.sectionContainer, { backgroundColor: theme.card }]}>
-          <SettingItem
+        <Group title="Preferencias">
+          <Row
             icon={Bell}
-            title="Notificaciones"
-            rightElement={
-              <Switch
-                value={true}
-                onValueChange={() => {}}
-                trackColor={{ false: '#E5E5EA', true: '#30D158' }}
-                thumbColor={'#FFFFFF'}
-              />
+            label="Notificaciones"
+            sub="Recordatorios de exámenes y racha"
+            control={
+              <Toggle value={notificationsEnabled} onValueChange={setNotificationsEnabled} />
             }
           />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <SettingItem
-            icon={Sliders}
-            title="Prompt de Calificación"
-            subtitle="Preguntar nota al finalizar"
-            rightElement={
-              <Switch
-                value={autoGradePrompt}
-                onValueChange={toggleAutoGradePrompt}
-                trackColor={{ false: '#E5E5EA', true: '#30D158' }}
-                thumbColor={'#FFFFFF'}
-              />
-            }
+          <Row
+            icon={Star}
+            label="Prompt de calificación"
+            sub="Preguntar nota al finalizar"
+            control={<Toggle value={autoGradePrompt} onValueChange={setAutoGradePrompt} />}
           />
-        </View>
+        </Group>
 
-        {/* Comms Section */}
-        <SectionHeader title="Comunidad" />
-        <View style={[styles.sectionContainer, { backgroundColor: theme.card }]}>
-          <SettingItem
+        {/* Checkpoint 1, item 4 — its other half: the policies have to be
+            reachable from inside the app, not only from registration. */}
+        <Group title="Legal y privacidad">
+          <Row icon={Shield} label="Política de privacidad" onPress={() => openLegal('privacy')} />
+          <Row icon={ScrollText} label="Términos de servicio" onPress={() => openLegal('terms')} />
+        </Group>
+
+        <Group title="Comunidad">
+          <Row
             icon={MessageSquare}
-            title="Enviar Feedback"
-            onPress={() => handleOpenLink('feedback')}
+            label="Enviar feedback"
+            onPress={() => comingSoon('Enviar feedback')}
           />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <SettingItem
+          <Row
             icon={Briefcase}
-            title="Trabaja con nosotros"
-            onPress={() => handleOpenLink('jobs')}
+            label="Trabaja con nosotros"
+            onPress={() => comingSoon('Trabaja con nosotros')}
           />
-        </View>
+        </Group>
 
-        {/* Danger Zone */}
-        <View
-          style={[styles.sectionContainer, styles.marginTop24, { backgroundColor: theme.card }]}
-        >
-          <SettingItem icon={LogOut} title="Cerrar sesión" isDestructive onPress={handleLogout} />
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-          <SettingItem
-            icon={Trash2}
-            title="Eliminar cuenta"
-            subtitle="Borra tu cuenta y todos tus datos"
-            isDestructive
-            onPress={openDelete}
-          />
-        </View>
+        <Group>
+          <Row icon={Trash2} label="Eliminar cuenta" danger onPress={openDelete} />
+          <Row icon={LogOut} label="Cerrar sesión" danger onPress={handleLogout} />
+        </Group>
 
-        <Text style={[styles.versionText, { color: theme.textSecondary }]}>
-          Versión 1.0.0 (MVP)
-        </Text>
-        <View style={{ height: 40 }} />
+        <Text style={styles.version}>Versión {APP_VERSION} (MVP)</Text>
       </ScrollView>
 
       <Modal
@@ -357,47 +334,43 @@ export default function SettingsScreen() {
         onRequestClose={() => !deleting && setDeleteOpen(false)}
       >
         <View style={styles.deleteOverlay}>
-          <View style={[styles.deleteCard, { backgroundColor: theme.card }]}>
+          <View style={styles.deleteCard}>
             <View style={styles.deleteIcon}>
-              <Trash2 size={26} color="#FF453A" />
+              <Trash2 size={26} color={tokens.colors.danger} strokeWidth={1.75} />
             </View>
-            <Text style={[styles.deleteTitle, { color: theme.text }]}>Eliminar cuenta</Text>
-            <Text style={[styles.deleteBody, { color: theme.textSecondary }]}>
+            <Text style={styles.deleteTitle}>Eliminar cuenta</Text>
+            <Text style={styles.deleteBody}>
               Se borrarán tu cuenta y todos tus datos: materias, sesiones de estudio, exámenes y
               notas, apuntes rápidos y los archivos de tu mochila. Esta acción no se puede deshacer.
             </Text>
 
-            {usesPasswordSignIn(user) && (
+            {usesPasswordSignIn(user) ? (
               <TextInput
-                style={[styles.deleteInput, { color: theme.text, borderColor: theme.border }]}
+                style={styles.deleteInput}
                 placeholder="Confirma con tu contraseña"
-                placeholderTextColor={theme.textSecondary}
+                placeholderTextColor={tokens.colors.textDisabled}
                 secureTextEntry
                 autoCapitalize="none"
                 value={deletePassword}
                 onChangeText={setDeletePassword}
                 editable={!deleting}
               />
-            )}
+            ) : null}
 
             {deleteError ? <Text style={styles.deleteError}>{deleteError}</Text> : null}
 
             <View style={styles.deleteActions}>
               <TouchableOpacity
-                style={[styles.deleteCancel, { borderColor: theme.border }]}
+                style={styles.deleteCancel}
                 onPress={() => setDeleteOpen(false)}
                 disabled={deleting}
               >
-                <Text style={[styles.deleteCancelText, { color: theme.text }]}>Cancelar</Text>
+                <Text style={styles.deleteCancelText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[
-                  styles.deleteConfirm,
-                  (deleting || !usesPasswordSignIn(user) || !deletePassword) &&
-                    styles.deleteConfirmDisabled,
-                ]}
+                style={[styles.deleteConfirm, !canConfirmDelete && styles.deleteConfirmOff]}
                 onPress={handleDeleteAccount}
-                disabled={deleting || !usesPasswordSignIn(user) || !deletePassword}
+                disabled={!canConfirmDelete}
               >
                 {deleting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
@@ -414,8 +387,8 @@ export default function SettingsScreen() {
         visible={alertConfig.visible}
         title={alertConfig.title}
         message={alertConfig.message}
-        cancelText={alertConfig.cancelText}
-        confirmText={alertConfig.confirmText}
+        cancelText={alertConfig.cancelText || 'Cancelar'}
+        confirmText={alertConfig.confirmText || 'OK'}
         onCancel={closeAlert}
         onConfirm={alertConfig.onConfirm}
         isDestructive={alertConfig.isDestructive}
@@ -426,9 +399,139 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: tokens.colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
+  },
+  back: {
+    width: 44,
+    height: 44,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontFamily: font.semibold,
+    fontSize: 17,
+    color: tokens.colors.textPrimary,
+  },
+  scroll: {
+    flex: 1,
+  },
+  content: {
+    gap: 32,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 32,
+  },
+
+  // Prime
+  primeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
+    borderRadius: tokens.radius.card,
+  },
+  primeIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.premiumBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primeTitle: {
+    fontFamily: font.semibold,
+    fontSize: 16,
+    color: tokens.colors.textPrimary,
+  },
+  primeSub: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+    marginTop: 3,
+  },
+
+  // Groups
+  group: {
+    gap: 10,
+  },
+  groupTitle: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: tokens.colors.textSecondary,
+    paddingLeft: 4,
+  },
+  groupBody: {
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    borderRadius: tokens.radius.card,
+    overflow: 'hidden',
+  },
+  rowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: tokens.colors.borderDefault,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    minHeight: 44,
+  },
+  rowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.surfaceHover,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rowLabel: {
+    fontFamily: font.medium,
+    fontSize: 15,
+  },
+  rowSub: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  version: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+    textAlign: 'center',
+  },
+
+  // Delete account
   deleteOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -436,27 +539,33 @@ const styles = StyleSheet.create({
   deleteCard: {
     width: '100%',
     maxWidth: 360,
-    borderRadius: 20,
     padding: 24,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
     alignItems: 'center',
   },
   deleteIcon: {
     width: 56,
     height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 69, 58, 0.14)',
+    borderRadius: tokens.radius.pill,
+    backgroundColor: 'rgba(216, 96, 74, 0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
   },
   deleteTitle: {
+    fontFamily: font.bold,
     fontSize: 20,
-    fontWeight: '700',
+    color: tokens.colors.textPrimary,
     marginBottom: 8,
   },
   deleteBody: {
+    fontFamily: font.regular,
     fontSize: 14,
     lineHeight: 20,
+    color: tokens.colors.textSecondary,
     textAlign: 'center',
   },
   deleteInput: {
@@ -464,16 +573,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 12,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.background,
     borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    fontFamily: font.regular,
     fontSize: 15,
+    color: tokens.colors.textPrimary,
   },
   deleteError: {
     width: '100%',
     marginTop: 10,
-    color: '#FF453A',
+    fontFamily: font.medium,
     fontSize: 13,
     lineHeight: 18,
+    color: tokens.colors.danger,
   },
   deleteActions: {
     flexDirection: 'row',
@@ -484,145 +598,29 @@ const styles = StyleSheet.create({
   deleteCancel: {
     flex: 1,
     paddingVertical: 13,
-    borderRadius: 12,
+    borderRadius: tokens.radius.btn,
     borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
     alignItems: 'center',
   },
   deleteCancelText: {
+    fontFamily: font.semibold,
     fontSize: 15,
-    fontWeight: '600',
+    color: tokens.colors.textPrimary,
   },
   deleteConfirm: {
     flex: 1,
     paddingVertical: 13,
-    borderRadius: 12,
-    backgroundColor: '#FF453A',
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.danger,
     alignItems: 'center',
   },
-  deleteConfirmDisabled: {
+  deleteConfirmOff: {
     opacity: 0.45,
   },
   deleteConfirmText: {
+    fontFamily: font.semibold,
     fontSize: 15,
-    fontWeight: '700',
     color: '#FFFFFF',
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 60,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 20,
-  },
-  headerTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  premiumCard: {
-    marginBottom: 24,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  premiumGradient: {
-    padding: 1,
-    borderRadius: 16,
-  },
-  premiumContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-  },
-  premiumIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  premiumTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  premiumSubtitle: {
-    fontSize: 13,
-    color: '#000000',
-    opacity: 0.8,
-  },
-  sectionHeader: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    marginLeft: 16,
-  },
-  sectionContainer: {
-    borderRadius: 12,
-    marginBottom: 24,
-    overflow: 'hidden',
-  },
-  itemContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    minHeight: 56,
-  },
-  itemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  iconBox: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconBoxDestructive: {
-    backgroundColor: 'rgba(255, 69, 58, 0.1)',
-  },
-  itemTitle: {
-    fontSize: 16,
-  },
-  textDestructive: {
-    color: '#FF453A',
-  },
-  itemSubtitle: {
-    fontSize: 13,
-    marginTop: 2,
-  },
-  divider: {
-    height: 1,
-    marginLeft: 60,
-  },
-  marginTop24: {
-    marginTop: 0,
-  },
-  versionText: {
-    textAlign: 'center',
-    fontSize: 13,
-    marginTop: 0,
-    marginBottom: 20,
   },
 });

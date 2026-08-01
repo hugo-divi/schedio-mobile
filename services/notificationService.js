@@ -2,6 +2,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { db } from './firebase';
 import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import usePreferencesStore from '../store/preferencesStore';
 
 // Configure how notifications should be handled when the app is open.
 // `shouldShowAlert` was deprecated in favour of the banner/list pair.
@@ -111,6 +112,9 @@ function getUniqueMessage(type, subject, log = []) {
  */
 export async function scheduleExamReminders(userId, exams, notificationLog = []) {
   if (Platform.OS === 'web' || !userId) return;
+  // Respects the notifications switch in settings, which until now was a
+  // decoration: it rendered `value={true}` with an empty handler.
+  if (!usePreferencesStore.getState().notificationsEnabled) return;
 
   // Cancel previous to avoid doubles (simplest way to sync)
   // In a real app we'd be more surgical but this is safe for a v1
@@ -176,6 +180,7 @@ async function logNotification(userId, type, examId = null) {
  */
 export async function schedulePanicModeAlert(userId, exam, log = []) {
   if (Platform.OS === 'web' || !userId) return;
+  if (!usePreferencesStore.getState().notificationsEnabled) return;
   if (sentToday(log, 'panic_mode', exam.id)) return;
 
   const body = getUniqueMessage('panic_mode', exam.subject, log);
@@ -196,6 +201,7 @@ export async function schedulePanicModeAlert(userId, exam, log = []) {
  */
 export async function scheduleInactivityReminder(userId, lastLoginDate, hasActiveExams, log = []) {
   if (Platform.OS === 'web' || !userId || !hasActiveExams) return;
+  if (!usePreferencesStore.getState().notificationsEnabled) return;
 
   const now = new Date();
   const lastLogin = new Date(lastLoginDate);
