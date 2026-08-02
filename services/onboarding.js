@@ -149,16 +149,21 @@ export const estimatePotential = ({
 
   // Scaled by how much room is left between here and a 10, with a small floor
   // so a well-organised student isn't told the app does nothing for them.
+  //
+  // K was raised from 1.3 to 1.9 after the first pass read as too timid: a
+  // student at 6 was shown roughly +0,5, which undersold what better habits
+  // plausibly buy. Headroom is what keeps that increase honest — the same
+  // habits push a 6 far more than a 9, because there's more slack to recover.
   const headroom = Math.max(0, (10 - grade) / 10);
-  const uplift = Math.max(0.2, rawUplift * headroom * 1.3);
+  const gain = Math.max(0.15, rawUplift * headroom * 1.9);
 
   // Never claim more than 60% of the gap that is actually left. Without this,
   // bad habits on a 9,5 came out as a promised 10.
   const ceiling = grade + (10 - grade) * 0.6;
 
   const round = (n) => Math.round(Math.min(10, Math.min(ceiling, n)) * 10) / 10;
-  const low = round(grade + uplift * 0.55);
-  const high = round(grade + uplift);
+  const low = round(grade + gain * 0.7);
+  const high = round(grade + gain * 1.3);
 
   const reasons = [];
   if (taskManagement === 'memory' || taskManagement === 'scattered') {
