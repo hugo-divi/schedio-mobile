@@ -218,6 +218,21 @@ const useUserStore = create((set, get) => ({
     }
   },
 
+  updateQuickNote: async (uid, noteId, content) => {
+    try {
+      // `createdAt` is deliberately untouched: the list is ordered by it, and
+      // fixing a typo should not jump a note to the top.
+      await updateDoc(doc(db, 'users', uid, 'notes', noteId), {
+        content,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Error updating quick note:', error);
+      throw error;
+    }
+  },
+
   canUpload: () => {
     const { uploadsHistory, profile } = get();
     // Entitlement comes from RevenueCat (see authStore), never from Firestore.

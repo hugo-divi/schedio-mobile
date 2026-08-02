@@ -28,6 +28,22 @@ const palette = {
   premiumText: '#D4A94C',
   premiumBg: 'rgba(212, 169, 76, 0.12)',
   premiumBorder: 'rgba(212, 169, 76, 0.3)',
+  /**
+   * Closed palette for subject labels, one fixed tone each — mirrors
+   * tokens/subjects.css in the design system. Desaturated for the dark
+   * background: these categorise, they don't decorate, so the student picks
+   * from these eight rather than from a free colour wheel.
+   */
+  subjects: {
+    tecno: '#2FA4A6',
+    historia: '#C9922F',
+    filosofia: '#8A6FD4',
+    quimica: '#3FA76B',
+    mates: '#E0705A',
+    tic: '#4C9BE0',
+    ingles: '#D46A9A',
+    lengua: '#6C6FD4',
+  },
   // Semantic exceptions — restricted use, never decorative.
   trendUp: '#5AB98A',
   danger: '#D8604A',
