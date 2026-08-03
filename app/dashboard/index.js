@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { ChevronRight, HelpCircle, Plus, Trophy } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -29,6 +29,7 @@ import {
   updateExam,
   deleteExam,
 } from '../../services/exams';
+import { rankExams, summarizeStudyLoad, HIGH_PRIORITY_SCORE } from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
 import usePreferencesStore from '../../store/preferencesStore';
 import {
@@ -61,14 +62,15 @@ const FOCUS_REFETCH_MS = 60_000;
 export default function Dashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { autoGradePrompt } = usePreferencesStore();
-  const { updateAverageGrade } = useUserStore();
+  const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
 
   const [refreshing, setRefreshing] = useState(false);
   const [userData, setUserData] = useState({
     streak: 0,
     dailyActivity: 0,
     maxStreak: 0,
+    restDays: [],
+    restRemaining: 2,
     level: 1,
     xp: 0,
     rank: 'Aprendiz',
@@ -76,7 +78,11 @@ export default function Dashboard() {
   const [profile, setProfile] = useState(null);
   const [exams, setExams] = useState([]);
   const [pendingExams, setPendingExams] = useState([]);
-  const { subjects, loadUserData, sessionHistory, loadSessionHistory } = useUserStore();
+  // One selector per slice: destructuring the store subscribed this screen to
+  // every write in it, so unrelated changes redrew the whole dashboard. The
+  // actions are stable, so they're read through getState() at the call site.
+  const subjects = useUserStore((state) => state.subjects);
+  const sessionHistory = useUserStore((state) => state.sessionHistory);
   // Already normalised by the store (raw doc keeps it under `profile.averageGrade`).
   const averageGrade = useUserStore((state) => state.profile?.averageGrade) ?? 0;
   const hasAverage = parseFloat(averageGrade) > 0;
@@ -128,7 +134,10 @@ export default function Dashboard() {
       const user = auth.currentUser;
       if (!user) return;
 
-      if (!refreshing) setLoading(true);
+      // Skeletons are for a screen with nothing on it. Coming back to the tab
+      // refetches in the background, and swapping the content out for
+      // placeholders while it does read as the tab being slow.
+      if (!refreshing && !lastFetchRef.current) setLoading(true);
 
       // Fetch user profile
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
@@ -142,7 +151,7 @@ export default function Dashboard() {
       ]);
 
       // Load subjects and user details via store
-      await loadUserData(user.uid);
+      await useUserStore.getState().loadUserData(user.uid);
 
       setUserData({
         streak: streakData.currentStreak || 0,
@@ -150,6 +159,8 @@ export default function Dashboard() {
         // checkDailyStreak. StreakModal shows both; they were being discarded.
         dailyActivity: streakData.dailyActivity || 0,
         maxStreak: streakData.maxStreak || 0,
+        restDays: streakData.restDays || [],
+        restRemaining: streakData.restRemaining ?? 0,
         level: profileData?.gamification?.level || 1,
         xp: profileData?.gamification?.xp || 0,
         rank: profileData?.gamification?.rank || 'Aprendiz',
@@ -268,8 +279,8 @@ export default function Dashboard() {
   // data/notification flow there stays untouched.
   useEffect(() => {
     const user = auth.currentUser;
-    if (user) loadSessionHistory(user.uid);
-  }, [loadSessionHistory]);
+    if (user) useUserStore.getState().loadSessionHistory(user.uid);
+  }, []);
 
   // Independent effect for the tour to prevent render loops
   useEffect(() => {
@@ -392,7 +403,7 @@ export default function Dashboard() {
       // 2. Trigger Average Recalculation (Global & Subject)
       const user = auth.currentUser;
       if (user) {
-        await updateAverageGrade(user.uid);
+        await useUserStore.getState().updateAverageGrade(user.uid);
       }
 
       await fetchData();
@@ -402,11 +413,22 @@ export default function Dashboard() {
     }
   };
 
-  // Priority chip reflects real urgency instead of the stored default of 5.
-  const isUrgent = (exam) => {
-    const days = Math.ceil((new Date(exam.date) - new Date()) / (1000 * 60 * 60 * 24));
-    return days <= 3 || (exam.priority || 0) >= 8;
-  };
+  // Priority chip reads the computed score, not the stored `priority` field.
+  // That field held whatever the user picked in EventModal and never changed
+  // afterwards, so the chip couldn't react to an exam getting closer, to a bad
+  // grade landing, or to the subject going untouched for a fortnight.
+  const urgentExamIds = useMemo(() => {
+    const ctx = {
+      studiedMinutesBySubject: summarizeStudyLoad(sessionHistory),
+    };
+    return new Set(
+      rankExams(exams, subjects, ctx)
+        .filter((exam) => exam.priorityScore >= HIGH_PRIORITY_SCORE)
+        .map((exam) => exam.id)
+    );
+  }, [exams, subjects, sessionHistory]);
+
+  const isUrgent = (exam) => urgentExamIds.has(exam.id);
 
   const formatShortDate = (date) =>
     new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
@@ -758,6 +780,8 @@ export default function Dashboard() {
         studyHistory={sessionHistory}
         dailyActivity={userData.dailyActivity}
         maxStreak={userData.maxStreak}
+        restDays={userData.restDays}
+        restRemaining={userData.restRemaining}
         onStartSession={() => router.push('/dashboard/study')}
       />
 

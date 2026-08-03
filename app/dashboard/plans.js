@@ -44,20 +44,24 @@ const LIST_TRANSITION = LinearTransition.duration(250);
 
 export default function PlansScreen() {
   const router = useRouter();
-  const { user, isPrime } = useAuthStore();
-  const {
-    microplans,
-    initDailyMicroplans,
-    completeMicroTask,
-    generateAiPlans,
-    postponeMicroTask,
-    deleteMicroTask,
-    addManualTask,
-    loading: storeLoading,
-    resources,
-    addResource,
-    removeResource,
-  } = useUserStore();
+  const user = useAuthStore((state) => state.user);
+  const isPrime = useAuthStore((state) => state.isPrime);
+
+  // One selector per key rather than destructuring the store: destructuring
+  // subscribed this screen to every write, so it redrew whenever anything at
+  // all changed. The action references are stable, so selecting them costs
+  // nothing.
+  const microplans = useUserStore((state) => state.microplans);
+  const storeLoading = useUserStore((state) => state.loading);
+  const resources = useUserStore((state) => state.resources);
+  const initDailyMicroplans = useUserStore((state) => state.initDailyMicroplans);
+  const completeMicroTask = useUserStore((state) => state.completeMicroTask);
+  const generateAiPlans = useUserStore((state) => state.generateAiPlans);
+  const postponeMicroTask = useUserStore((state) => state.postponeMicroTask);
+  const deleteMicroTask = useUserStore((state) => state.deleteMicroTask);
+  const addManualTask = useUserStore((state) => state.addManualTask);
+  const addResource = useUserStore((state) => state.addResource);
+  const removeResource = useUserStore((state) => state.removeResource);
 
   const params = useLocalSearchParams();
   const highlightId = params.highlightId;

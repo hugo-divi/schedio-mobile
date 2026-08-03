@@ -1,10 +1,8 @@
 import { Tabs } from 'expo-router';
-import { Home, Calendar, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native';
+import { Home, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import React, { useState } from 'react';
 import { tokens } from '../../theme/tokens';
-import { LinearGradient } from 'expo-linear-gradient';
-import useThemeStore from '../../store/themeStore';
 import QuickActionsModal from '../../components/QuickActionsModal';
 import EventModal from '../../components/EventModal';
 import UploadModal from '../../components/UploadModal';
@@ -12,41 +10,20 @@ import useUserStore from '../../store/userStore';
 import { auth } from '../../services/firebase';
 
 export default function DashboardLayout() {
-  const { isDarkMode } = useThemeStore();
-  const { subjects } = useUserStore();
+  // Selector form on purpose: this component is the parent of every tab, so a
+  // whole-store subscription re-rendered all of them (and the three modals
+  // below) on any unrelated write.
+  const subjects = useUserStore((state) => state.subjects);
   const [quickActionsVisible, setQuickActionsVisible] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
-  const [completedExams, setCompletedExams] = useState([]);
-  const [examRefreshKey, setExamRefreshKey] = useState(0);
-
-  // Fetch exams for the "grade exam" quick action
-  React.useEffect(() => {
-    const load = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
-      try {
-        const { getCompletedExams, getPendingExams } = await import('../../services/exams');
-        const [completedRes, pendingRes] = await Promise.all([
-          getCompletedExams(user.uid, 20),
-          getPendingExams(user.uid),
-        ]);
-
-        // Combine and deduplicate just in case
-        const combined = [...pendingRes, ...completedRes];
-        const unique = Array.from(new global.Map(combined.map((e) => [e.id, e])).values());
-
-        setCompletedExams(unique);
-      } catch (e) {
-        console.warn('Could not load exams for quick action', e);
-      }
-    };
-    load();
-  }, [examRefreshKey]);
 
   const screenOptions = React.useMemo(
     () => ({
       headerShown: false,
+      // Stops the tabs that aren't on screen from re-rendering. Without it
+      // every store write redrew Perfil and Plan in the background.
+      freezeOnBlur: true,
       sceneContainerStyle: {
         backgroundColor: tokens.colors.background,
       },
@@ -108,6 +85,9 @@ export default function DashboardLayout() {
           name="study"
           options={{
             title: 'Estudiar',
+            // The one tab that must keep running while it isn't on screen: it
+            // owns the session timer.
+            freezeOnBlur: false,
             tabBarIcon: ({ color, focused }) => (
               <BookOpen size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
             ),
@@ -171,8 +151,6 @@ export default function DashboardLayout() {
         onClose={() => setQuickActionsVisible(false)}
         onAddExam={() => setEventModalVisible(true)}
         onAddFile={() => setUploadModalVisible(true)}
-        completedExams={completedExams}
-        onRefresh={() => setExamRefreshKey((k) => k + 1)}
       />
 
       <EventModal

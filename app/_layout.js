@@ -1,6 +1,6 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
 import { configureRevenueCat } from '../services/revenuecat';
@@ -35,11 +35,22 @@ export default function Layout() {
     BebasNeue_400Regular,
   });
 
-  // Don't block the app forever if a font fails to load — render with the
-  // system fallback rather than sitting on the splash screen.
-  const ready = fontsLoaded || !!fontError;
+  // A font download must never be able to brick startup. `useFonts` reports
+  // failures, but it can also just never settle (a stalled asset request), and
+  // gating the render on it meant the app kept running behind a splash screen
+  // that was never dismissed — effects fired, nothing was drawn.
+  const [waitedLongEnough, setWaitedLongEnough] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setWaitedLongEnough(true), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
-  const onLayoutRoot = useCallback(() => {
+  const ready = fontsLoaded || !!fontError || waitedLongEnough;
+
+  // Hide from an effect rather than the root view's onLayout: onLayout depends
+  // on the wrapper forwarding it, and if it doesn't fire the splash stays up
+  // forever. An effect is tied to `ready` itself.
+  useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
 
@@ -69,10 +80,7 @@ export default function Layout() {
   return (
     // Gesture handlers (the sheets' drag-to-dismiss) need this at the root;
     // expo-router doesn't provide it.
-    <GestureHandlerRootView
-      style={{ flex: 1, backgroundColor: tokens.colors.background }}
-      onLayout={onLayoutRoot}
-    >
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: tokens.colors.background }}>
       <Head>
         <meta name="google" content="notranslate" />
       </Head>

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -35,18 +35,11 @@ const VIEW_NOTE = 'note';
 const VIEW_EXAM_GRADE = 'exam_grade';
 const VIEW_GRADE_INPUT = 'grade_input';
 
-export default function QuickActionsModal({
-  visible,
-  onClose,
-  onAddExam,
-  onAddFile,
-  completedExams = [],
-  onRefresh,
-}) {
+export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFile }) {
   const router = useRouter();
-  const { addQuickNote } = useUserStore();
-  const { isPrime } = useAuthStore();
+  const isPrime = useAuthStore((state) => state.isPrime);
   const [view, setView] = useState(VIEW_MAIN);
+  const [completedExams, setCompletedExams] = useState([]);
   const [noteContent, setNoteContent] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [selectedExam, setSelectedExam] = useState(null);
@@ -56,6 +49,34 @@ export default function QuickActionsModal({
   const [savingGrade, setSavingGrade] = useState(false);
   const gradeInputRef = useRef(null);
   const weightInputRef = useRef(null);
+
+  // Loaded when the sheet opens rather than when the app starts: these two
+  // queries used to run on every launch for a sheet that often never opens.
+  const loadExams = useCallback(async () => {
+    try {
+      const { auth } = await import('../services/firebase');
+      const user = auth.currentUser;
+      if (!user) return;
+
+      const { getCompletedExams, getPendingExams } = await import('../services/exams');
+      const [completedRes, pendingRes] = await Promise.all([
+        getCompletedExams(user.uid, 20),
+        getPendingExams(user.uid),
+      ]);
+
+      // Combine and deduplicate just in case
+      const combined = [...pendingRes, ...completedRes];
+      const unique = Array.from(new global.Map(combined.map((e) => [e.id, e])).values());
+
+      setCompletedExams(unique);
+    } catch (e) {
+      console.warn('Could not load exams for quick action', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (visible) loadExams();
+  }, [visible, loadExams]);
 
   const examsWithoutGrade = completedExams.filter((e) => !e.grade && e.grade !== 0);
 
@@ -79,7 +100,7 @@ export default function QuickActionsModal({
     setSavingNote(true);
     try {
       const { auth } = await import('../services/firebase');
-      await addQuickNote(auth.currentUser.uid, noteContent);
+      await useUserStore.getState().addQuickNote(auth.currentUser.uid, noteContent);
       setSavingNote(false);
       // Close entire modal smoothly — no popup alert
       handleClose();
@@ -117,6 +138,8 @@ export default function QuickActionsModal({
       const { auth } = await import('../services/firebase');
       await useUserStore.getState().updateAverageGrade(auth.currentUser.uid);
       useUserStore.getState().triggerExamRefresh();
+      // The exam just stopped being ungraded, so drop it from the list.
+      loadExams();
 
       setView(VIEW_MAIN);
       setGradeInput('');
@@ -145,7 +168,7 @@ export default function QuickActionsModal({
             const { auth } = await import('../services/firebase');
             await useUserStore.getState().loadUserData(auth.currentUser.uid);
             useUserStore.getState().triggerExamRefresh();
-            if (onRefresh) onRefresh();
+            loadExams();
           } catch (e) {
             Alert.alert('Error', 'No se pudo eliminar el examen.');
           }
