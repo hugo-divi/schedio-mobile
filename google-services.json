@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "97363652124-froac5olv15j1q7sstapaijhcl23o6de.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.schedio.mobile",
+            "certificate_hash": "ce625773b22fee5c780f5c9b50fe1dc89369f43e"
+          }
+        },
+        {
           "client_id": "97363652124-n1ljd61rl8vq9hrcnvn6ljtj52svrdkh.apps.googleusercontent.com",
           "client_type": 3
         }
