@@ -47,6 +47,15 @@ export default function Login() {
       const user = await signIn(email, password);
       setUser(user);
       buzz(Haptics.NotificationFeedbackType.Success);
+
+      // Google accounts arrive pre-verified; only password accounts can land
+      // here unverified, and Play Store's data policy requires blocking them
+      // until they confirm the address.
+      if (!user.emailVerified) {
+        router.replace('/verify-email');
+        return;
+      }
+
       router.replace('/dashboard');
     } catch (err) {
       console.error('[Login] Error:', err);

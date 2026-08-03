@@ -63,7 +63,9 @@ export default function Register() {
       const user = await signUp(email.trim(), password, displayName.trim());
       setUser(user);
       buzz(Haptics.NotificationFeedbackType.Success);
-      router.replace('/onboarding');
+      // Fresh password accounts are never verified yet — Google accounts
+      // (below) skip this screen entirely since Google already verified them.
+      router.replace('/verify-email');
     } catch (err) {
       setError(err.userMessage || err.message || 'Error al crear la cuenta. Inténtalo de nuevo.');
       buzz(Haptics.NotificationFeedbackType.Error);

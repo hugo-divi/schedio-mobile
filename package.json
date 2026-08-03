@@ -21,6 +21,7 @@
     "@ide/backoff": "^1.0.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/slider": "5.0.1",
+    "@react-native-google-signin/google-signin": "^16.1.4",
     "date-fns": "^4.1.0",
     "debug": "^4.4.3",
     "expo": "54",

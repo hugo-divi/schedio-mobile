@@ -70,7 +70,8 @@
       ],
       "expo-font",
       "expo-asset",
-      "expo-router"
+      "expo-router",
+      "@react-native-google-signin/google-signin"
     ]
   }
 }
