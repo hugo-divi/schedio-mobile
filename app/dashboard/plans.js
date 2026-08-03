@@ -25,6 +25,7 @@ import {
   Plus,
 } from 'lucide-react-native';
 import { tokens } from '../../theme/tokens';
+import Animated, { LinearTransition, FadeIn, FadeOut } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import useUserStore from '../../store/userStore';
@@ -35,6 +36,11 @@ import { es } from 'date-fns/locale';
 import UploadModal from '../../components/UploadModal';
 import ResourceList from '../../components/ResourceList';
 import { GlassCard } from '../../components/GlassView';
+
+// Replaces LayoutAnimation.Presets.easeInEaseOut, which no longer does anything
+// under the New Architecture. Built once at module scope so every item shares the
+// same config object instead of rebuilding it on each render.
+const LIST_TRANSITION = LinearTransition.duration(250);
 
 export default function PlansScreen() {
   const router = useRouter();
@@ -59,6 +65,14 @@ export default function PlansScreen() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState('plans'); // 'plans' | 'resources'
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
+
+  // `entering` must stay off for the first render: otherwise the whole list
+  // fades in on mount (and on every tab switch), which reads as a flicker.
+  // We only want it for items that appear *after* the list is on screen.
+  const [listMounted, setListMounted] = useState(false);
+  useEffect(() => {
+    setListMounted(true);
+  }, []);
 
   const displayPlans = transformRealData(microplans);
 
@@ -316,7 +330,7 @@ export default function PlansScreen() {
                 </Text>
               </View>
             ) : (
-              displayPlans.map((group, groupIdx) => {
+              displayPlans.map((group) => {
                 const dateObj = new Date(group.date);
                 const isTodayDate = isToday(dateObj);
                 const label = isTodayDate
@@ -326,7 +340,11 @@ export default function PlansScreen() {
                     : format(dateObj, 'EEEE d', { locale: es });
 
                 return (
-                  <View key={groupIdx} className="relative mb-6">
+                  <Animated.View
+                    key={group.date}
+                    layout={LIST_TRANSITION}
+                    className="relative mb-6"
+                  >
                     <View
                       style={{
                         position: 'absolute',
@@ -343,8 +361,8 @@ export default function PlansScreen() {
                       <Text className="text-white text-lg font-bold ml-4 capitalize">{label}</Text>
                     </View>
 
-                    <View className="pl-8 gap-3">
-                      {group.items.map((item, idx) => {
+                    <Animated.View layout={LIST_TRANSITION} className="pl-8 gap-3">
+                      {group.items.map((item) => {
                         const isHighlighted =
                           highlightId && (item.examId === highlightId || item.id === highlightId);
                         const isActive = (isTodayDate && !item.completed) || isHighlighted;
@@ -352,14 +370,22 @@ export default function PlansScreen() {
                           if (Platform.OS !== 'web') {
                             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                           }
-                          // TODO: re-add a list transition here using Reanimated's
-                          // layout animations. LayoutAnimation was removed: it is a
-                          // no-op under the New Architecture (enabled in SDK 54).
+                          // The list transition is declarative now: each item carries
+                          // `layout={LIST_TRANSITION}`, so any reflow caused by this
+                          // update is animated by Reanimated. No imperative call here
+                          // (the old LayoutAnimation.configureNext is a no-op under the
+                          // New Architecture, enabled in SDK 54).
                           completeMicroTask(user?.uid, item.id);
                         };
 
                         return (
-                          <View key={item.id} style={{ marginBottom: 12 }}>
+                          <Animated.View
+                            key={item.id}
+                            layout={LIST_TRANSITION}
+                            entering={listMounted ? FadeIn.duration(180) : undefined}
+                            exiting={FadeOut.duration(150)}
+                            style={{ marginBottom: 12 }}
+                          >
                             <TouchableOpacity
                               activeOpacity={0.7}
                               onPress={() =>
@@ -526,11 +552,11 @@ export default function PlansScreen() {
                                 </View>
                               </GlassCard>
                             </TouchableOpacity>
-                          </View>
+                          </Animated.View>
                         );
                       })}
-                    </View>
-                  </View>
+                    </Animated.View>
+                  </Animated.View>
                 );
               })
             )}

@@ -1,241 +1,258 @@
-import { Modal, View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import { X, Zap, BookOpen, Star, Crown, Moon } from 'lucide-react-native';
+import { View, Text, StyleSheet } from 'react-native';
+import { Zap, BookOpen, Star, Crown, Lock, Check } from 'lucide-react-native';
+import { tokens } from '../theme/tokens';
+import {
+  RANKS,
+  getRankForLevel,
+  getNextRank,
+  calculateXpForLevel,
+  calculateXpForNextLevel,
+} from '../services/gamification';
+import BottomSheet from './ui/BottomSheet';
+import Button from './ui/Button';
 
-const RANKS = [
-    { title: 'Aprendiz', minLevel: 1, maxLevel: 4, color: '#64D2FF', icon: 'Zap' },
-    { title: 'Estudiante', minLevel: 5, maxLevel: 9, color: '#30D158', icon: 'BookOpen' },
-    { title: 'Académico', minLevel: 10, maxLevel: 19, color: '#BF5AF2', icon: 'Star' },
-    { title: 'Maestro', minLevel: 20, maxLevel: 49, color: '#FFD60A', icon: 'Crown' },
-    { title: 'Sabio', minLevel: 50, maxLevel: Infinity, color: '#FF9F0A', icon: 'Moon' },
-];
+const font = tokens.typography.families.inter;
+const IconMap = { Zap, BookOpen, Star, Crown };
 
-const IconMap = { Zap, BookOpen, Star, Crown, Moon };
-
-function getRankForLevel(level) {
-    return RANKS.find(r => level >= r.minLevel && level <= r.maxLevel) || RANKS[0];
-}
-
+/**
+ * Level and rank detail sheet.
+ *
+ * Ranks come from services/gamification. This file used to carry its own copy
+ * of the table, and the two had drifted apart — the service calls level 10
+ * "Estudiante" while the local copy called it "Académico", a rank that doesn't
+ * exist in the service at all. The dashboard and profile read the service, so
+ * this sheet was the one telling a different story.
+ */
 export default function LevelProgressModal({ visible, onClose, gamification }) {
-    if (!gamification) return null;
+  if (!gamification) return null;
 
-    const { level = 1, xp = 0, rank } = gamification;
+  const { level = 1, xp = 0 } = gamification;
 
-    // Calculate Progress
-    const currentLevelBaseXP = Math.pow(level - 1, 2) * 100;
-    const nextLevelXP = Math.pow(level, 2) * 100;
-    const levelProgress = xp - currentLevelBaseXP;
-    const levelTotal = nextLevelXP - currentLevelBaseXP;
-    const percentage = Math.min(100, Math.max(0, (levelProgress / levelTotal) * 100));
+  const floor = calculateXpForLevel(level);
+  const ceiling = calculateXpForNextLevel(level);
+  const span = ceiling - floor;
+  const percentage = span > 0 ? Math.min(100, Math.max(0, ((xp - floor) / span) * 100)) : 0;
+  const xpToGo = Math.max(0, ceiling - Math.floor(xp));
 
-    const currentRankObj = getRankForLevel(level);
-    const nextMajorRankIndex = RANKS.findIndex(r => r.minLevel > level);
-    const nextMajorRank = nextMajorRankIndex !== -1 ? RANKS[nextMajorRankIndex] : null;
+  const currentRank = getRankForLevel(level);
+  const nextRank = getNextRank(level);
+  const RankIcon = IconMap[currentRank?.icon] || Zap;
 
-    const RankIcon = IconMap[currentRankObj?.icon] || Zap;
-    const NextIcon = nextMajorRank ? IconMap[nextMajorRank.icon] || Zap : null;
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.hero}>
+        <View style={[styles.iconRing, { borderColor: currentRank.color }]}>
+          <RankIcon size={30} color={currentRank.color} strokeWidth={1.75} />
+        </View>
+        <Text style={styles.level}>Nivel {level}</Text>
+        <Text style={[styles.rankName, { color: currentRank.color }]}>{currentRank.title}</Text>
+        <Text style={styles.rankDescription}>{currentRank.description}</Text>
+      </View>
 
-    return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <TouchableOpacity
-                style={styles.overlay}
-                activeOpacity={1}
-                onPress={onClose}
+      <View style={styles.xpHeader}>
+        <Text style={styles.xpLabel}>XP</Text>
+        <Text style={styles.xpValue}>
+          {Math.floor(xp)} / {ceiling}
+        </Text>
+      </View>
+      <View style={styles.xpTrack}>
+        <View
+          style={[styles.xpFill, { width: `${percentage}%`, backgroundColor: currentRank.color }]}
+        />
+      </View>
+      <Text style={styles.xpHint}>
+        {xpToGo > 0 ? (
+          <>
+            Te faltan <Text style={styles.xpStrong}>{xpToGo} XP</Text> para el nivel {level + 1}.
+          </>
+        ) : (
+          '¡Nivel completado!'
+        )}
+      </Text>
+
+      <Text style={styles.laddderTitle}>
+        {nextRank ? `Próximo rango: ${nextRank.title}` : 'Has alcanzado el rango máximo'}
+      </Text>
+
+      {/* The whole ladder, so the milestones ahead are visible — not just the
+          next one. No inner ScrollView: the sheet itself scrolls, and nesting
+          the two would make neither behave predictably. */}
+      <View>
+        {RANKS.map((rank) => {
+          const unlocked = level >= rank.minLevel;
+          const isCurrent = rank.title === currentRank.title;
+          const Icon = IconMap[rank.icon] || Zap;
+
+          return (
+            <View
+              key={rank.title}
+              style={[styles.ladderRow, isCurrent && { borderColor: rank.color }]}
             >
-                <TouchableOpacity
-                    style={styles.modalContent}
-                    activeOpacity={1}
-                    onPress={(e) => e.stopPropagation()}
+              <View
+                style={[
+                  styles.ladderIcon,
+                  { backgroundColor: unlocked ? `${rank.color}22` : tokens.colors.surfaceHover },
+                ]}
+              >
+                <Icon
+                  size={16}
+                  color={unlocked ? rank.color : tokens.colors.textDisabled}
+                  strokeWidth={2}
+                />
+              </View>
+
+              <View style={styles.ladderText}>
+                <Text
+                  style={[styles.ladderName, !unlocked && { color: tokens.colors.textDisabled }]}
                 >
-                    <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-                        <X size={24} color="#8E8E93" />
-                    </TouchableOpacity>
+                  {rank.title}
+                </Text>
+                <Text style={styles.ladderReq}>{rank.requirements}</Text>
+              </View>
 
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        <View style={styles.header}>
-                            <View style={[styles.iconRing, { borderColor: currentRankObj.color }]}>
-                                <RankIcon size={48} color={currentRankObj.color} strokeWidth={1.5} />
-                            </View>
-                            <Text style={styles.levelTitle}>Nivel {level}</Text>
-                            <Text style={[styles.rankSubtitle, { color: currentRankObj.color }]}>
-                                {rank || currentRankObj.title}
-                            </Text>
-                        </View>
+              {isCurrent ? (
+                <Text style={[styles.ladderBadge, { color: rank.color }]}>Actual</Text>
+              ) : unlocked ? (
+                <Check size={15} color={tokens.colors.trendUp} />
+              ) : (
+                <Lock size={14} color={tokens.colors.textDisabled} />
+              )}
+            </View>
+          );
+        })}
+      </View>
 
-                        <View style={styles.xpSection}>
-                            <View style={styles.xpLabels}>
-                                <Text style={styles.xpLabel}>XP Actual</Text>
-                                <Text style={styles.xpValue}>{Math.floor(xp)} / {nextLevelXP}</Text>
-                            </View>
-                            <View style={styles.xpBarTrack}>
-                                <View
-                                    style={[
-                                        styles.xpBarFill,
-                                        { width: `${percentage}%`, backgroundColor: currentRankObj.color }
-                                    ]}
-                                />
-                            </View>
-                            <Text style={styles.xpMessage}>
-                                ¡Solo faltan <Text style={styles.xpBold}>{nextLevelXP - Math.floor(xp)} XP</Text> para el nivel {level + 1}!
-                            </Text>
-                        </View>
-
-                        {nextMajorRank && (
-                            <View style={styles.nextRankPreview}>
-                                <View style={styles.nextRankInfo}>
-                                    <Text style={styles.nextRankLabel}>Próximo Rango</Text>
-                                    <Text style={styles.nextRankTitle}>{nextMajorRank.title}</Text>
-                                    <Text style={styles.nextRankLevel}>Desbloqueado al Nivel {nextMajorRank.minLevel}</Text>
-                                </View>
-                                {NextIcon && <NextIcon size={32} color={nextMajorRank.color} style={{ opacity: 0.5 }} />}
-                            </View>
-                        )}
-
-                        <View style={styles.footer}>
-                            <Zap size={14} color="#4A90E2" style={{ marginRight: 4 }} />
-                            <Text style={styles.footerTip}>
-                                Tip: Completa sesiones largas para ganar más XP
-                            </Text>
-                        </View>
-                    </ScrollView>
-                </TouchableOpacity>
-            </TouchableOpacity>
-        </Modal>
-    );
+      <Button
+        title="Entendido"
+        variant="secondary"
+        fullWidth
+        style={styles.cta}
+        onPress={onClose}
+      />
+    </BottomSheet>
+  );
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 24,
-    },
-    modalContent: {
-        backgroundColor: '#1C1C1E',
-        borderRadius: 24,
-        padding: 32,
-        width: '100%',
-        maxWidth: 400,
-        maxHeight: '80%',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-    },
-    closeButton: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: '#2C2C2E',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10,
-    },
-    header: {
-        alignItems: 'center',
-        marginBottom: 32,
-    },
-    iconRing: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        borderWidth: 3,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 16,
-    },
-    levelTitle: {
-        fontSize: 28,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        marginBottom: 4,
-    },
-    rankSubtitle: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    xpSection: {
-        marginBottom: 24,
-    },
-    xpLabels: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    xpLabel: {
-        fontSize: 13,
-        color: '#8E8E93',
-    },
-    xpValue: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#FFFFFF',
-    },
-    xpBarTrack: {
-        height: 8,
-        backgroundColor: '#2C2C2E',
-        borderRadius: 4,
-        overflow: 'hidden',
-        marginBottom: 12,
-    },
-    xpBarFill: {
-        height: '100%',
-        borderRadius: 4,
-    },
-    xpMessage: {
-        fontSize: 14,
-        color: '#8E8E93',
-        textAlign: 'center',
-    },
-    xpBold: {
-        fontWeight: '700',
-        color: '#FFFFFF',
-    },
-    nextRankPreview: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        backgroundColor: '#2C2C2E',
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 24,
-    },
-    nextRankInfo: {
-        flex: 1,
-    },
-    nextRankLabel: {
-        fontSize: 11,
-        color: '#8E8E93',
-        textTransform: 'uppercase',
-        marginBottom: 4,
-    },
-    nextRankTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        marginBottom: 2,
-    },
-    nextRankLevel: {
-        fontSize: 13,
-        color: '#8E8E93',
-    },
-    footer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 12,
-        backgroundColor: 'rgba(74, 144, 226, 0.1)',
-        borderRadius: 12,
-    },
-    footerTip: {
-        fontSize: 12,
-        color: '#8E8E93',
-    },
+  hero: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  iconRing: {
+    width: 60,
+    height: 60,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  level: {
+    fontFamily: font.bold,
+    fontSize: 26,
+    color: tokens.colors.textPrimary,
+  },
+  rankName: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    marginTop: 2,
+  },
+  rankDescription: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  xpHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  xpLabel: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    letterSpacing: 0.4,
+    color: tokens.colors.textSecondary,
+  },
+  xpValue: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.textPrimary,
+  },
+  xpTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: tokens.colors.background,
+    overflow: 'hidden',
+  },
+  xpFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  xpHint: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    marginTop: 8,
+  },
+  xpStrong: {
+    fontFamily: font.bold,
+    color: tokens.colors.textPrimary,
+  },
+  laddderTitle: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: tokens.colors.textSecondary,
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  ladder: {
+    // No cap: the sheet scrolls, so the ladder can be as tall as it needs.
+  },
+  ladderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: tokens.radius.btn,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: tokens.colors.background,
+    marginBottom: 8,
+  },
+  ladderIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ladderText: {
+    flex: 1,
+  },
+  ladderName: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  ladderReq: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    marginTop: 1,
+  },
+  ladderBadge: {
+    fontFamily: font.bold,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  cta: {
+    marginTop: 20,
+  },
 });
