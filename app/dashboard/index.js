@@ -32,11 +32,7 @@ import {
 import { rankExams, summarizeStudyLoad, HIGH_PRIORITY_SCORE } from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
 import usePreferencesStore from '../../store/preferencesStore';
-import {
-  scheduleExamReminders,
-  scheduleInactivityReminder,
-  schedulePanicModeAlert,
-} from '../../services/notificationService';
+import { registerForPushNotifications } from '../../services/notificationService';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import useUserStore from '../../store/userStore';
 import Skeleton from '../../components/Skeleton';
@@ -144,6 +140,13 @@ export default function Dashboard() {
       const profileData = profileDoc.exists() ? profileDoc.data() : null;
       setProfile(profileData);
 
+      // First time this account reaches the Dashboard: ask once for push
+      // permission. `notificationsConsent` is undefined until this runs, so
+      // it never asks again regardless of the answer.
+      if (profileData && profileData.notificationsConsent === undefined) {
+        registerForPushNotifications(user.uid);
+      }
+
       const [streakData, examsData, pendingExamsData] = await Promise.all([
         checkDailyStreak(user.uid),
         getUpcomingExams(user.uid, 20),
@@ -168,30 +171,6 @@ export default function Dashboard() {
 
       setExams(examsData || []);
       setPendingExams(pendingExamsData || []);
-
-      // --- Notification Scheduling ---
-      if (user && profileData) {
-        const log = profileData.notificationLog || [];
-        // 1. Exam Reminders (3d, 1d, 0d)
-        scheduleExamReminders(user.uid, examsData || [], log);
-
-        // 2. Inactivity Reminder
-        const hasExams =
-          (examsData && examsData.length > 0) || (pendingExamsData && pendingExamsData.length > 0);
-        const lastLogin = profileData.lastLogin || new Date().toISOString();
-        scheduleInactivityReminder(user.uid, lastLogin, hasExams, log);
-
-        // 3. Panic Mode (if nearest exam is <= 2 days)
-        const nearestExam = examsData?.[0];
-        if (nearestExam) {
-          const examDate = new Date(nearestExam.date);
-          const now = new Date();
-          const diffDays = (examDate - now) / (1000 * 60 * 60 * 24);
-          if (diffDays <= 2 && diffDays >= 0) {
-            schedulePanicModeAlert(user.uid, nearestExam, log);
-          }
-        }
-      }
 
       // --- Rank Celebration Check ---
       const currentRank = profileData?.gamification?.rank;

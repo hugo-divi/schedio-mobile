@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
 // Configure how notifications should be handled when the app is open.
 // `shouldShowAlert` was deprecated in favour of the banner/list pair.
@@ -13,16 +13,6 @@ Notifications.setNotificationHandler({
     shouldSetBadge: true,
   }),
 });
-
-/**
- * These reminders are surfaced as soon as the condition is detected, so they
- * carry no schedule. A `null` trigger delivers immediately.
- *
- * They previously passed `{ seconds: 1 }`, which stopped being a valid trigger
- * once expo-notifications started requiring an explicit `type` — every call
- * threw, so no reminder had been delivered since the SDK upgrade.
- */
-const IMMEDIATE = null;
 
 /**
  * Request permissions for push notifications
@@ -46,174 +36,48 @@ export async function requestPermissions() {
 }
 
 /**
- * Messaging Pools for unique/rotating notifications
- */
-const MESSAGES = {
-  exam_3days: [
-    'Tu examen de [subject] es en 3 días 📖 ¿Ya tienes plan?',
-    '3 días para [subject]. Schedio tiene tu plan listo 🧠',
-    '¡Oye! Solo quedan 3 días para [subject]. Un empujón más 💪',
-  ],
-  exam_1day: [
-    'Mañana es [subject] 😬 Un repaso esta noche marca la diferencia.',
-    'Último día antes de [subject]. ¡Tú puedes! 💪',
-    'Recta final para [subject]. Schedio está contigo 🚀',
-  ],
-  exam_today: [
-    'Hoy es el día 🎯 Confía en lo que has estudiado.',
-    '¡Hoy [subject]! Ya has hecho el trabajo duro 🚀',
-    'Mucha suerte en [subject]. ¡A por todas! 🎖️',
-  ],
-  panic_mode: [
-    '🔥 MODO PÁNICO: [subject] es pasado mañana. Tu plan de choque te espera.',
-    '⚠️ [subject] se acerca peligrosamente. Entra para el plan de emergencia.',
-    '🔥 No hay tiempo que perder con [subject]. Schedio ha priorizado lo vital.',
-  ],
-  inactivity: [
-    'Parece que llevas un tiempo fuera 👀 Tus exámenes no se han olvidado de ti.',
-    'Tus próximos exámenes se acercan. ¿Seguimos? 📚',
-    'No dejes que el trabajo se acumule. 5 minutos hoy ahorran horas mañana 🧠',
-  ],
-};
-
-/**
- * Was this notification already delivered today?
+ * Asks for notification permission and, if granted, registers this device's
+ * native FCM token in Firestore so the exam-alert/re-engagement/weekly-summary
+ * Cloud Functions can reach it. Whether granted or not, `notificationsConsent`
+ * is recorded either way — its presence is what tells the caller "already
+ * asked", so this only needs to run once per account.
  *
- * Everything here is scheduled from `fetchData`, which re-runs whenever the
- * dashboard refreshes, so without this check a reminder fires again on every
- * refresh. Exam reminders had it; panic mode and the inactivity nudge did not,
- * and repeated on every pass.
+ * All notifications now come from the server (Cloud Functions + FCM), not
+ * from scheduling them on-device: an iOS PWA can't reliably schedule a future
+ * local notification, so the same pipeline covers both platforms instead of
+ * running two different systems.
  */
-function sentToday(log = [], type, examId = null) {
-  const today = new Date().toDateString();
-  return log.some(
-    (entry) =>
-      entry.type === type &&
-      (examId === null || entry.examId === examId) &&
-      new Date(entry.sentAt).toDateString() === today
-  );
-}
+export async function registerForPushNotifications(uid) {
+  if (Platform.OS === 'web' || !uid) return false;
 
-/**
- * Get a rotating message based on a log of sent notifications to avoid repetition
- */
-function getUniqueMessage(type, subject, log = []) {
-  const pool = MESSAGES[type] || ['¡Es hora de estudiar!'];
-  // Use length of log to pick the next message
-  const index = log.filter((l) => l.type === type).length % pool.length;
-  let msg = pool[index];
-  if (subject) msg = msg.replace('[subject]', subject);
-  return msg;
-}
+  const granted = await requestPermissions();
+  const userRef = doc(db, 'users', uid);
 
-/**
- * Schedule exam reminders at 3d, 1d, and day-of
- */
-export async function scheduleExamReminders(userId, exams, notificationLog = []) {
-  if (Platform.OS === 'web' || !userId) return;
-
-  // Cancel previous to avoid doubles (simplest way to sync)
-  // In a real app we'd be more surgical but this is safe for a v1
-  await Notifications.cancelAllScheduledNotificationsAsync();
-
-  const now = new Date();
-
-  for (const exam of exams) {
-    if (exam.completed) continue;
-
-    const examDate = new Date(exam.date);
-    const diffDays = Math.ceil((examDate - now) / (1000 * 60 * 60 * 24));
-
-    // Reminders: 3 days, 1 day, Today
-    const targets = [
-      { days: 3, type: 'exam_3days' },
-      { days: 1, type: 'exam_1day' },
-      { days: 0, type: 'exam_today' },
-    ];
-
-    for (const target of targets) {
-      if (diffDays === target.days) {
-        if (!sentToday(notificationLog, target.type, exam.id)) {
-          const body = getUniqueMessage(target.type, exam.subject, notificationLog);
-
-          await Notifications.scheduleNotificationAsync({
-            content: {
-              title: 'Schedio: Recordatorio',
-              body,
-              data: { type: target.type, examId: exam.id },
-            },
-            trigger: IMMEDIATE,
-          });
-
-          // Log it in Firestore
-          await logNotification(userId, target.type, exam.id);
-        }
-      }
-    }
+  if (!granted) {
+    await updateDoc(userRef, { notificationsConsent: false });
+    return false;
   }
-}
 
-/**
- * Helper to log sent notifications in Firestore
- */
-async function logNotification(userId, type, examId = null) {
-  try {
-    const userRef = doc(db, 'users', userId);
-    await updateDoc(userRef, {
-      notificationLog: arrayUnion({
-        type,
-        examId,
-        sentAt: new Date().toISOString(),
-      }),
-    });
-  } catch (e) {
-    console.error('Error logging notification:', e);
-  }
-}
-
-/**
- * Schedule Panic Mode alert
- */
-export async function schedulePanicModeAlert(userId, exam, log = []) {
-  if (Platform.OS === 'web' || !userId) return;
-  if (sentToday(log, 'panic_mode', exam.id)) return;
-
-  const body = getUniqueMessage('panic_mode', exam.subject, log);
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: '🔥 MODO PÁNICO',
-      body,
-      data: { type: 'panic_mode', examId: exam.id },
-    },
-    trigger: IMMEDIATE,
+  const token = await Notifications.getDevicePushTokenAsync();
+  await updateDoc(userRef, {
+    notificationsConsent: true,
+    fcmToken: token.data,
+    platform: Platform.OS === 'ios' ? 'ios' : 'android',
   });
-
-  await logNotification(userId, 'panic_mode', exam.id);
+  return true;
 }
 
 /**
- * Schedule Inactivity Reminder
+ * Marks that the account opened the app just now — the signal the
+ * re-engagement Cloud Function reads to find accounts inactive 4+ days.
  */
-export async function scheduleInactivityReminder(userId, lastLoginDate, hasActiveExams, log = []) {
-  if (Platform.OS === 'web' || !userId || !hasActiveExams) return;
-
-  const now = new Date();
-  const lastLogin = new Date(lastLoginDate);
-  const diffDays = Math.floor((now - lastLogin) / (1000 * 60 * 60 * 24));
-
-  if (diffDays >= 2) {
-    if (sentToday(log, 'inactivity')) return;
-
-    const body = getUniqueMessage('inactivity', null, log);
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Te echamos de menos',
-        body,
-        data: { type: 'inactivity' },
-      },
-      trigger: IMMEDIATE,
-    });
-
-    await logNotification(userId, 'inactivity');
+export async function markAppOpened(uid) {
+  if (!uid) return;
+  try {
+    await updateDoc(doc(db, 'users', uid), { lastOpenTimestamp: serverTimestamp() });
+  } catch (error) {
+    // Never let this block startup — worst case, one day's re-engagement
+    // check runs on slightly stale data.
+    console.warn('Could not record lastOpenTimestamp', error);
   }
 }

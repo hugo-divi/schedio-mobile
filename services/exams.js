@@ -113,6 +113,10 @@ export const getCompletedExams = async (userId, limitCount = 20) => {
 export const createExam = async (examData) => {
   try {
     const docRef = await addDoc(collection(db, 'exams'), {
+      // Cloud Functions' exam-alert cron flips these once the 3-day/1-day
+      // notice has gone out, so every exam needs to start unnotified.
+      notified3Days: false,
+      notified1Day: false,
       ...examData,
       createdAt: new Date(),
     });
