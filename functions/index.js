@@ -1,12 +1,22 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
-const { setGlobalOptions } = require('firebase-functions/v2');
+// Deliberately not `firebase-functions/v2` — that barrel eagerly requires
+// every v2 provider, including the Realtime Database one, which pulls in
+// firebase-admin's RTDB compat layer and a `@firebase/app` import that isn't
+// actually part of the deployed dependency tree. That's what was crashing the
+// container on startup ("Cannot find module '@firebase/app'") even though
+// nothing here touches RTDB — `v2/options` exports setGlobalOptions on its
+// own, without the rest of the barrel.
+const { setGlobalOptions } = require('firebase-functions/v2/options');
 const logger = require('firebase-functions/logger');
-const admin = require('firebase-admin');
+const { initializeApp } = require('firebase-admin/app');
+const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getMessaging } = require('firebase-admin/messaging');
 
-admin.initializeApp();
+initializeApp();
 setGlobalOptions({ region: 'europe-west1' });
 
-const db = admin.firestore();
+const db = getFirestore();
+const messaging = getMessaging();
 
 const TIMEZONE = 'Europe/Madrid';
 // EventModal's own sentinel for "no subject chosen" — a literal string, not
@@ -71,7 +81,7 @@ const markNotifiedToday = (uid) =>
 /** Sends one push; clears the token if it's dead so later runs stop retrying it. */
 const sendToUser = async (uid, fcmToken, notification) => {
   try {
-    await admin.messaging().send({ token: fcmToken, notification });
+    await messaging.send({ token: fcmToken, notification });
     return true;
   } catch (error) {
     const deadToken =
@@ -187,7 +197,7 @@ exports.reengagement = onSchedule({ schedule: '10 8 * * *', timeZone: TIMEZONE }
     if (!sent) continue;
 
     await doc.ref.update({
-      lastReengagementSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastReengagementSentAt: FieldValue.serverTimestamp(),
       lastNotifiedDate: madridDateKey(new Date()),
     });
   }
