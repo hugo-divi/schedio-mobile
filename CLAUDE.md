@@ -23,7 +23,7 @@ Este es el bloqueante activo ahora mismo, por delante de cualquier feature nueva
 3. Términos de servicio — mismo tratamiento
 4. Enlazar ambas políticas en landing (GitHub Pages) y en pantalla de registro/perfil de la app
 5. Auth conforme a políticas de datos de Google con Firebase Auth:
-   - Verificación de email en registro — HECHO (commit `da891d7`, rama `integration/pruebas`). Corrección a esta misma lista: no era solo config — Firebase no bloquea por sí solo el login de una cuenta no verificada, así que hizo falta código (`sendEmailVerification` en `signUp`, pantalla `app/verify-email.js`, gate en login/register). Las cuentas de Google se saltan este paso porque Google ya las verifica.
+   - Verificación de email en registro — HECHO, en `master`. Corrección a esta misma lista: no era solo config — Firebase no bloquea por sí solo el login de una cuenta no verificada, así que hizo falta código (`sendEmailVerification` en `signUp`, pantalla `app/verify-email.js`, gate en login/register). Las cuentas de Google se saltan este paso porque Google ya las verifica.
    - Sign-in con Google nativo (Android) migrado de `signInWithPopup`/`signInWithRedirect` (solo funcionaban en web) a `@react-native-google-signin/google-signin`. Pendiente de pasos manuales en consola (Web Client ID, SHA-1/SHA-256, `google-services.json`, rebuild EAS) antes de poder probarlo en el APK.
    - Flujo de borrado de cuenta y datos asociados (esto SÍ requiere código)
 
