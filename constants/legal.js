@@ -3,19 +3,14 @@ import { Alert, Linking } from 'react-native';
 /**
  * Where the privacy policy and the terms of service live.
  *
- * The documents themselves are written — see legal/privacidad.md and
- * legal/terminos.md — but these stay empty until they're published
- * somewhere reachable by URL (the GitHub Pages landing, once it exists).
- * Fill these in and every link in the app starts working — registration
- * and settings both read from here.
- *
- * Play Store submission needs these live and reachable, so shipping with them
- * blank is not an option; the UI says "próximamente" rather than opening a
- * dead link in the meantime.
+ * Published on the GitHub Pages landing — the source Markdown these were
+ * generated from is legal/privacidad.md and legal/terminos.md. If the
+ * content changes, update both: this URL only serves what's already
+ * published there, it doesn't pull from the repo automatically.
  */
 export const LEGAL_URLS = {
-  privacy: '',
-  terms: '',
+  privacy: 'https://schedio-landing.github.io/schedio-app/privacidad.html',
+  terms: 'https://schedio-landing.github.io/schedio-app/terminos.html',
 };
 
 export const LEGAL_LABELS = {

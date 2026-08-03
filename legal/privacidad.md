@@ -4,8 +4,9 @@ Cómo usar este documento:
    de no vincular esta beta privada a una figura legal (ni autónomo ni
    sociedad) — el documento identifica solo "Schedio" + el email de
    contacto. Revisar y añadir nombre/NIF/CIF si eso cambia.
-2. Cuando exista la landing (GitHub Pages), publica este contenido ahí como
-   HTML y actualiza `LEGAL_URLS.privacy` en constants/legal.js con esa URL.
+2. Publicado en https://schedio-landing.github.io/schedio-app/privacidad.html
+   (landing en GitHub Pages) y enlazado desde `constants/legal.js`. Si cambias
+   este Markdown, actualiza también el HTML publicado — no se sincronizan solos.
 3. Revisa la fecha de "última actualización" cada vez que cambie algo real
    (nuevo proveedor, nuevo dato recogido, etc.) — Play Store y el RGPD exigen
    que el texto publicado coincida con lo que la app hace de verdad.
@@ -13,7 +14,7 @@ Cómo usar este documento:
 
 # Política de privacidad de Schedio
 
-**Última actualización:** [FECHA]
+**Última actualización:** 3 de agosto de 2026
 
 Esta política explica qué datos personales recoge Schedio, para qué los usa, con quién los comparte y qué derechos tienes sobre ellos, conforme al Reglamento General de Protección de Datos (RGPD) y la Ley Orgánica 3/2018 (LOPD-GDD).
 

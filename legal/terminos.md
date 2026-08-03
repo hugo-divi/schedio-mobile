@@ -1,13 +1,13 @@
 <!--
 Cómo usar este documento:
-1. Rellena los huecos marcados [ENTRE CORCHETES] igual que en privacidad.md.
-2. Publica junto a la política de privacidad en la landing y actualiza
-   `LEGAL_URLS.terms` en constants/legal.js.
+Publicado en https://schedio-landing.github.io/schedio-app/terminos.html
+(landing en GitHub Pages) y enlazado desde `constants/legal.js`. Si cambias
+este Markdown, actualiza también el HTML publicado — no se sincronizan solos.
 -->
 
 # Términos de servicio de Schedio
 
-**Última actualización:** [FECHA]
+**Última actualización:** 3 de agosto de 2026
 
 Al crear una cuenta en Schedio aceptas estos términos. Si no estás de acuerdo con alguno de ellos, no debes usar la aplicación.
 
