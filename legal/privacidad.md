@@ -1,7 +1,9 @@
 <!--
 Cómo usar este documento:
-1. Rellena los huecos marcados [ENTRE CORCHETES] en cuanto decidas la figura
-   legal bajo la que opera Schedio (autónomo o sociedad).
+1. Identificación del responsable: decisión deliberada de Hugo (2 agosto 2026)
+   de no vincular esta beta privada a una figura legal (ni autónomo ni
+   sociedad) — el documento identifica solo "Schedio" + el email de
+   contacto. Revisar y añadir nombre/NIF/CIF si eso cambia.
 2. Cuando exista la landing (GitHub Pages), publica este contenido ahí como
    HTML y actualiza `LEGAL_URLS.privacy` en constants/legal.js con esa URL.
 3. Revisa la fecha de "última actualización" cada vez que cambie algo real
@@ -17,11 +19,10 @@ Esta política explica qué datos personales recoge Schedio, para qué los usa, 
 
 ## 1. Responsable del tratamiento
 
-- **Titular:** [NOMBRE Y APELLIDOS / RAZÓN SOCIAL — pendiente de decidir si Schedio opera como persona física/autónomo o como sociedad]
-- **NIF/CIF:** [PENDIENTE]
+- **Servicio:** Schedio
 - **Contacto:** schedio.contacto@gmail.com
 
-Puedes usar ese correo para cualquier duda sobre esta política o para ejercer los derechos descritos en el punto 7.
+Puedes usar ese correo para cualquier duda sobre esta política o para ejercer los derechos descritos más abajo, incluida la solicitud de borrado de tu cuenta y tus datos.
 
 ## 2. A quién va dirigido Schedio
 
@@ -61,24 +62,32 @@ Como Google (Firebase, Gemini) y RevenueCat son empresas con sede fuera de la Un
 
 ## 6. Cuánto tiempo conservamos tus datos
 
-Conservamos tus datos mientras tu cuenta esté activa. Si eliminas tu cuenta desde Ajustes, se borran tu perfil, tus asignaturas, exámenes, sesiones, rachas y archivos de la Mochila. Algunos registros mínimos (por ejemplo, los necesarios para justificar una compra ya realizada) pueden conservarse el tiempo que exija la normativa fiscal o mercantil aplicable.
+Conservamos tus datos mientras tu cuenta esté activa. Si eliminas tu cuenta, se borran tu perfil, tus asignaturas, exámenes, sesiones, rachas y archivos de la Mochila. Algunos registros mínimos (por ejemplo, los necesarios para justificar una compra ya realizada) pueden conservarse el tiempo que exija la normativa fiscal o mercantil aplicable.
 
-## 7. Tus derechos
+## 7. Cómo borrar tu cuenta y tus datos
 
-Puedes ejercer en cualquier momento, escribiendo a schedio.contacto@gmail.com:
+Tienes dos formas de hacerlo, sin necesidad de tener la app instalada:
+
+- **Desde la app:** Ajustes → Eliminar cuenta, si te registraste con email y contraseña. El borrado es inmediato y no se puede deshacer.
+- **Por email, sin abrir la app:** escribe a schedio.contacto@gmail.com solicitando el borrado de tu cuenta y tus datos, desde el mismo correo con el que te registraste. Lo tramitamos en un plazo máximo de 30 días y te confirmamos cuando esté hecho. Esta es también la única vía disponible hoy para las cuentas registradas con Google, ya que el borrado propio dentro de la app todavía no soporta ese caso.
+
+En ambos casos se elimina permanentemente: tu perfil, asignaturas, exámenes, sesiones de estudio, rachas, archivos de la Mochila y tu cuenta de acceso.
+
+## 8. Tus derechos
+
+Además de la supresión (punto anterior), puedes ejercer en cualquier momento, escribiendo a schedio.contacto@gmail.com:
 
 - **Acceso**: saber qué datos tenemos sobre ti.
 - **Rectificación**: corregir datos inexactos.
-- **Supresión**: pedir que borremos tus datos (también puedes hacerlo tú mismo desde Ajustes → Eliminar cuenta).
 - **Portabilidad**: recibir tus datos en un formato reutilizable.
 - **Oposición y limitación**: oponerte a un tratamiento concreto o pedir que lo pausemos.
 
 Si consideras que no hemos atendido tu solicitud correctamente, puedes reclamar ante la Agencia Española de Protección de Datos (aepd.es).
 
-## 8. Seguridad
+## 9. Seguridad
 
-El acceso a tus datos está protegido por las reglas de seguridad de Firestore y Storage, que restringen cada documento y archivo a su propio dueño. Las contraseñas nunca se almacenan en texto plano: las gestiona Firebase Authentication.
+Toda la comunicación entre la app y nuestros servidores viaja cifrada (HTTPS/TLS). El acceso a tus datos está protegido además por las reglas de seguridad de Firestore y Storage, que restringen cada documento y archivo a su propio dueño. Las contraseñas nunca se almacenan en texto plano: las gestiona Firebase Authentication.
 
-## 9. Cambios en esta política
+## 10. Cambios en esta política
 
 Si cambiamos de forma relevante qué datos recogemos o con quién los compartimos, lo reflejaremos aquí actualizando la fecha de la cabecera y, si el cambio es sustancial, te avisaremos dentro de la app.

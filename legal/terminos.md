@@ -24,7 +24,7 @@ Schedio está pensado para mayores de 14 años (edad mínima en España para con
 - Debes dar un email real y una contraseña, o registrarte con tu cuenta de Google.
 - Eres responsable de mantener tu contraseña en secreto y de toda actividad que ocurra desde tu cuenta.
 - Si crees que alguien más ha accedido a tu cuenta sin tu permiso, avísanos en schedio.contacto@gmail.com y cambia tu contraseña cuanto antes.
-- Puedes eliminar tu cuenta en cualquier momento desde Ajustes → Eliminar cuenta. Esto borra permanentemente tu perfil, asignaturas, exámenes, sesiones y archivos de la Mochila; no se puede deshacer.
+- Puedes eliminar tu cuenta en cualquier momento desde Ajustes → Eliminar cuenta, o escribiendo a schedio.contacto@gmail.com sin necesidad de tener la app instalada (ver la política de privacidad para el detalle). Esto borra permanentemente tu perfil, asignaturas, exámenes, sesiones y archivos de la Mochila; no se puede deshacer.
 
 ## 4. Uso permitido
 
@@ -54,7 +54,7 @@ Schedio ofrece funciones adicionales de pago bajo el nombre "Schedio Prime". Las
 
 ## 8. Propiedad de la aplicación
 
-El nombre "Schedio", su diseño, logotipo y código son propiedad de [TITULAR — ver política de privacidad]. No puedes copiar, distribuir o crear obras derivadas de la app sin permiso.
+El nombre "Schedio", su diseño, logotipo y código son propiedad de Schedio. No puedes copiar, distribuir o crear obras derivadas de la app sin permiso.
 
 ## 9. Límite de responsabilidad
 
