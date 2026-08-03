@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
 import { configureRevenueCat } from '../services/revenuecat';
+import { initCrashlytics } from '../services/crashlytics';
 import { requestPermissions } from '../services/notificationService';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
@@ -57,6 +58,7 @@ export default function Layout() {
   useEffect(() => {
     const unsubscribe = initAuth();
     configureRevenueCat();
+    initCrashlytics();
 
     // Notification setup
     requestPermissions();
