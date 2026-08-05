@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 
 import useAuthStore from '../store/authStore';
-import { signIn, signInWithGoogle } from '../services/auth';
+import { signIn, signInWithGoogle, getAuthErrorMessage } from '../services/auth';
 import { auth } from '../services/firebase';
 import { needsOnboarding } from '../services/onboarding';
 import { tokens } from '../theme/tokens';
@@ -62,9 +62,7 @@ export default function Login() {
       router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
     } catch (err) {
       console.error('[Login] Error:', err);
-      setError(
-        err.userMessage || err.message || 'Error de autenticación. Revisa tus credenciales.'
-      );
+      setError(getAuthErrorMessage(err));
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
@@ -85,9 +83,9 @@ export default function Login() {
       }
     } catch (err) {
       setError(
-        err?.code === 'auth/unauthorized-domain'
-          ? 'Dominio no autorizado en Firebase. Añade localhost a los dominios autorizados en la consola de Firebase.'
-          : err?.message || 'Google Sign-In falló. Inténtalo de nuevo.'
+        err?.code === 'DEVELOPER_ERROR'
+          ? 'Google Sign-In no está bien configurado en este build todavía.'
+          : getAuthErrorMessage(err)
       );
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {

@@ -15,7 +15,7 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 
 import useAuthStore from '../store/authStore';
-import { signUp, signInWithGoogle } from '../services/auth';
+import { signUp, signInWithGoogle, getAuthErrorMessage } from '../services/auth';
 import { tokens } from '../theme/tokens';
 import { openLegal } from '../constants/legal';
 import Button from '../components/ui/Button';
@@ -67,7 +67,7 @@ export default function Register() {
       // (below) skip this screen entirely since Google already verified them.
       router.replace('/verify-email');
     } catch (err) {
-      setError(err.userMessage || err.message || 'Error al crear la cuenta. Inténtalo de nuevo.');
+      setError(getAuthErrorMessage(err));
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
@@ -84,8 +84,12 @@ export default function Register() {
         buzz(Haptics.NotificationFeedbackType.Success);
         router.replace('/onboarding');
       }
-    } catch {
-      setError('Google Sign-In falló. Inténtalo de nuevo.');
+    } catch (err) {
+      setError(
+        err?.code === 'DEVELOPER_ERROR'
+          ? 'Google Sign-In no está bien configurado en este build todavía.'
+          : getAuthErrorMessage(err)
+      );
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);

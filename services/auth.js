@@ -36,6 +36,32 @@ export const isSessionExpired = async () => {
   return Date.now() - Number(raw) > SESSION_MAX_AGE_MS;
 };
 
+/**
+ * Firebase's own error.message is the raw SDK string (e.g. "Firebase: Error
+ * (auth/invalid-credential).") — not something to put in front of a student.
+ * Maps the codes login/register actually hit to plain Spanish.
+ */
+const AUTH_ERROR_MESSAGES = {
+  'auth/invalid-credential': 'Correo o contraseña incorrectos.',
+  'auth/wrong-password': 'Contraseña incorrecta.',
+  'auth/user-not-found': 'No existe ninguna cuenta con ese correo.',
+  'auth/invalid-email': 'Ese correo no tiene un formato válido.',
+  'auth/email-already-in-use': 'Ya existe una cuenta con ese correo. Prueba a iniciar sesión.',
+  'auth/weak-password': `La contraseña debe tener al menos 6 caracteres.`,
+  'auth/too-many-requests': 'Demasiados intentos seguidos. Espera un momento y vuelve a probar.',
+  'auth/user-disabled': 'Esta cuenta ha sido deshabilitada.',
+  'auth/network-request-failed':
+    'Error de red: no se pudo contactar con Firebase. Revisa tu conexión.',
+  'auth/operation-not-allowed': 'Este método de acceso no está disponible ahora mismo.',
+  'auth/unauthorized-domain':
+    'Dominio no autorizado en Firebase. Añade este dominio a los autorizados en la consola.',
+  'auth/popup-closed-by-user': 'Ventana cerrada antes de completar el inicio de sesión.',
+};
+
+/** Plain-Spanish message for a Firebase Auth error, for showing in the UI. */
+export const getAuthErrorMessage = (error) =>
+  AUTH_ERROR_MESSAGES[error?.code] || 'Ha ocurrido un error. Inténtalo de nuevo.';
+
 /** Creates the Firestore profile the first time this uid is seen. */
 const ensureUserDoc = async (user) => {
   const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -114,11 +140,6 @@ export const signIn = async (email, password) => {
     return userCredential.user;
   } catch (error) {
     console.error('[AuthService] Error signing in:', error.code, error.message);
-    // Enrich error for UI
-    if (error.code === 'auth/network-request-failed') {
-      error.userMessage =
-        'Error de red: No se pudo contactar con Firebase. Verifica tu conexión o dominios autorizados.';
-    }
     throw error;
   }
 };
