@@ -253,12 +253,13 @@ export default function Onboarding() {
     setStep(step - 1);
   };
 
-  const finish = async () => {
+  const finish = async (skipGoal = false) => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     setSaving(true);
     try {
-      // Subjects only become real — and get ids — here.
+      // Subjects become real — and get ids — regardless of whether the
+      // student skips choosing a first goal.
       const created = await completeOnboarding(uid, {
         educationLevel,
         branch,
@@ -267,7 +268,7 @@ export default function Onboarding() {
         taskManagement,
       });
 
-      const chosen = created[goalSubject];
+      const chosen = skipGoal ? null : created[goalSubject];
 
       if (goal === 'exam' && chosen) {
         await createExam({
@@ -634,8 +635,18 @@ export default function Onboarding() {
       case 7:
         return (
           <>
-            <Text style={styles.title}>Empieza con algo concreto</Text>
-            <Text style={styles.lead}>Elige una de las dos. Podrás añadir más luego.</Text>
+            <View style={styles.stepHeadRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.title}>Empieza con algo concreto</Text>
+                <Text style={styles.lead}>Elige una de las dos. Podrás añadir más luego.</Text>
+              </View>
+              {/* For a student who already knows their way around an app like
+                  this — a second Schedio account, a sibling's referral — the
+                  activation nudge is friction, not help. */}
+              <TouchableOpacity onPress={() => finish(true)} disabled={saving}>
+                <Text style={styles.skipLink}>Saltar</Text>
+              </TouchableOpacity>
+            </View>
 
             <View style={styles.pillWrap}>
               <Pill
@@ -874,6 +885,13 @@ const styles = StyleSheet.create({
   },
   ok: { fontFamily: font.regular, fontSize: 13, color: tokens.colors.trendUp, marginTop: 16 },
   link: { fontFamily: font.semibold, fontSize: 15, color: tokens.colors.accent },
+  stepHeadRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  skipLink: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+    paddingTop: 2,
+  },
 
   pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: {
