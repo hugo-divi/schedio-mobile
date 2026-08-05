@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { onAuthChange } from '../services/auth';
+import { onAuthChange, isSessionExpired, signOut } from '../services/auth';
 import { checkEntitlements } from '../services/revenuecat';
 import { markAppOpened } from '../services/notificationService';
 
@@ -37,6 +37,16 @@ const useAuthStore = create((set) => ({
       console.log('[AuthStore] Initializing auth listener...');
       const unsubscribe = onAuthChange(async (user) => {
         console.log('[AuthStore] Auth change detected. User:', user?.uid || 'guest');
+
+        // Firebase's refresh token doesn't expire on its own, so a restored
+        // session is otherwise good forever. Force a fresh login once a
+        // month, same as most apps, instead of trusting it indefinitely.
+        if (user && (await isSessionExpired())) {
+          console.log('[AuthStore] Session older than 30 days, signing out.');
+          await signOut();
+          return; // onAuthChange fires again with user=null; that pass sets state
+        }
+
         set({ user, loading: false });
 
         if (user) {

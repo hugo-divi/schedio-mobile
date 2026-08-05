@@ -9,7 +9,32 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, googleProvider, db } from './firebase';
+
+// Firebase's own refresh token doesn't expire on a schedule — left alone, a
+// signed-in account stays signed in forever, which is what made closing the
+// app and reopening it demand a fresh login (nothing was actually rotating
+// the session; app/index.js just always routed to /login regardless of
+// whether one was already restored). Most consumer apps re-prompt after a
+// stretch of real time instead, so that's tracked here locally rather than
+// relying on any Firebase-side expiry.
+const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const LAST_AUTH_AT_KEY = 'schedio:lastAuthAt';
+
+const markSessionStart = () => AsyncStorage.setItem(LAST_AUTH_AT_KEY, String(Date.now()));
+
+/**
+ * Whether the signed-in session is older than SESSION_MAX_AGE_MS. No record
+ * at all (e.g. upgrading from a build before this existed) counts as
+ * expired — safer to ask once for a fresh login than to trust an
+ * unknown-age session indefinitely.
+ */
+export const isSessionExpired = async () => {
+  const raw = await AsyncStorage.getItem(LAST_AUTH_AT_KEY);
+  if (!raw) return true;
+  return Date.now() - Number(raw) > SESSION_MAX_AGE_MS;
+};
 
 /** Creates the Firestore profile the first time this uid is seen. */
 const ensureUserDoc = async (user) => {
@@ -48,6 +73,7 @@ export const signUp = async (email, password, displayName) => {
     // Password accounts start unverified; Google accounts skip this
     // entirely because Google already verified the address.
     await sendEmailVerification(user);
+    await markSessionStart();
 
     return user;
   } catch (error) {
@@ -84,6 +110,7 @@ export const refreshEmailVerified = async () => {
 export const signIn = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    await markSessionStart();
     return userCredential.user;
   } catch (error) {
     console.error('[AuthService] Error signing in:', error.code, error.message);
@@ -116,6 +143,7 @@ export const signInWithGoogle = async () => {
       try {
         const result = await signInWithPopup(auth, googleProvider);
         await ensureUserDoc(result.user);
+        await markSessionStart();
         return result.user;
       } catch (popupError) {
         const isBlockedOrCancelled =
@@ -155,6 +183,7 @@ export const signInWithGoogle = async () => {
     const credential = GoogleAuthProvider.credential(idToken);
     const userCredential = await signInWithCredential(auth, credential);
     await ensureUserDoc(userCredential.user);
+    await markSessionStart();
     return userCredential.user;
   } catch (error) {
     console.error('Error signing in with Google (native):', error);
@@ -175,6 +204,7 @@ export const checkGoogleRedirectResult = async () => {
     if (!result) return null;
 
     await ensureUserDoc(result.user);
+    await markSessionStart();
     return result.user;
   } catch (error) {
     console.error('Error checking redirect result:', error);
