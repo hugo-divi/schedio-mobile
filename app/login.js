@@ -18,6 +18,7 @@ import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import useAuthStore from '../store/authStore';
 import { signIn, signInWithGoogle } from '../services/auth';
 import { auth } from '../services/firebase';
+import { needsOnboarding } from '../services/onboarding';
 import { tokens } from '../theme/tokens';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -56,7 +57,9 @@ export default function Login() {
         return;
       }
 
-      router.replace('/dashboard');
+      // An account that abandoned the onboarding goes back into it rather than
+      // landing on a dashboard with no subjects.
+      router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
     } catch (err) {
       console.error('[Login] Error:', err);
       setError(
@@ -78,7 +81,7 @@ export default function Login() {
       if (user) {
         setUser(user);
         buzz(Haptics.NotificationFeedbackType.Success);
-        router.replace('/dashboard');
+        router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
       }
     } catch (err) {
       setError(

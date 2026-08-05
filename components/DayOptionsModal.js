@@ -1,167 +1,133 @@
-import { Modal, View, Text, TouchableOpacity, StyleSheet, TouchableWithoutFeedback } from 'react-native';
-import { X, Calendar as CalendarIcon, Edit2, Plus } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Plus, ChevronRight, GraduationCap, ClipboardList } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
+import BottomSheet from './ui/BottomSheet';
+import Button from './ui/Button';
 
-export default function DayOptionsModal({ visible, onClose, events = [], date, onAddNew, onEditEvent }) {
-    if (!visible) return null;
+const font = tokens.typography.families.inter;
 
-    const formattedDate = date ? new Date(date).toLocaleDateString('es-ES', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long'
-    }) : '';
+const capitalise = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : '');
 
-    return (
-        <Modal
-            visible={visible}
-            transparent={true}
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <TouchableWithoutFeedback onPress={onClose}>
-                <View style={styles.modalOverlay}>
-                    <TouchableWithoutFeedback>
-                        <View style={styles.modalContainer}>
-                            {/* Header */}
-                            <View style={styles.header}>
-                                <View>
-                                    <Text style={styles.title}>Opciones del día</Text>
-                                    <Text style={styles.subtitle}>{formattedDate}</Text>
-                                </View>
-                                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-                                    <X size={20} color="#8E8E93" />
-                                </TouchableOpacity>
-                            </View>
+const formatDate = (date) =>
+  date
+    ? capitalise(
+        new Date(date).toLocaleDateString('es-ES', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+        })
+      )
+    : '';
 
-                            {/* Options List */}
-                            <View style={styles.content}>
-                                <Text style={styles.sectionLabel}>Eventos existentes</Text>
-                                {events.map((event, index) => (
-                                    <TouchableOpacity
-                                        key={event.id || index}
-                                        style={styles.optionCard}
-                                        onPress={() => onEditEvent(event)}
-                                    >
-                                        <View style={styles.optionIcon}>
-                                            <Edit2 size={18} color="#4A90E2" />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.optionTitle}>Editar "{event.name}"</Text>
-                                            <Text style={styles.optionSubtitle}>Toca para modificar detalles</Text>
-                                        </View>
-                                    </TouchableOpacity>
-                                ))}
+const isExam = (event) => (event?.type || 'exam') === 'exam';
 
-                                <View style={styles.divider} />
+/**
+ * What a day on the calendar opens into when it already has something on it:
+ * either add another exam or task, or pick one of the existing ones to edit.
+ * Both routes hand off to EventModal — this only decides which.
+ */
+export default function DayOptionsModal({
+  visible,
+  onClose,
+  events = [],
+  date,
+  subjects = [],
+  onAddNew,
+  onEditEvent,
+}) {
+  const colourOf = (event) =>
+    subjects.find((s) => s.id === event.subjectId)?.color || tokens.colors.textDisabled;
 
-                                <TouchableOpacity
-                                    style={[styles.optionCard, styles.addNewCard]}
-                                    onPress={onAddNew}
-                                >
-                                    <View style={[styles.optionIcon, styles.addNewIcon]}>
-                                        <Plus size={18} color="#FFFFFF" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[styles.optionTitle, { color: '#FFFFFF' }]}>Añadir nuevo evento</Text>
-                                        <Text style={styles.optionSubtitle}>Crear un examen o tarea</Text>
-                                    </View>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </TouchableWithoutFeedback>
-                </View>
-            </TouchableWithoutFeedback>
-        </Modal>
-    );
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title={formatDate(date)}>
+      <Text style={styles.lead}>
+        {events.length === 1
+          ? 'Ya tienes algo este día. Tócalo para editarlo, o añade otro.'
+          : `Ya tienes ${events.length} cosas este día. Toca una para editarla, o añade otra.`}
+      </Text>
+
+      <View style={styles.list}>
+        {events.map((event, index) => {
+          const exam = isExam(event);
+          const Icon = exam ? GraduationCap : ClipboardList;
+          return (
+            <TouchableOpacity
+              key={event.id || index}
+              activeOpacity={0.8}
+              onPress={() => onEditEvent(event)}
+              style={styles.row}
+              accessibilityRole="button"
+              accessibilityLabel={`Editar ${event.name}`}
+            >
+              <View style={[styles.icon, { backgroundColor: colourOf(event) }]}>
+                <Icon size={17} color="#FFFFFF" strokeWidth={2} />
+              </View>
+              <View style={styles.body}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {event.name}
+                </Text>
+                <Text style={styles.meta}>{exam ? 'Examen' : 'Tarea o entrega'}</Text>
+              </View>
+              <ChevronRight size={18} color={tokens.colors.textSecondary} strokeWidth={1.75} />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      <View style={{ marginTop: 20 }}>
+        <Button
+          title="Añadir examen o tarea"
+          fullWidth
+          icon={<Plus size={17} color="#FFFFFF" />}
+          onPress={onAddNew}
+        />
+      </View>
+    </BottomSheet>
+  );
 }
 
 const styles = StyleSheet.create({
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        justifyContent: 'center',
-        padding: 24,
-    },
-    modalContainer: {
-        backgroundColor: '#1C1C1E',
-        borderRadius: 24,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        padding: 24,
-        overflow: 'hidden',
-    },
-    header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: 24,
-    },
-    title: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: '#FFFFFF',
-        marginBottom: 4,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: '#8E8E93',
-        textTransform: 'capitalize',
-    },
-    closeBtn: {
-        padding: 4,
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 20,
-    },
-    content: {
-        gap: 12,
-    },
-    sectionLabel: {
-        fontSize: 13,
-        color: '#8E8E93',
-        fontWeight: '600',
-        marginBottom: 4,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    optionCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 16,
-        backgroundColor: '#2C2C2E',
-        padding: 16,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    addNewCard: {
-        backgroundColor: 'rgba(74, 144, 226, 0.15)',
-        borderColor: 'rgba(74, 144, 226, 0.3)',
-    },
-    optionIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(74, 144, 226, 0.1)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    addNewIcon: {
-        backgroundColor: '#4A90E2',
-    },
-    optionTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#FFFFFF',
-        marginBottom: 2,
-    },
-    optionSubtitle: {
-        fontSize: 13,
-        color: '#8E8E93',
-    },
-    divider: {
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        marginVertical: 8,
-    }
+  lead: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+    marginTop: 4,
+  },
+  list: {
+    gap: 8,
+    marginTop: 20,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    borderRadius: tokens.radius.card,
+  },
+  icon: {
+    width: 34,
+    height: 34,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  body: {
+    flex: 1,
+    minWidth: 0,
+  },
+  name: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  meta: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    marginTop: 2,
+  },
 });

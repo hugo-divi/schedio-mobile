@@ -80,9 +80,14 @@ const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
   }
 };
 
+/** Files a free account may upload per rolling seven days. */
+export const FREE_WEEKLY_UPLOADS = 3;
+
 const initialState = {
   profile: null,
   subjects: [],
+  // Timestamps of past uploads, used for the rolling weekly allowance.
+  uploadsHistory: [],
   // The plan the UI renders. DERIVED — regenerated from exams and then merged
   // with `manualTasks` + `planOverrides`. Still persisted so the first paint
   // after a cold start doesn't need a round trip, but it is no longer the source
@@ -218,20 +223,40 @@ const useUserStore = create((set, get) => ({
     }
   },
 
+  updateQuickNote: async (uid, noteId, content) => {
+    try {
+      // `createdAt` is deliberately untouched: the list is ordered by it, and
+      // fixing a typo should not jump a note to the top.
+      await updateDoc(doc(db, 'users', uid, 'notes', noteId), {
+        content,
+        updatedAt: new Date().toISOString(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Error updating quick note:', error);
+      throw error;
+    }
+  },
+
   canUpload: () => {
-    const { uploadsHistory, profile } = get();
+    const { profile } = get();
     // Entitlement comes from RevenueCat (see authStore), never from Firestore.
     const isPrime = useAuthStore.getState().isPrime;
     // Use centralized permission check
     if (hasPrimeAccess({ isPrime, ...profile })) return true;
 
-    const now = Date.now();
-    const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
+    return get().uploadsThisWeek() < FREE_WEEKLY_UPLOADS;
+  },
 
-    // Filter uploads from the last 7 days
-    const recentUploads = (uploadsHistory || []).filter((timestamp) => timestamp > oneWeekAgo);
-
-    return recentUploads.length < 3;
+  /**
+   * Uploads inside the rolling seven-day window. Split out of `canUpload` so
+   * the Mochila can show how much of the free allowance is left, instead of
+   * only finding out when an upload is refused.
+   */
+  uploadsThisWeek: () => {
+    const { uploadsHistory } = get();
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return (uploadsHistory || []).filter((timestamp) => timestamp > oneWeekAgo).length;
   },
 
   recordUpload: async (userId) => {
@@ -342,7 +367,7 @@ const useUserStore = create((set, get) => ({
       const userRef = doc(db, 'users', uid);
 
       // Parallel writes for efficiency
-      await Promise.all([
+      const [, createdSession] = await Promise.all([
         updateDoc(userRef, {
           stats: newStats,
           gamification: newGameData,
@@ -358,10 +383,48 @@ const useUserStore = create((set, get) => ({
         }),
       ]);
 
-      return { xpEarned, newLevel, unlockedBadges, newRank };
+      // Swap the optimistic id for the real one so a later patch (notes, mood)
+      // has something to write to.
+      if (createdSession?.id) {
+        set((state) => ({
+          sessionHistory: state.sessionHistory.map((s) =>
+            s.id === newLocalSession.id ? { ...s, id: createdSession.id } : s
+          ),
+        }));
+      }
+
+      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: createdSession?.id ?? null };
     } catch (error) {
       console.error('Error saving session:', error);
-      return { xpEarned, newLevel, unlockedBadges, newRank };
+      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: null };
+    }
+  },
+
+  /**
+   * Attach what the student wrote after the timer stopped. Kept separate from
+   * `addSession` because that one runs the moment the session ends — waiting
+   * for the summary screen would risk losing the streak and the XP if the app
+   * went away first.
+   */
+  updateSessionFeedback: async (sessionId, { notes, focusScore }) => {
+    if (!sessionId) return;
+
+    const fields = {};
+    if (typeof notes === 'string') fields.notes = notes;
+    if (typeof focusScore === 'number') fields.focusScore = focusScore;
+    if (Object.keys(fields).length === 0) return;
+
+    set((state) => ({
+      sessionHistory: state.sessionHistory.map((s) =>
+        s.id === sessionId ? { ...s, ...fields } : s
+      ),
+    }));
+
+    try {
+      const { updateSession } = await import('../services/sessions');
+      await updateSession(sessionId, fields);
+    } catch (error) {
+      console.error('Error saving session feedback:', error);
     }
   },
 

@@ -38,7 +38,6 @@ import useUserStore from '../../store/userStore';
 import Skeleton from '../../components/Skeleton';
 import GradeModal from '../../components/GradeModal';
 import StreakModal from '../../components/StreakModal';
-import LevelProgressModal from '../../components/LevelProgressModal';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
@@ -85,6 +84,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   const scrollViewRef = useRef(null);
+  const statsStripRef = useRef(null);
   const heroCardRef = useRef(null);
   const pendingSectionRef = useRef(null);
   const calendarSectionRef = useRef(null);
@@ -94,7 +94,6 @@ export default function Dashboard() {
 
   // Modals state
   const [streakModalOpen, setStreakModalOpen] = useState(false);
-  const [levelModalOpen, setLevelModalOpen] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [dayOptionsVisible, setDayOptionsVisible] = useState(false);
   const [gradeModalVisible, setGradeModalVisible] = useState(false);
@@ -482,67 +481,69 @@ export default function Dashboard() {
           />
         }
       >
-        {/* Streak / level — scrolls with the content, each half opens its modal */}
-        <Animated.View entering={FadeInDown.duration(320)}>
-          <StatsStrip>
-            <TouchableOpacity
-              style={styles.statCell}
-              onPress={() => setStreakModalOpen(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.statEmoji}>🔥</Text>
-              <View style={styles.statTextWrap}>
-                <OverlineLabel style={styles.statLabel}>Racha</OverlineLabel>
-                <Text
-                  style={[
-                    styles.statValue,
-                    userData.streak === 0 && { color: tokens.colors.textDisabled },
-                  ]}
-                >
-                  {userData.streak} {userData.streak === 1 ? 'día' : 'días'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <View style={styles.statDivider} />
-
-            <TouchableOpacity
-              style={styles.statCell}
-              onPress={() => setLevelModalOpen(true)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.statEmoji}>⚡</Text>
-              <View style={styles.statTextWrap}>
-                <OverlineLabel style={styles.statLabel}>Nivel</OverlineLabel>
-                <Text style={[styles.statValue, { color: tokens.colors.accent }]}>
-                  {userData.level}
-                </Text>
-                {/* How far into the current level the user is */}
-                <View style={styles.xpTrack}>
-                  <View style={[styles.xpFill, { width: `${levelProgress}%` }]} />
+        {/* Streak / level / average — each cell opens its own screen or sheet */}
+        <View ref={statsStripRef}>
+          <Animated.View entering={FadeInDown.duration(320)}>
+            <StatsStrip>
+              <TouchableOpacity
+                style={styles.statCell}
+                onPress={() => setStreakModalOpen(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statEmoji}>🔥</Text>
+                <View style={styles.statTextWrap}>
+                  <OverlineLabel style={styles.statLabel}>Racha</OverlineLabel>
+                  <Text
+                    style={[
+                      styles.statValue,
+                      userData.streak === 0 && { color: tokens.colors.textDisabled },
+                    ]}
+                  >
+                    {userData.streak} {userData.streak === 1 ? 'día' : 'días'}
+                  </Text>
                 </View>
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
 
-            <View style={styles.statDivider} />
+              <View style={styles.statDivider} />
 
-            <TouchableOpacity
-              style={styles.statCell}
-              onPress={() => router.push('/dashboard/profile')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.statEmoji}>📊</Text>
-              <View style={styles.statTextWrap}>
-                <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
-                <Text
-                  style={[styles.statValue, !hasAverage && { color: tokens.colors.textDisabled }]}
-                >
-                  {hasAverage ? String(averageGrade).replace('.', ',') : '—'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </StatsStrip>
-        </Animated.View>
+              <TouchableOpacity
+                style={styles.statCell}
+                onPress={() => router.push('/dashboard/ranks')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statEmoji}>⚡</Text>
+                <View style={styles.statTextWrap}>
+                  <OverlineLabel style={styles.statLabel}>Nivel</OverlineLabel>
+                  <Text style={[styles.statValue, { color: tokens.colors.accent }]}>
+                    {userData.level}
+                  </Text>
+                  {/* How far into the current level the user is */}
+                  <View style={styles.xpTrack}>
+                    <View style={[styles.xpFill, { width: `${levelProgress}%` }]} />
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              <View style={styles.statDivider} />
+
+              <TouchableOpacity
+                style={styles.statCell}
+                onPress={() => router.push('/dashboard/profile')}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.statEmoji}>📊</Text>
+                <View style={styles.statTextWrap}>
+                  <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
+                  <Text
+                    style={[styles.statValue, !hasAverage && { color: tokens.colors.textDisabled }]}
+                  >
+                    {hasAverage ? String(averageGrade).replace('.', ',') : '—'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </StatsStrip>
+          </Animated.View>
+        </View>
 
         {/* Welcome / AI suggestion */}
         <View ref={heroCardRef}>
@@ -743,6 +744,7 @@ export default function Dashboard() {
           onComplete={handleTourComplete}
           tourRefs={{
             scrollViewRef,
+            statsStripRef,
             heroCardRef,
             pendingSectionRef,
             calendarSectionRef,
@@ -764,16 +766,6 @@ export default function Dashboard() {
         onStartSession={() => router.push('/dashboard/study')}
       />
 
-      <LevelProgressModal
-        visible={levelModalOpen}
-        onClose={() => setLevelModalOpen(false)}
-        gamification={{
-          level: userData.level,
-          xp: userData.xp,
-          rank: userData.rank,
-        }}
-      />
-
       <EventModal
         visible={eventModalVisible}
         onClose={() => setEventModalVisible(false)}
@@ -789,15 +781,16 @@ export default function Dashboard() {
         onClose={() => setDayOptionsVisible(false)}
         date={selectedDate}
         events={eventsForSelectedDay}
+        subjects={subjects}
         onAddNew={() => {
           setDayOptionsVisible(false);
           setSelectedEvent(null);
-          setTimeout(() => setEventModalVisible(true), 100);
+          setTimeout(() => setEventModalVisible(true), 220);
         }}
         onEditEvent={(event) => {
           setDayOptionsVisible(false);
           setSelectedEvent(event);
-          setTimeout(() => setEventModalVisible(true), 100);
+          setTimeout(() => setEventModalVisible(true), 220);
         }}
       />
 

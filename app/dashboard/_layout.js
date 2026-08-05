@@ -164,8 +164,12 @@ export default function DashboardLayout() {
       <UploadModal
         visible={uploadModalVisible}
         onClose={() => setUploadModalVisible(false)}
+        subjects={subjects}
         onUploadSuccess={(fileData) => {
-          console.log('File uploaded via quick action:', fileData);
+          // This used to only log: the file reached Storage and then never got
+          // a Firestore row, so it never showed up in the Mochila.
+          const uid = auth.currentUser?.uid;
+          if (uid) useUserStore.getState().addResource(uid, fileData);
         }}
       />
     </>
@@ -176,10 +180,13 @@ const styles = StyleSheet.create({
   fabButton: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
+    // No elevation: the redesign is flat, and this was the last drop shadow
+    // left in the tab bar. The accent fill is already the loudest thing there.
+    borderWidth: 3,
+    borderColor: tokens.colors.background,
   },
 });
