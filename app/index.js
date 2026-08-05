@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { LoadingScreen } from '../components/LoadingScreen';
 import useAuthStore from '../store/authStore';
+import { needsOnboarding } from '../services/onboarding';
 
 export default function Home() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function Home() {
     if (loading) return;
 
     // Small delay to show branding rather than a hard cut.
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       if (!user) {
         router.replace('/login');
       } else if (!user.emailVerified) {
@@ -26,7 +27,9 @@ export default function Home() {
         // password account that never verified shouldn't skip it.
         router.replace('/verify-email');
       } else {
-        router.replace('/dashboard');
+        // Same as login.js: an account that abandoned onboarding goes back
+        // into it rather than landing on a dashboard with no subjects.
+        router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
       }
     }, 1200);
 
