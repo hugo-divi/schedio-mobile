@@ -30,9 +30,11 @@ import {
   LogOut,
 } from 'lucide-react-native';
 
-import { auth } from '../services/firebase';
+import { auth, db } from '../services/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
+import { doc, updateDoc } from 'firebase/firestore';
 import { deleteAccount, usesPasswordSignIn } from '../services/account';
+import { registerForPushNotifications } from '../services/notificationService';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -123,6 +125,24 @@ export default function SettingsScreen() {
   const setAutoGradePrompt = usePreferencesStore((state) => state.setAutoGradePrompt);
   const notificationsEnabled = usePreferencesStore((state) => state.notificationsEnabled);
   const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
+
+  // The switch used to be decorative — this is what actually turns the
+  // server-side pipeline (Cloud Functions + FCM) on and off for this device.
+  // Off clears the token so every scheduled function's `if (!fcmToken)
+  // continue` skips this user; on re-registers it, asking for permission
+  // again if it was never granted.
+  const handleNotificationsToggle = async (value) => {
+    setNotificationsEnabled(value);
+    if (!user) return;
+    if (value) {
+      await registerForPushNotifications(user.uid);
+    } else {
+      await updateDoc(doc(db, 'users', user.uid), {
+        fcmToken: null,
+        notificationsConsent: false,
+      });
+    }
+  };
 
   const [alertConfig, setAlertConfig] = useState({ visible: false });
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -288,7 +308,7 @@ export default function SettingsScreen() {
             label="Notificaciones"
             sub="Recordatorios de exámenes y racha"
             control={
-              <Toggle value={notificationsEnabled} onValueChange={setNotificationsEnabled} />
+              <Toggle value={notificationsEnabled} onValueChange={handleNotificationsToggle} />
             }
           />
           <Row
