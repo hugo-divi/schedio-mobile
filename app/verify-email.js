@@ -101,6 +101,10 @@ export default function VerifyEmail() {
           {'\n'}Ábrelo y vuelve aquí.
         </Animated.Text>
 
+        <Animated.Text entering={FadeInDown.duration(300).delay(220)} style={styles.spamHint}>
+          Si no lo ves en un par de minutos, revisa también la carpeta de spam o promociones.
+        </Animated.Text>
+
         {message ? (
           <Animated.View
             entering={FadeIn.duration(200)}
@@ -179,6 +183,14 @@ const styles = StyleSheet.create({
   email: {
     fontFamily: font.semibold,
     color: tokens.colors.textPrimary,
+  },
+  spamHint: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: tokens.colors.textDisabled,
+    textAlign: 'center',
+    marginTop: 12,
   },
   messageBox: {
     marginTop: 20,
