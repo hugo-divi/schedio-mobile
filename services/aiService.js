@@ -380,20 +380,47 @@ export const identifyWeakSubjects = (sessions, subjects, exams) => {
 };
 
 /**
+ * Mensajes genéricos para cuando no hay recomendación de IA disponible —
+ * porque falló la llamada, porque se acabó la cuota diaria del usuario sin
+ * nada que repetir todavía, o porque el freno de presupuesto mensual
+ * (MONTHLY_BUDGET_USD en functions/index.js) cortó las llamadas a Gemini
+ * para todo el mundo. Con 15 variantes elegidas al azar, es poco probable
+ * ver la misma dos veces seguidas sin tener que llevar la cuenta de cuál
+ * tocó la última vez.
+ */
+const GENERIC_RECOMMENDATIONS = [
+  'Cada sesión cuenta, por pequeña que sea. Sigue a tu ritmo.',
+  'Organiza tu día con calma: un paso cada vez es suficiente.',
+  'Revisa tu calendario y elige una tarea sencilla para empezar.',
+  'La constancia pesa más que la intensidad. Sigue así.',
+  'Tómate un momento para repasar tus próximos exámenes.',
+  'Un buen descanso también forma parte de estudiar bien.',
+  'Elige la asignatura que más se acerque y dale prioridad.',
+  'Pequeños avances diarios suman más de lo que parece.',
+  'Revisa tu Mochila: puede que tengas apuntes útiles ahí guardados.',
+  'Hoy es un buen día para repasar algo que ya sabes bien.',
+  'No hace falta un plan perfecto, solo empezar.',
+  'Tu progreso hasta ahora ya dice mucho de ti.',
+  'Dedica unos minutos a organizar lo que toca esta semana.',
+  'Ir paso a paso también es avanzar.',
+  'Confía en el trabajo que ya has hecho hasta ahora.',
+];
+
+const pickGenericRecommendation = () =>
+  GENERIC_RECOMMENDATIONS[Math.floor(Math.random() * GENERIC_RECOMMENDATIONS.length)];
+
+/**
  * Recomendaciones de fallback cuando la API falla
  */
 const getFallbackRecommendations = (userData) => {
-  const { sessions, exams, subjects, streak } = userData;
+  const { sessions, exams, subjects } = userData;
 
   const weakSubjects = identifyWeakSubjects(sessions, subjects, exams);
   const upcomingExams =
     exams?.filter((e) => !e.completed && new Date(e.date) > new Date()).slice(0, 3) || [];
 
   return {
-    mainRecommendation:
-      streak?.currentStreak > 0
-        ? `¡Llevas ${streak.currentStreak} días de racha! Mantén el impulso con una sesión hoy.`
-        : '¡Comienza tu racha hoy! Una sesión de 25 minutos es todo lo que necesitas.',
+    mainRecommendation: pickGenericRecommendation(),
     studyPlan: upcomingExams.map((exam) => {
       const subject = subjects?.find((s) => s.id === exam.subjectId);
       const daysUntil = Math.ceil((new Date(exam.date) - new Date()) / (1000 * 60 * 60 * 24));

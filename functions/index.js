@@ -255,8 +255,21 @@ const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GE
 // real recommendation instead of calling Gemini again — still feels live
 // (opening the app doesn't show a canned message) without the cost or abuse
 // surface of an unlimited backend.
-const AI_DAILY_LIMIT = 5;
+const AI_DAILY_LIMIT = 3;
 const MAX_PROMPT_LENGTH = 8000;
+
+// Global circuit breaker: the per-user cap alone doesn't stop cost from a
+// fan-out across many accounts (real or scripted). Tracked in USD because
+// that's what Gemini bills in — €20 at ~1.15 USD/EUR (checked at the time
+// this was written; drifts with the real exchange rate, so treat this as an
+// approximation, not an exact cutoff). Resets automatically each calendar
+// month via the `month` key below, the same pattern the daily fields use.
+const MONTHLY_BUDGET_USD = 23;
+const GEMINI_INPUT_USD_PER_1M = 0.3;
+const GEMINI_OUTPUT_USD_PER_1M = 2.5;
+
+/** 'YYYY-MM' for the Madrid calendar month `date` falls in. */
+const madridMonthKey = (date) => madridDateKey(date).slice(0, 7);
 
 const callGemini = async (prompt, attempt = 0) => {
   const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY.value()}`, {
@@ -282,7 +295,13 @@ const callGemini = async (prompt, attempt = 0) => {
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error('Empty response from Gemini');
-  return text;
+
+  const usage = data.usageMetadata || {};
+  const costUsd =
+    ((usage.promptTokenCount || 0) / 1e6) * GEMINI_INPUT_USD_PER_1M +
+    ((usage.candidatesTokenCount || 0) / 1e6) * GEMINI_OUTPUT_USD_PER_1M;
+
+  return { text, costUsd };
 };
 
 exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
@@ -300,11 +319,25 @@ exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
     throw new HttpsError('invalid-argument', 'El prompt es demasiado largo.');
   }
 
+  const todayKey = madridDateKey(new Date());
+  const monthKey = madridMonthKey(new Date());
+
+  // Global breaker first — cheaper than the per-user read, and if the month's
+  // budget is already gone there's no point checking anything else.
+  const budgetRef = db.collection('system').doc('aiBudget');
+  const budgetSnap = await budgetRef.get();
+  const budget = budgetSnap.exists ? budgetSnap.data() : null;
+  const budgetSpent = budget?.month === monthKey ? (budget.spentUsd ?? 0) : 0;
+
+  if (budgetSpent >= MONTHLY_BUDGET_USD) {
+    logger.warn('AI monthly budget exhausted, serving no AI calls', { monthKey, budgetSpent });
+    return { text: null, limited: true, budgetExceeded: true };
+  }
+
   const uid = request.auth.uid;
   const usageRef = db.collection('users').doc(uid).collection('meta').doc('aiUsage');
   const usageSnap = await usageRef.get();
   const usage = usageSnap.exists ? usageSnap.data() : null;
-  const todayKey = madridDateKey(new Date());
   const sameDay = usage?.date === todayKey;
   const countSoFar = sameDay ? (usage.count ?? 0) : 0;
 
@@ -315,9 +348,21 @@ exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
     return { text: sameDay ? (usage.lastRecommendation ?? null) : null, limited: true };
   }
 
-  const text = await callGemini(prompt);
+  const { text, costUsd } = await callGemini(prompt);
 
   await usageRef.set({ date: todayKey, count: countSoFar + 1, lastRecommendation: text });
+
+  // FieldValue.increment rather than reading spentUsd and writing spentUsd +
+  // costUsd back: this doc is shared across every user's calls, so a plain
+  // read-then-write would lose updates whenever two calls landed at once.
+  // increment() applies server-side and is safe under that concurrency.
+  // Reset instead of increment on a month rollover, or the new month would
+  // start by inheriting whatever was left over from the old one.
+  if (budget?.month === monthKey) {
+    await budgetRef.update({ spentUsd: FieldValue.increment(costUsd) });
+  } else {
+    await budgetRef.set({ month: monthKey, spentUsd: costUsd });
+  }
 
   return { text, limited: false };
 });
