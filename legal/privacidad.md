@@ -14,7 +14,7 @@ Cómo usar este documento:
 
 # Política de privacidad de Schedio
 
-**Última actualización:** 3 de agosto de 2026
+**Última actualización:** 5 de agosto de 2026
 
 Esta política explica qué datos personales recoge Schedio, para qué los usa, con quién los comparte y qué derechos tienes sobre ellos, conforme al Reglamento General de Protección de Datos (RGPD) y la Ley Orgánica 3/2018 (LOPD-GDD).
 
@@ -31,30 +31,31 @@ Schedio está pensado para estudiantes de Bachillerato, ESO y universidad, orien
 
 ## 3. Qué datos recogemos y para qué
 
-| Dato                                                            | De dónde sale                                   | Para qué lo usamos                                                                                 |
-| --------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Email, nombre y contraseña (cifrada)                            | Registro con email/contraseña                   | Crear y proteger tu cuenta                                                                         |
-| Email, nombre y foto de perfil                                  | Registro con Google                             | Crear y proteger tu cuenta, sin pedirte otra contraseña                                            |
-| Curso, rama de Bachillerato, nota media, asignaturas            | Onboarding inicial                              | Generar tu plan de estudio y las recomendaciones de la app                                         |
-| Exámenes (asignatura y fecha)                                   | Calendario académico que creas dentro de la app | Organizar tu calendario y avisarte con antelación                                                  |
-| Sesiones de estudio, rachas y rango                             | Uso normal de la app                            | Medir tu progreso y mostrártelo en Inicio/Perfil                                                   |
-| Archivos que subes a la Mochila (apuntes, imágenes, documentos) | Subida manual desde la app                      | Guardarlos para que los tengas disponibles en la app                                               |
-| Historial de compras/suscripción (Schedio Prime)                | Google Play / App Store, vía RevenueCat         | Saber si tienes acceso a las funciones de pago                                                     |
-| Token de notificaciones push                                    | Si activas notificaciones                       | Enviarte avisos relevantes (exámenes, resúmenes); no se usa todavía en la versión actual de la app |
+| Dato                                                                                                                  | De dónde sale                                   | Para qué lo usamos                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Email, nombre y contraseña (cifrada)                                                                                  | Registro con email/contraseña                   | Crear y proteger tu cuenta                                                                                              |
+| Email, nombre y foto de perfil                                                                                        | Registro con Google                             | Crear y proteger tu cuenta, sin pedirte otra contraseña                                                                 |
+| Curso, rama de Bachillerato, nota media, asignaturas                                                                  | Onboarding inicial                              | Generar tu plan de estudio y las recomendaciones de la app                                                              |
+| Exámenes (asignatura y fecha)                                                                                         | Calendario académico que creas dentro de la app | Organizar tu calendario y avisarte con antelación                                                                       |
+| Sesiones de estudio, rachas y rango                                                                                   | Uso normal de la app                            | Medir tu progreso y mostrártelo en Inicio/Perfil                                                                        |
+| Archivos que subes a la Mochila (apuntes, imágenes, documentos)                                                       | Subida manual desde la app                      | Guardarlos para que los tengas disponibles en la app                                                                    |
+| Historial de compras/suscripción (Schedio Prime)                                                                      | Google Play / App Store, vía RevenueCat         | Saber si tienes acceso a las funciones de pago                                                                          |
+| Token de notificaciones push                                                                                          | Si aceptas el permiso de notificaciones         | Avisarte de exámenes próximos, retomar el estudio tras unos días sin abrir la app, y un resumen semanal de tus sesiones |
+| Datos de fallos de la app (Crashlytics): modelo de dispositivo, versión de Android, y el punto del código donde falló | Automático si la app se cierra inesperadamente  | Detectar y corregir errores. No incluye tu email, contraseña ni contenido de la Mochila                                 |
 
 No recogemos datos de pago (número de tarjeta, etc.) directamente: las compras las gestionan Google Play o Apple, no Schedio.
 
 ## 4. Base legal del tratamiento
 
 - **Ejecución del contrato de uso:** los datos de cuenta, calendario, Mochila y progreso son necesarios para prestarte el servicio que pides al registrarte.
-- **Consentimiento:** para las recomendaciones generadas con inteligencia artificial y, en su momento, para las notificaciones push.
-- **Interés legítimo:** medidas mínimas de seguridad y prevención de abuso (por ejemplo, limitar intentos de inicio de sesión).
+- **Consentimiento:** para las recomendaciones generadas con inteligencia artificial y para las notificaciones push (se piden explícitamente al aceptar el permiso).
+- **Interés legítimo:** medidas mínimas de seguridad y prevención de abuso (por ejemplo, limitar intentos de inicio de sesión), y el diagnóstico de fallos técnicos (Crashlytics).
 
 ## 5. Con quién compartimos tus datos
 
 Schedio no vende tus datos a nadie. Los siguientes proveedores tratan datos por nuestra cuenta, como encargados del tratamiento, únicamente para prestar el servicio:
 
-- **Google Firebase** (Authentication, Firestore, Storage): aloja tu cuenta, tu calendario, tu progreso y los archivos de tu Mochila. Los datos de Firestore/Storage se almacenan en la región europea (`eur3`).
+- **Google Firebase** (Authentication, Firestore, Storage, Cloud Messaging, Crashlytics, Cloud Functions): aloja tu cuenta, tu calendario, tu progreso, los archivos de tu Mochila, envía las notificaciones push y recoge los datos de fallos técnicos. Firestore/Storage se almacenan en la región europea (`eur3`/`europe-southwest1`).
 - **Google Gemini API**: cuando usas las recomendaciones de IA, tu nombre y tu perfil académico (asignaturas, notas, exámenes próximos, patrones de estudio) se envían a esta API de Google para generar el texto de la recomendación. No se envían tu email, contraseña ni archivos de la Mochila.
 - **RevenueCat**: gestiona el estado de tu suscripción a Schedio Prime a partir de tu compra en Google Play/App Store; no ve tu email ni tus datos académicos.
 - **Google Play / App Store**: procesan el pago de Schedio Prime directamente; Schedio no ve ni almacena tus datos de pago.
