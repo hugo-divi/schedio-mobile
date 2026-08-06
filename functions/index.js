@@ -1,4 +1,6 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
+const { onCall, HttpsError } = require('firebase-functions/v2/https');
+const { defineSecret } = require('firebase-functions/params');
 // Deliberately not `firebase-functions/v2` — that barrel eagerly requires
 // every v2 provider, including the Realtime Database one, which pulls in
 // firebase-admin's RTDB compat layer and a `@firebase/app` import that isn't
@@ -234,4 +236,88 @@ exports.weeklySummary = onSchedule({ schedule: '0 20 * * 0', timeZone: TIMEZONE 
 
     await doc.ref.update({ lastNotifiedDate: madridDateKey(new Date()) });
   }
+});
+
+// ── AI proxy ──────────────────────────────────────────────────────────────
+// The client used to call Gemini directly with a key shipped in the app
+// bundle — extractable from any distributed APK, so effectively public, and
+// nothing stopped someone who pulled it out from hammering it outside the
+// app entirely. Routing through here fixes both at once: the key never
+// leaves the server, and every call is tied to a real signed-in user, which
+// is what makes a per-user quota actually enforceable rather than
+// decorative.
+
+const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+const GEMINI_MODEL = 'gemini-2.5-flash-lite';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+// Fresh AI calls per user per day; once hit, aiProxy replays that day's last
+// real recommendation instead of calling Gemini again — still feels live
+// (opening the app doesn't show a canned message) without the cost or abuse
+// surface of an unlimited backend.
+const AI_DAILY_LIMIT = 5;
+const MAX_PROMPT_LENGTH = 8000;
+
+const callGemini = async (prompt, attempt = 0) => {
+  const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY.value()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.7, topK: 40, topP: 0.95, maxOutputTokens: 1024 },
+    }),
+  });
+
+  if (!response.ok) {
+    // Bounded, unlike the client's old version of this — that one recursed
+    // on every 500/503 with no cap, which during a real Gemini outage meant
+    // retrying forever instead of failing.
+    if ((response.status === 500 || response.status === 503) && attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+      return callGemini(prompt, attempt + 1);
+    }
+    throw new Error(`Gemini API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Empty response from Gemini');
+  return text;
+};
+
+exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
+  // onCall verifies the Firebase Auth ID token itself — request.auth is only
+  // populated once that's checked, so this is the whole authentication step.
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Debes iniciar sesión.');
+  }
+
+  const prompt = request.data?.prompt;
+  if (!prompt || typeof prompt !== 'string') {
+    throw new HttpsError('invalid-argument', 'Falta el prompt.');
+  }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    throw new HttpsError('invalid-argument', 'El prompt es demasiado largo.');
+  }
+
+  const uid = request.auth.uid;
+  const usageRef = db.collection('users').doc(uid).collection('meta').doc('aiUsage');
+  const usageSnap = await usageRef.get();
+  const usage = usageSnap.exists ? usageSnap.data() : null;
+  const todayKey = madridDateKey(new Date());
+  const sameDay = usage?.date === todayKey;
+  const countSoFar = sameDay ? (usage.count ?? 0) : 0;
+
+  if (countSoFar >= AI_DAILY_LIMIT) {
+    // Replay today's last real recommendation rather than calling Gemini
+    // again. `text: null` is the signal for the rare case there isn't one
+    // yet to replay — the client falls back to its own local logic then.
+    return { text: sameDay ? (usage.lastRecommendation ?? null) : null, limited: true };
+  }
+
+  const text = await callGemini(prompt);
+
+  await usageRef.set({ date: todayKey, count: countSoFar + 1, lastRecommendation: text });
+
+  return { text, limited: false };
 });

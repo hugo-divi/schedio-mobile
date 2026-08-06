@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "97363652124-vsblcl22l5llgnc5avunv3647clhpe28.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.schedio.mobile",
+            "certificate_hash": "80231340237ca233fc90b2ac87cdced727842c97"
+          }
+        },
+        {
           "client_id": "97363652124-n1ljd61rl8vq9hrcnvn6ljtj52svrdkh.apps.googleusercontent.com",
           "client_type": 3
         }

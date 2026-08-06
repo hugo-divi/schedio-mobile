@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { getFunctions } from 'firebase/functions';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
@@ -57,5 +58,9 @@ export { auth };
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+// Must match where functions/index.js's setGlobalOptions region is set —
+// the default SDK region (us-central1) doesn't match where these actually
+// live, and calling the wrong region 404s.
+export const functions = getFunctions(app, 'europe-west1');
 
 export default app;

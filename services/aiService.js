@@ -1,28 +1,20 @@
 /**
  * AI Service - Google Gemini Integration
  *
- * 🛡️ KNOWN LIMITATION: the key below ships inside the client bundle.
- * Any EXPO_PUBLIC_* value is extractable from a distributed APK, so this key
- * must be treated as public. The proper fix is routing calls through a server
- * (see USE_BACKEND_PROXY), which needs Firebase Cloud Functions and therefore
- * the Blaze plan — this project is on Spark, so it is not available yet.
- *
- * Until then the exposure is capped rather than closed, via Google Cloud
- * Console (outside this repo): usage quota + budget alerts on the Generative
- * Language API, key restricted to that single API, and periodic key rotation.
- *
- * When Blaze is enabled, flipping USE_BACKEND_PROXY to true and setting
- * BACKEND_URL is nearly the whole migration — only two call sites reach this
- * module's API-backed functions: app/dashboard/index.js and store/userStore.js.
+ * Calls go through the `aiProxy` Cloud Function (functions/index.js) rather
+ * than Gemini directly. It used to call Gemini with a key embedded in the
+ * client bundle — extractable from any distributed APK, so effectively
+ * public, and nothing stopped someone who pulled it out from calling it
+ * outside the app with no limit at all. The proxy keeps the key server-side
+ * and enforces a 5-per-day quota per signed-in user (see AI_DAILY_LIMIT in
+ * functions/index.js) — real enforcement, since it's tied to a verified
+ * Firebase Auth token rather than anything the client claims about itself.
  */
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC__GEMINI_API_KEY;
-const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from './firebase';
 
-// 🛡️ Requires a deployed Cloud Function (Blaze plan). See note above.
-const USE_BACKEND_PROXY = false;
-const BACKEND_URL = 'https://YOUR_BACKEND_REGION-YOUR_PROJECT.cloudfunctions.net/aiProxy';
+const callAiProxy = httpsCallable(functions, 'aiProxy');
 
 // Cache para evitar llamadas excesivas a la API
 const cache = {
@@ -40,85 +32,24 @@ const isCacheValid = () => {
 };
 
 /**
- * Llama a la API de Gemini con un prompt
- * 🛡️ SECURITY: Supports both direct frontend calls and backend proxying
+ * Sends a prompt through the aiProxy Cloud Function. Retries and the daily
+ * quota are enforced server-side now (see functions/index.js) — this just
+ * surfaces whatever it returns. A `limited: true, text: null` response (quota
+ * hit on the very first call of the day, so there's nothing yet to replay)
+ * throws the same as any other failure, so every caller's existing
+ * catch-and-fall-back-to-local-logic path handles it without changes.
  */
 const callGeminiAPI = async (prompt) => {
-  if (USE_BACKEND_PROXY) {
-    return callBackendProxy(prompt);
-  }
-
-  if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your_gemini_api_key_here') {
-    console.warn(
-      '🛡️ [Security] AI Service: API Key is missing or default. Falling back to local logic.'
-    );
-    throw new Error('GEMINI_API_KEY not configured properly');
-  }
-
   try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: prompt,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 4096,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      if (response.status === 503 || response.status === 500) {
-        console.warn(`Gemini API ${response.status} (Service Unavailable). Retrying in 2s...`);
-        await new Promise((r) => setTimeout(r, 2000));
-        return callGeminiAPI(prompt);
-      }
-      throw new Error(`API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
+    const result = await callAiProxy({ prompt });
+    const text = result.data?.text;
     if (!text) {
-      throw new Error('No response from API');
+      throw new Error('No response from AI proxy');
     }
-
     return text;
   } catch (error) {
-    console.error('Gemini API error:', error);
+    console.error('AI proxy error:', error);
     throw error;
-  }
-};
-
-/**
- * 🛡️ Backend Proxy Caller (Placeholder for secure implementation)
- */
-const callBackendProxy = async (prompt) => {
-  try {
-    const response = await fetch(BACKEND_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
-    });
-    if (!response.ok) throw new Error('Backend proxy error');
-    const data = await response.json();
-    return data.text;
-  } catch (e) {
-    console.error('🛡️ [Security] Backend Proxy failed:', e);
-    throw e;
   }
 };
 
