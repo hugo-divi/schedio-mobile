@@ -26,7 +26,12 @@ import {
   checkNewBadges,
   BASE_XP_PER_MINUTE,
 } from '../services/gamification';
-import { hasPrimeAccess } from '../services/permissions';
+import {
+  getWeeklyUploadLimit,
+  getMaxSubjects,
+  WEEKLY_UPLOADS_FREE,
+  WEEKLY_UPLOADS_PRIME,
+} from '../services/permissions';
 import { logger } from '../utils/logger';
 import useAuthStore from './authStore';
 
@@ -80,8 +85,9 @@ const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
   }
 };
 
-/** Files a free account may upload per rolling seven days. */
-export const FREE_WEEKLY_UPLOADS = 3;
+/** Re-exported for screens that display the quota (plan-aware limits live in services/permissions.js). */
+export const FREE_WEEKLY_UPLOADS = WEEKLY_UPLOADS_FREE;
+export const PRIME_WEEKLY_UPLOADS = WEEKLY_UPLOADS_PRIME;
 
 const initialState = {
   profile: null,
@@ -187,9 +193,8 @@ const useUserStore = create((set, get) => ({
         const resourcesSnap = await getDocs(query(resourcesRef, limit(50)));
         const resources = resourcesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         set({ resources });
-      } catch (rErr) {
+      } catch {
         // Silently fail if resources subcollection isn't accessible or doesn't exist
-        // console.debug("Resources not loaded:", rErr.message);
       }
     } catch (error) {
       logger.error('Error loading user data:', error);
@@ -242,10 +247,14 @@ const useUserStore = create((set, get) => ({
     const { profile } = get();
     // Entitlement comes from RevenueCat (see authStore), never from Firestore.
     const isPrime = useAuthStore.getState().isPrime;
-    // Use centralized permission check
-    if (hasPrimeAccess({ isPrime, ...profile })) return true;
+    return get().uploadsThisWeek() < getWeeklyUploadLimit({ isPrime, ...profile });
+  },
 
-    return get().uploadsThisWeek() < FREE_WEEKLY_UPLOADS;
+  /** The current user's weekly upload cap (3 free / 15 Prime), for UI that shows remaining quota. */
+  weeklyUploadLimit: () => {
+    const { profile } = get();
+    const isPrime = useAuthStore.getState().isPrime;
+    return getWeeklyUploadLimit({ isPrime, ...profile });
   },
 
   /**
@@ -309,11 +318,8 @@ const useUserStore = create((set, get) => ({
 
     // 1. Update Stats
     const now = new Date();
-    const todayStr = now.toDateString();
-    const lastDate = stats.lastStudyDate ? new Date(stats.lastStudyDate) : null;
-    const lastDateStr = lastDate ? lastDate.toDateString() : null;
 
-    // 1. Use centralized reliable streak logic
+    // 2. Use centralized reliable streak logic
     const { recordActivity } = await import('../services/streaks');
     const streakResult = await recordActivity(uid, sessionData.duration);
     const newStreak = streakResult.currentStreak;
@@ -752,7 +758,22 @@ const useUserStore = create((set, get) => ({
     return writePlanOverride(get, set, uid, taskId, { dismissed: true }, extra);
   },
 
+  /** The current user's max subjects (8 free / 20 Prime — capped even for Prime against server load). */
+  maxSubjects: () => {
+    const { profile } = get();
+    const isPrime = useAuthStore.getState().isPrime;
+    return getMaxSubjects({ isPrime, ...profile });
+  },
+
   addSubject: async (userId, subjectData) => {
+    const { subjects, profile } = get();
+    const isPrime = useAuthStore.getState().isPrime;
+    if (subjects.length >= getMaxSubjects({ isPrime, ...profile })) {
+      const limitError = new Error('SUBJECT_LIMIT_REACHED');
+      limitError.code = 'SUBJECT_LIMIT_REACHED';
+      throw limitError;
+    }
+
     try {
       const newSubject = await createSubject({ ...subjectData, userId });
       set((state) => ({

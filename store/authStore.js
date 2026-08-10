@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { onAuthChange, isSessionExpired, signOut } from '../services/auth';
-import { checkEntitlements } from '../services/revenuecat';
+import { checkEntitlements, identifyUser, resetUser } from '../services/revenuecat';
 import { markAppOpened } from '../services/notificationService';
 
 /**
@@ -50,6 +50,9 @@ const useAuthStore = create((set) => ({
         set({ user, loading: false });
 
         if (user) {
+          // Identify before checking entitlements, or the check would still
+          // be reading whatever anonymous identity RevenueCat had before.
+          await identifyUser(user.uid);
           const isPrime = await checkEntitlements();
           set({ isPrime });
           // Approximates "opened the app": fires on launch and on
@@ -57,6 +60,7 @@ const useAuthStore = create((set) => ({
           // good enough for a daily-granularity inactivity check.
           markAppOpened(user.uid);
         } else {
+          await resetUser();
           set({ isPrime: false });
         }
       });

@@ -1,797 +1,624 @@
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Dimensions,
-  StyleSheet,
-  Platform,
-  Animated,
-} from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import {
-  ChevronLeft,
-  Sparkles,
-  Brain,
-  Zap,
-  FolderOpen,
-  Layout,
-  Infinity,
-  Check,
-  ShieldCheck,
-  X,
-  Star,
-  Users,
-  BrainCircuit,
-  TrendingUp,
-} from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { useState, useRef, useEffect } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ChevronLeft, X, Check, Star } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
 import { getOfferings, purchasePackage } from '../services/revenuecat';
 import useAuthStore from '../store/authStore';
-import { ActivityIndicator, Alert } from 'react-native';
+import { Button } from '../components/ui/Button';
+import { PremiumBadge } from '../components/ui/Chip';
 
-const { width, height } = Dimensions.get('window');
-const CARD_WIDTH = width - 84;
-const CARD_MARGIN = 12;
-const SNAP_INTERVAL = CARD_WIDTH + CARD_MARGIN;
+const font = tokens.typography.families.inter;
 
-const features = [
-  { icon: <Brain size={24} color="#FFD60A" />, title: 'IA de estudio ilimitada', emoji: '🤖' },
-  { icon: <Zap size={24} color="#FFD60A" />, title: 'Priorización Inteligente', emoji: '⚡' },
-  { icon: <FolderOpen size={24} color="#FFD60A" />, title: 'Mochila sin límites', emoji: '🎒' },
-  { icon: <Layout size={24} color="#FFD60A" />, title: 'Widgets Personalizados', emoji: '🖼️' },
-  { icon: <Infinity size={24} color="#FFD60A" />, title: 'Planes de estudio extra', emoji: '📈' },
+// What's actually shipped this round — keep in sync with the real gates in
+// userStore/permissions/plans.js. Widget and trimester live only in the
+// "Próximamente" note below, not as rows here, until they're real.
+const COMPARE_ROWS = [
+  { label: 'Mochila ampliada', note: 'Free limita las subidas semanales a la Mochila' },
+  { label: 'Materias ilimitadas', note: 'Free permite hasta 8 asignaturas' },
+  { label: 'Vista de Plan completa', note: 'Free muestra 1–2 semanas; Prime, el mes completo' },
+  { label: 'Exportar datos', note: 'Notas y exámenes en PDF', freeIncluded: false },
 ];
+
+const BULLETS = [
+  'Materias y Mochila ampliadas',
+  'Vista de Plan completa, hasta un mes por delante',
+  'Exporta tus notas y exámenes en PDF',
+];
+
+const TESTIMONIALS = [
+  {
+    quote:
+      'Desde que uso Prime llevo 3 semanas sin fallar ni un día de estudio. Las rachas me enganchan.',
+    author: 'Marta, 2º Bach',
+  },
+  {
+    quote:
+      'Tenía 4 exámenes en una semana y Schedio me dijo exactamente qué estudiar cada día. Aprobé todo.',
+    author: 'Marcos, 1º Universidad',
+  },
+  { quote: 'Ya no tengo límite de asignaturas en la Mochila.', author: 'Elena, 4º ESO' },
+];
+
+function CompareRow({ label, note, freeIncluded = true, index }) {
+  return (
+    <View style={[styles.row, index % 2 === 1 && styles.rowAlt]}>
+      <View style={styles.rowInfo}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {note ? <Text style={styles.rowNote}>{note}</Text> : null}
+      </View>
+      <View style={styles.rowCell}>
+        {freeIncluded ? (
+          <Check size={18} color={tokens.colors.trendUp} />
+        ) : (
+          <Text style={styles.rowDash}>—</Text>
+        )}
+      </View>
+      <View style={styles.rowCell}>
+        <Star size={16} color={tokens.colors.accent} fill={tokens.colors.accent} />
+      </View>
+    </View>
+  );
+}
+
+/** The gold-filled CTA is unique to the paywall — not the shared Button's territory. */
+function PrimeButton({ title, onPress, loading, disabled }) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled || loading}
+      activeOpacity={0.85}
+      style={[styles.primeButton, (disabled || loading) && { opacity: 0.6 }]}
+    >
+      {loading ? (
+        <ActivityIndicator color={tokens.colors.bgBase} />
+      ) : (
+        <Text style={styles.primeButtonText}>{title}</Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function Testimonials() {
+  const [index, setIndex] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setIndex((i) => (i + 1) % TESTIMONIALS.length), 4000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const current = TESTIMONIALS[index];
+
+  return (
+    <View style={styles.testimonial}>
+      <Text style={styles.testimonialQuote}>"{current.quote}"</Text>
+      <Text style={styles.testimonialAuthor}>{current.author}</Text>
+      <View style={styles.dots}>
+        {TESTIMONIALS.map((_, i) => (
+          <TouchableOpacity key={i} onPress={() => setIndex(i)} hitSlop={8}>
+            <View style={[styles.dot, i === index && styles.dotActive]} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export default function SchedioPlusScreen() {
   const router = useRouter();
-  const { isPrime, setIsPrime } = useAuthStore();
-  const [step, setStep] = useState(1); // 1: Features, 2: Comparison & Testimonials, 3: Purchase
-  const [selectedPlan, setSelectedPlan] = useState('monthly'); // Default to monthly as requested
-  const [showDiscount, setShowDiscount] = useState(false);
-
-  // RevenueCat State
+  const insets = useSafeAreaInsets();
+  const { setIsPrime } = useAuthStore();
+  const [step, setStep] = useState('compare'); // 'compare' | 'plan' | 'success'
   const [offerings, setOfferings] = useState(null);
+  const [offeringsLoading, setOfferingsLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
-  const [rcError, setRcError] = useState(null);
 
-  // Animations
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const featuresAnim = useRef(features.map(() => new Animated.Value(0))).current;
-  const tableAnim = useRef(new Animated.Value(0)).current;
-  const purchaseAnim = useRef(new Animated.Value(0)).current;
-  const discountAnim = useRef(new Animated.Value(0)).current;
-
-  // Load offerings (with dummy fallback)
   useEffect(() => {
-    const loadOfferings = async () => {
-      console.log('[Plus] Attempting to load offerings...');
+    let cancelled = false;
+    (async () => {
+      let data = null;
       try {
-        const data = await getOfferings();
-        if (data) {
-          setOfferings(data);
-        } else {
-          // Dummy data for testing as requested
-          setOfferings({
-            monthly: { product: { priceString: '4,99 €', price: 4.99 } },
-            annual: { product: { priceString: '80,91 €', price: 80.91 } },
-          });
-        }
-      } catch (err) {
-        console.log('[Plus] Using dummy data for fallback');
-        setOfferings({
-          monthly: { product: { priceString: '4,99 €', price: 4.99 } },
-          annual: { product: { priceString: '80,91 €', price: 80.91 } },
-        });
+        data = await getOfferings();
+      } catch {
+        // fall through to the placeholder below
       }
+      if (!cancelled) {
+        setOfferings(data || { monthly: { product: { priceString: '4,99 €' } } });
+        setOfferingsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadOfferings();
   }, []);
 
+  const price =
+    offerings?.monthly?.product?.priceString ||
+    offerings?.current?.monthly?.product?.priceString ||
+    '4,99 €';
+
   const handlePurchase = async () => {
-    if (!offerings) return;
-
-    const pack =
-      selectedPlan === 'annual'
-        ? offerings.annual || offerings.current?.annual
-        : offerings.monthly || offerings.current?.monthly;
-
+    const pack = offerings?.monthly || offerings?.current?.monthly;
     if (!pack) {
-      Alert.alert('Error', 'No se encontró el paquete seleccionado.');
+      Alert.alert(
+        'No disponible',
+        'No se encontró el plan mensual. Inténtalo de nuevo en unos segundos.'
+      );
       return;
     }
-
     setPurchasing(true);
-    const success = await purchasePackage(pack);
+    const result = await purchasePackage(pack);
     setPurchasing(false);
 
-    if (success) {
+    if (result) {
       // Optimistic UI only. The entitlement itself lives in RevenueCat and is
       // re-read via checkEntitlements() on every auth change — deliberately NOT
       // mirrored into Firestore, since a client-writable flag would let anyone
       // grant themselves Prime.
       setIsPrime(true);
-
-      Alert.alert('¡Bienvenido a Prime!', 'Tu suscripción ha sido activada con éxito. 🎉', [
-        { text: '¡Genial!', onPress: () => router.back() },
-      ]);
+      setStep('success');
+    } else if (result === false) {
+      // `null` means the student closed the purchase sheet themselves —
+      // nothing to say. `false` is a real failure (declined card, network,
+      // billing unavailable) and silence there just looks like a broken button.
+      Alert.alert(
+        'No se pudo completar la compra',
+        'Ha habido un problema procesando el pago. Comprueba tu método de pago en Google Play e inténtalo de nuevo.'
+      );
     }
   };
 
-  // Testimonials Setup
-  const scrollRef = useRef(null);
-  const testimonials = [
-    { name: 'Hugo', text: 'Me ha salvado el semestre. La IA organiza todo solo.', stars: 5 },
-    { name: 'Lucía', text: 'La interfaz es preciosa y el ahorro de tiempo es real.', stars: 5 },
-    { name: 'Marc', text: 'Por fin una app que entiende mis tiempos de estudio.', stars: 5 },
-  ];
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  // Initial load animation
-  useEffect(() => {
-    Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-    animateFeatures();
-  }, []);
-
-  const animateFeatures = () => {
-    const stagger = featuresAnim.map((anim, i) =>
-      Animated.spring(anim, {
-        toValue: 1,
-        tension: 50,
-        friction: 7,
-        delay: i * 100,
-        useNativeDriver: true,
-      })
-    );
-    Animated.stagger(100, stagger).start();
-  };
-
-  const animateTable = () => {
-    tableAnim.setValue(0);
-    Animated.spring(tableAnim, {
-      toValue: 1,
-      tension: 40,
-      friction: 8,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  // Auto-scroll testimonials (only if user isn't interacting)
-  useEffect(() => {
-    let interval;
-    if (step === 2) {
-      animateTable();
-      interval = setInterval(() => {
-        setCurrentIndex((prev) => {
-          const next = (prev + 1) % testimonials.length;
-          scrollRef.current?.scrollTo({
-            x: next * SNAP_INTERVAL,
-            animated: true,
-          });
-          return next;
-        });
-      }, 6000);
-    }
-    return () => interval && clearInterval(interval);
-  }, [step]);
-
-  const changeStep = (newStep) => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
-      setStep(newStep);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    });
-  };
-
-  const handleExit = () => {
-    if (step === 3 && !showDiscount) {
-      setShowDiscount(true);
-      Animated.timing(discountAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
-    } else {
-      router.back();
-    }
-  };
-
-  const renderStep1 = () => (
-    <View style={styles.stepContainer}>
-      <View style={styles.hero}>
-        <Animated.View style={[styles.iconContainer, { transform: [{ scale: fadeAnim }] }]}>
-          <LinearGradient
-            colors={['#FFD60A', '#FF9F0A']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.fullSize}
-          >
-            <TrendingUp size={40} color="#000" fill="#000" />
-          </LinearGradient>
-        </Animated.View>
-        <Text style={styles.titleText}>
-          Schedio <Text style={{ color: '#FFD60A' }}>PRIME</Text>
-        </Text>
-        <Text style={styles.subtitle}>La inversión más inteligente para tu futuro académico.</Text>
-      </View>
-
-      <View style={styles.featuresList}>
-        {features.map((f, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              styles.featureItem,
-              {
-                opacity: featuresAnim[i],
-                transform: [
-                  {
-                    translateX: featuresAnim[i].interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [50, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
-            <View style={styles.featureIconSmall}>{f.icon}</View>
-            <Text style={styles.featureTextSmall}>
-              {f.title} {f.emoji}
-            </Text>
-            <Check size={18} color="#FFD60A" />
-          </Animated.View>
-        ))}
-      </View>
-
-      <View style={styles.btnWrapper}>
-        <TouchableOpacity style={styles.mainBtnSmall} onPress={() => changeStep(2)}>
-          <LinearGradient
-            colors={['#FFD60A', '#FF9F0A']}
-            style={styles.btnGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Text style={styles.btnText}>Continuar</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderStep2 = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.sectionTitle}>¿Por qué ser Prime?</Text>
-
-      {/* Comparison Table */}
-      <Animated.View
-        style={[
-          styles.compareTable,
-          {
-            opacity: tableAnim,
-            transform: [
-              { translateY: tableAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) },
-            ],
-          },
-        ]}
-      >
-        <View style={styles.compareHeader}>
-          <View style={{ flex: 1.5 }}>
-            <Text style={styles.compareLabel}>Función</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.compareLabel}>Gratis</Text>
-          </View>
-          <View style={{ flex: 1.2 }}>
-            <Text style={[styles.compareLabel, { color: '#FFD60A' }]}>Schedio PRIME</Text>
-          </View>
-        </View>
-
-        <View style={styles.compareRow}>
-          <Text style={[styles.compareText, { flex: 1.5 }]}>IA de estudio</Text>
-          <View style={styles.valCell}>
-            <X size={16} color="#FF453A" />
-          </View>
-          <View style={styles.valCell}>
-            <Check size={16} color="#34C759" />
-          </View>
-        </View>
-        <View style={styles.compareRow}>
-          <Text style={[styles.compareText, { flex: 1.5 }]}>Organización IA</Text>
-          <View style={styles.valCell}>
-            <X size={16} color="#FF453A" />
-          </View>
-          <View style={styles.valCell}>
-            <Check size={16} color="#34C759" />
-          </View>
-        </View>
-        <View style={styles.compareRow}>
-          <Text style={[styles.compareText, { flex: 1.5 }]}>Mochila</Text>
-          <View style={styles.valCell}>
-            <Text style={styles.compareVal}>50MB</Text>
-          </View>
-          <View style={styles.valCell}>
-            <Text style={[styles.compareVal, { color: '#FFD60A' }]}>5GB</Text>
-          </View>
-        </View>
-        <View style={styles.compareRow}>
-          <Text style={[styles.compareText, { flex: 1.5 }]}>Planes de estudio</Text>
-          <View style={styles.valCell}>
-            <Text style={styles.compareVal}>1</Text>
-          </View>
-          <View style={styles.valCell}>
-            <Text style={[styles.compareVal, { color: '#FFD60A' }]}>∞</Text>
-          </View>
-        </View>
-        <View style={styles.compareRow}>
-          <Text style={[styles.compareText, { flex: 1.5 }]}>Sincronización Cloud</Text>
-          <View style={styles.valCell}>
-            <X size={16} color="#FF453A" />
-          </View>
-          <View style={styles.valCell}>
-            <Check size={16} color="#34C759" />
-          </View>
-        </View>
-
-        <Text style={styles.moreToCome}>...y muchos más por llegar 🚀✨</Text>
-      </Animated.View>
-
-      {/* Testimonials */}
-      <View style={styles.testimonialsSection}>
-        <Text style={styles.sectionTitleSmall}>Opiniones de la comunidad</Text>
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          scrollEnabled={true}
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={SNAP_INTERVAL}
-          decelerationRate="fast"
-          snapToAlignment="center"
-          contentContainerStyle={{ paddingHorizontal: (width - CARD_WIDTH) / 2 }}
-          onScroll={(event) => {
-            const offset = event.nativeEvent.contentOffset.x;
-            const index = Math.round(offset / SNAP_INTERVAL);
-            if (index !== currentIndex) setCurrentIndex(index);
-          }}
-          scrollEventThrottle={16}
-        >
-          {testimonials.map((t, i) => (
-            <View key={i} style={styles.testimonialCard}>
-              <View style={styles.starsRow}>
-                {[...Array(t.stars)].map((_, s) => (
-                  <Star key={s} size={12} color="#FFD60A" fill="#FFD60A" />
-                ))}
-              </View>
-              <Text style={styles.testimonialText}>"{t.text}"</Text>
-              <Text style={styles.testimonialName}>{t.name}</Text>
-            </View>
-          ))}
-        </ScrollView>
-        <View style={styles.paginationDots}>
-          {testimonials.map((_, i) => (
-            <View key={i} style={[styles.dot, currentIndex === i && styles.dotActive]} />
-          ))}
-        </View>
-      </View>
-
-      <View style={styles.btnWrapper}>
-        <TouchableOpacity style={styles.mainBtnSmall} onPress={() => changeStep(3)}>
-          <LinearGradient
-            colors={['#FFD60A', '#FF9F0A']}
-            style={styles.btnGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Text style={styles.btnText}>Continuar</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderStep3 = () => {
-    const annualPackage = offerings?.annual;
-    const monthlyPackage = offerings?.monthly;
-
+  if (step === 'success') {
     return (
-      <Animated.View
-        style={[
-          styles.sheetContainer,
-          {
-            transform: [
-              {
-                translateY: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }),
-              },
-            ],
-          },
-        ]}
-      >
-        <View style={styles.sheetContent}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Elige tu plan Prime</Text>
-          <Text style={styles.sheetSubtitle}>Eleva tu productividad al máximo nivel.</Text>
-
-          {monthlyPackage && (
-            <TouchableOpacity
-              style={selectedPlan === 'monthly' ? styles.planCardActive : styles.planCard}
-              onPress={() => setSelectedPlan('monthly')}
-            >
-              <View style={styles.planInfo}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.planName}>Mensual (Opción favorita para estudiantes 🎓)</Text>
-                  <View style={styles.promoBadge}>
-                    <Text style={styles.promoBadgeText}>MÁS POPULAR</Text>
-                  </View>
-                </View>
-                <Text style={styles.planPrice}>4,99 € / mes</Text>
-                <Text style={styles.planBilling}>Menos que un café a la semana ☕</Text>
-              </View>
-              <View
-                style={selectedPlan === 'monthly' ? styles.purchaseRadioActive : styles.planRadio}
-              />
-            </TouchableOpacity>
-          )}
-
-          {annualPackage && (
-            <TouchableOpacity
-              style={selectedPlan === 'annual' ? styles.planCardActive : styles.planCard}
-              onPress={() => setSelectedPlan('annual')}
-            >
-              <View style={styles.planInfo}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={styles.planName}>Anual (Todo un curso ✨)</Text>
-                  <View style={[styles.promoBadge, { backgroundColor: '#4A90E2' }]}>
-                    <Text style={[styles.promoBadgeText, { color: '#FFF' }]}>SIN VERANO</Text>
-                  </View>
-                </View>
-                <Text style={styles.planPrice}>80,91 € / año</Text>
-                <Text style={styles.planBilling}>Solo 8,99 € durante los meses lectivos 🌴</Text>
-              </View>
-              <View
-                style={selectedPlan === 'annual' ? styles.purchaseRadioActive : styles.planRadio}
-              />
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            style={[styles.buyBtn, purchasing && { opacity: 0.7 }]}
-            onPress={handlePurchase}
-            disabled={purchasing}
-          >
-            <LinearGradient
-              colors={['#FFD60A', '#FF9F0A']}
-              style={styles.btnGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              {purchasing ? (
-                <ActivityIndicator color="#000" />
-              ) : (
-                <Text style={styles.btnText}>Continuar</Text>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-          <Text style={styles.footerNote}>Cancela cuando quieras. Sin compromiso.</Text>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.successBody}>
+          <View style={styles.successIconCircle}>
+            <Check size={36} color={tokens.colors.premiumText} strokeWidth={2.5} />
+          </View>
+          <PremiumBadge>Prime</PremiumBadge>
+          <Text style={styles.successTitle}>¡Bienvenido a Schedio Prime!</Text>
+          <Text style={styles.successSubtitle}>
+            Tu suscripción se ha activado. Ya tienes acceso a todo, sin límites.
+          </Text>
         </View>
-      </Animated.View>
-    );
-  };
 
-  const renderDiscountModal = () => (
-    <Animated.View style={[styles.discountOverlay, { opacity: discountAnim }]}>
-      <BlurView intensity={30} style={StyleSheet.absoluteFill} tint="dark" />
-      <View style={styles.discountCard}>
-        <View style={styles.discountEmoji}>
-          <Text style={{ fontSize: 40 }}>🎁</Text>
+        <View style={[styles.planFooter, { paddingBottom: 16 + insets.bottom }]}>
+          <PrimeButton title="Empezar" onPress={() => router.back()} />
         </View>
-        <Text style={styles.discountTitle}>¡Espera! Un último regalo</Text>
-        <Text style={styles.discountText}>Sabemos que quieres ser Prime. Quédate por solo:</Text>
-        <Text style={styles.discountPrice}>3,49€/mes</Text>
-        <Text style={styles.discountSubtext}>Durante el primer año completo</Text>
-
-        <TouchableOpacity
-          style={styles.discountButton}
-          onPress={() => {
-            setSelectedPlan('exclusive');
-            handlePurchase();
-          }}
-        >
-          <LinearGradient
-            colors={['#FFD60A', '#FF9F0A']}
-            style={styles.btnGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            <Text style={styles.btnText}>Aceptar oferta</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.discountSkip}>No, gracias. Prefiero pagar más luego.</Text>
-        </TouchableOpacity>
       </View>
-    </Animated.View>
-  );
+    );
+  }
+
+  if (step === 'plan') {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.planHeader}>
+          <TouchableOpacity
+            onPress={() => setStep('compare')}
+            style={styles.iconBtn}
+            accessibilityLabel="Volver"
+          >
+            <ChevronLeft size={22} color={tokens.colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.planBody}>
+          <View style={styles.planHead}>
+            <PremiumBadge>Prime</PremiumBadge>
+            <Text style={styles.planTitle}>Schedio Prime</Text>
+            <Text style={styles.planSubtitle}>Un solo plan, todo incluido</Text>
+          </View>
+
+          <View style={styles.priceCard}>
+            <View style={styles.priceRow}>
+              {offeringsLoading ? (
+                <ActivityIndicator color={tokens.colors.textPrimary} />
+              ) : (
+                <>
+                  <Text style={styles.priceValue}>{price}</Text>
+                  <Text style={styles.priceUnit}>/ mes</Text>
+                </>
+              )}
+            </View>
+            <View style={styles.priceDivider} />
+            <View style={styles.bulletList}>
+              {BULLETS.map((bullet) => (
+                <View key={bullet} style={styles.bullet}>
+                  <View style={styles.bulletIcon}>
+                    <Star
+                      size={11}
+                      color={tokens.colors.premiumText}
+                      fill={tokens.colors.premiumText}
+                    />
+                  </View>
+                  <Text style={styles.bulletText}>{bullet}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <Testimonials />
+
+          <View style={styles.planCta}>
+            <PrimeButton
+              title="Suscríbete ahora"
+              onPress={handlePurchase}
+              loading={purchasing}
+              disabled={offeringsLoading}
+            />
+            <Text style={styles.cancelNote}>Cancela cuando quieras</Text>
+          </View>
+        </View>
+
+        <View style={[styles.planFooter, { paddingBottom: 16 + insets.bottom }]}>
+          <Button
+            title="Volver a Free"
+            variant="secondary"
+            fullWidth
+            onPress={() => router.back()}
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.container}>
-      <LinearGradient colors={['#1A1A1A', '#000']} style={StyleSheet.absoluteFill} />
-
-      {step === 3 && (
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleExit} style={styles.closeBtn}>
-            <X size={24} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-      )}
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.compareHeader}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.iconBtn}
+          accessibilityLabel="Volver"
+        >
+          <ChevronLeft size={22} color={tokens.colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.compareTitle}>Elige tu plan</Text>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.iconBtn}
+          accessibilityLabel="Cerrar"
+        >
+          <X size={20} color={tokens.colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
 
       <View style={{ flex: 1 }}>
-        <Animated.View style={{ flex: 1, opacity: step === 3 ? 0.2 : fadeAnim }}>
-          {step === 1 && renderStep1()}
-          {(step === 2 || step === 3) && renderStep2()}
-        </Animated.View>
+        <View style={styles.compareColumnHead}>
+          <View style={{ flex: 1 }} />
+          <Text style={styles.compareColumnLabel}>Free</Text>
+          <View style={styles.rowCell}>
+            <PremiumBadge>Prime</PremiumBadge>
+          </View>
+        </View>
 
-        {step === 3 && (
-          <TouchableOpacity
-            activeOpacity={1}
-            style={StyleSheet.absoluteFill}
-            onPress={handleExit}
-          />
-        )}
-        {step === 3 && renderStep3()}
-        {showDiscount && renderDiscountModal()}
+        {COMPARE_ROWS.map((row, i) => (
+          <CompareRow key={row.label} {...row} index={i} />
+        ))}
+
+        <View style={styles.comingSoon}>
+          <Text style={styles.comingSoonLabel}>Próximamente</Text>
+          <Text style={styles.comingSoonText}>
+            Coach IA, vista de trimestre y widget de inicio en Android — incluidos con Prime en
+            cuanto estén listos.
+          </Text>
+        </View>
+
+        <Text style={styles.independentNote}>
+          Schedio lo hace un equipo pequeño e independiente — tu suscripción nos ayuda a seguir
+          mejorando la app para estudiantes.
+        </Text>
+      </View>
+
+      <View style={[styles.compareFooter, { paddingBottom: 16 + insets.bottom }]}>
+        <PrimeButton title="Suscríbete a Prime" onPress={() => setStep('plan')} />
+        <Button
+          title="Continuar en Free"
+          variant="secondary"
+          fullWidth
+          onPress={() => router.back()}
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  fullSize: {
+  container: {
     flex: 1,
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 24,
+    backgroundColor: tokens.colors.bgBase,
   },
-  header: { position: 'absolute', top: 60, right: 24, zIndex: 100 },
-  closeBtn: {
+  iconBtn: {
     width: 44,
     height: 44,
+    borderRadius: tokens.radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.1)',
   },
-  stepContainer: { flex: 1, paddingHorizontal: 30, justifyContent: 'center', paddingBottom: 60 },
-  hero: { alignItems: 'center', marginBottom: 40 },
-  iconContainer: { width: 80, height: 80, borderRadius: 24, marginBottom: 20, overflow: 'hidden' },
-  titleText: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#FFF',
-    fontFamily: tokens.typography.families.sans,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#8E8E93',
-    textAlign: 'center',
-    marginTop: 10,
-    paddingHorizontal: 20,
-    fontFamily: tokens.typography.families.sans,
-  },
-  featuresList: { gap: 14, marginBottom: 40 },
-  featureItem: {
+
+  // Compare screen
+  compareHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 14,
-    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
   },
-  featureIconSmall: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,214,10,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureTextSmall: {
+  compareTitle: {
     flex: 1,
-    color: '#FFF',
-    fontWeight: '600',
-    fontFamily: tokens.typography.families.sans,
-  },
-  btnWrapper: { alignItems: 'center', marginTop: 10 },
-  mainBtnSmall: { width: width * 0.7, height: 56, borderRadius: 28, overflow: 'hidden' },
-  mainBtn: { height: 60, borderRadius: 20, overflow: 'hidden' },
-  btnGradient: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  btnText: { color: '#000', fontSize: 18, fontWeight: '800' },
-  sectionTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#FFF',
     textAlign: 'center',
-    marginBottom: 25,
-    marginTop: 40,
+    fontFamily: font.semibold,
+    fontSize: 17,
+    color: tokens.colors.textPrimary,
   },
-  compareTable: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 30,
-  },
-  compareHeader: { flexDirection: 'row', marginBottom: 15 },
-  compareLabel: { fontSize: 11, fontWeight: '800', color: '#8E8E93', textAlign: 'center' },
-  compareRow: {
+  compareColumnHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 8,
+    gap: 8,
   },
-  compareText: { color: '#FFF', fontSize: 14, fontWeight: '500' },
-  valCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  compareVal: { fontSize: 14, fontWeight: '600', color: '#FFF' },
-  testimonialsSection: { marginBottom: 35 },
-  sectionTitleSmall: {
+  compareColumnLabel: {
+    width: 64,
+    textAlign: 'center',
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  rowAlt: {
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  rowInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  rowLabel: {
+    fontFamily: font.medium,
     fontSize: 14,
-    fontWeight: '700',
-    color: '#8E8E93',
-    marginBottom: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    color: tokens.colors.textPrimary,
   },
-  testimonialCard: {
-    width: CARD_WIDTH,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: 25,
-    borderRadius: 20,
-    marginRight: CARD_MARGIN,
-  },
-  starsRow: { flexDirection: 'row', gap: 4, marginBottom: 8 },
-  testimonialText: {
-    color: '#FFF',
-    fontSize: 15,
-    fontStyle: 'italic',
-    lineHeight: 24,
-    marginBottom: 10,
-    fontFamily: tokens.typography.families.serif,
-  },
-  testimonialName: {
-    color: '#FFD60A',
-    fontWeight: '800',
+  rowNote: {
+    fontFamily: font.regular,
     fontSize: 12,
-    fontFamily: tokens.typography.families.sans,
+    lineHeight: 16,
+    color: tokens.colors.textSecondary,
   },
-  sheetContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#1C1C1E',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 20,
-  },
-  sheetContent: { padding: 30, paddingBottom: Platform.OS === 'ios' ? 60 : 40 },
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  sheetTitle: { fontSize: 24, fontWeight: '800', color: '#FFF', textAlign: 'center' },
-  sheetSubtitle: {
-    fontSize: 14,
-    color: '#8E8E93',
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 25,
-  },
-  planCard: {
-    flexDirection: 'row',
+  rowCell: {
+    width: 64,
     alignItems: 'center',
-    padding: 18,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 20,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  planCardActive: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 18,
-    backgroundColor: 'rgba(255,214,10,0.1)',
-    borderRadius: 20,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#FFD60A',
-  },
-  planInfo: { flex: 1 },
-  planName: { fontSize: 15, fontWeight: '700', color: '#FFF' },
-  planPrice: { fontSize: 20, fontWeight: '900', color: '#FFF', marginTop: 2 },
-  planBilling: { fontSize: 11, color: '#8E8E93', marginTop: 2 },
-  planRadio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.2)',
-  },
-  purchaseRadioActive: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#FFD60A',
-    borderWidth: 4,
-    borderColor: 'rgba(255,214,10,0.3)',
-  },
-  buyBtn: { height: 60, borderRadius: 20, overflow: 'hidden', marginTop: 10 },
-  footerNote: { textAlign: 'center', color: '#636366', fontSize: 11, marginTop: 15 },
-  moreToCome: {
-    textAlign: 'center',
-    color: '#8E8E93',
-    fontSize: 12,
-    marginTop: 10,
-    fontStyle: 'italic',
-  },
-  paginationDots: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 15 },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.2)' },
-  dotActive: { backgroundColor: '#FFD60A', width: 12 },
-  promoBadge: {
-    backgroundColor: '#FFD60A',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  promoBadgeText: { color: '#000', fontSize: 10, fontWeight: '800' },
-  discountOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
   },
-  discountCard: {
-    width: '100%',
-    backgroundColor: '#1C1C1E',
-    borderRadius: 32,
-    padding: 30,
-    alignItems: 'center',
+  rowDash: {
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+  },
+  comingSoon: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    padding: 16,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
-    borderColor: 'rgba(255,214,10,0.3)',
+    borderStyle: 'dashed',
+    borderColor: tokens.colors.borderDefault,
+    gap: 4,
   },
-  discountEmoji: {
+  comingSoonLabel: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  comingSoonText: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textPrimary,
+  },
+  independentNote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
+  compareFooter: {
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+
+  // Plan screen
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  planBody: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    gap: 24,
+  },
+  planHead: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  planTitle: {
+    fontFamily: font.semibold,
+    fontSize: 20,
+    color: tokens.colors.premiumText,
+  },
+  planSubtitle: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+  },
+  priceCard: {
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
+    borderRadius: tokens.radius.card,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    gap: 22,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    minHeight: 60,
+    justifyContent: 'center',
+  },
+  priceValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 56,
+    lineHeight: 60,
+    color: tokens.colors.textPrimary,
+  },
+  priceUnit: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    color: tokens.colors.textSecondary,
+  },
+  priceDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: tokens.colors.borderDefault,
+  },
+  bulletList: {
+    width: '100%',
+    gap: 14,
+  },
+  bullet: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  bulletIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: tokens.colors.premiumBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  bulletText: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textPrimary,
+  },
+  testimonial: {
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
+    borderRadius: tokens.radius.card,
+    padding: 18,
+    gap: 10,
+  },
+  testimonialQuote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textPrimary,
+  },
+  testimonialAuthor: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+  },
+  dots: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 2,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: tokens.colors.borderDefault,
+  },
+  dotActive: {
+    backgroundColor: tokens.colors.premiumText,
+  },
+  planCta: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  cancelNote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  planFooter: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+  },
+
+  // Success screen
+  successBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 14,
+  },
+  successIconCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255,214,10,0.1)',
+    backgroundColor: tokens.colors.premiumBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: 6,
   },
-  discountTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#FFF',
+  successTitle: {
+    fontFamily: font.bold,
+    fontSize: 22,
+    lineHeight: 28,
+    color: tokens.colors.textPrimary,
     textAlign: 'center',
-    marginBottom: 10,
   },
-  discountText: { fontSize: 14, color: '#8E8E93', textAlign: 'center', marginBottom: 20 },
-  discountPrice: { fontSize: 48, fontWeight: '900', color: '#FFD60A', marginBottom: 5 },
-  discountSubtext: { fontSize: 12, color: '#FFF', opacity: 0.6, marginBottom: 30 },
-  discountButton: {
+  successSubtitle: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
+
+  // Shared premium CTA
+  primeButton: {
     width: '100%',
-    height: 60,
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.premiumText,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  discountSkip: { color: '#8E8E93', fontSize: 13, textDecorationLine: 'underline' },
+  primeButtonText: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.bgBase,
+  },
 });

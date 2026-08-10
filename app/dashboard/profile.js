@@ -33,6 +33,7 @@ import Animated, {
   runOnJS,
   LinearTransition,
 } from 'react-native-reanimated';
+import PrimeLimitSheet from '../../components/PrimeLimitSheet';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { tokens } from '../../theme/tokens';
@@ -215,6 +216,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
+  const isPrime = useAuthStore((state) => state.isPrime);
 
   // One selector per key rather than destructuring the store: destructuring
   // subscribed this screen — the biggest in the app — to every write, so it
@@ -222,6 +224,7 @@ export default function ProfileScreen() {
   const profile = useUserStore((state) => state.profile);
   const gamification = useUserStore((state) => state.gamification);
   const subjects = useUserStore((state) => state.subjects);
+  const maxSubjects = useUserStore((state) => state.maxSubjects());
   const sessionHistory = useUserStore((state) => state.sessionHistory);
 
   const [isEditingName, setIsEditingName] = useState(false);
@@ -238,6 +241,7 @@ export default function ProfileScreen() {
   const [savingNote, setSavingNote] = useState(false);
 
   const [subjectSheet, setSubjectSheet] = useState(false);
+  const [subjectLimitSheet, setSubjectLimitSheet] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [editSubName, setEditSubName] = useState('');
   const [editSubDifficulty, setEditSubDifficulty] = useState('5');
@@ -412,6 +416,20 @@ export default function ProfileScreen() {
       }
       setSubjectSheet(false);
     } catch (error) {
+      if (error.code === 'SUBJECT_LIMIT_REACHED') {
+        setSubjectSheet(false);
+        if (isPrime) {
+          // Prime's own cap (20) is an anti-abuse ceiling, not a marketing
+          // moment — a plain alert, no upsell.
+          Alert.alert(
+            'Límite de materias alcanzado',
+            `Has llegado al máximo de ${maxSubjects} materias.`
+          );
+        } else {
+          setSubjectLimitSheet(true);
+        }
+        return;
+      }
       console.error('[Profile] Error saving subject:', error);
       Alert.alert('Error', 'No se pudo guardar la materia.');
     }
@@ -642,6 +660,12 @@ export default function ProfileScreen() {
             >
               Mis Materias
             </SectionTitle>
+
+            {subjects.length > 0 && (
+              <Text style={styles.subjectsCounter}>
+                {subjects.length} de {maxSubjects} materias
+              </Text>
+            )}
 
             {subjects.length === 0 ? (
               <Card padding={20}>
@@ -974,6 +998,17 @@ export default function ProfileScreen() {
           </View>
         </View>
       </BottomSheet>
+
+      <PrimeLimitSheet
+        visible={subjectLimitSheet}
+        onClose={() => setSubjectLimitSheet(false)}
+        title={`Has alcanzado el límite de ${maxSubjects} materias`}
+        description="Con Schedio Prime puedes añadir todas las materias que necesites y organizar tu curso completo en un solo lugar."
+        onUpgrade={() => {
+          setSubjectLimitSheet(false);
+          router.push('/plus');
+        }}
+      />
     </View>
   );
 }
@@ -1507,6 +1542,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: tokens.colors.textSecondary,
+  },
+  subjectsCounter: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    marginTop: -6,
+    marginBottom: 8,
   },
   confirmActions: {
     flexDirection: 'row',

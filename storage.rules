@@ -3,7 +3,13 @@ service firebase.storage {
   match /b/{bucket}/o {
     match /users/{userId}/{allPaths=**} {
       // Allow access only if the user is authenticated and matches the folder owner
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Same ownership check, plus a hard cap per file — the weekly upload
+      // count (3 free / 15 Prime, enforced client-side) limits how often
+      // someone can upload, not how large a single file can be.
+      allow write: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.size < 20 * 1024 * 1024;
     }
   }
 }

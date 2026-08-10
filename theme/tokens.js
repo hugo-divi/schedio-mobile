@@ -84,7 +84,13 @@ export const tokens = {
     card: palette.surfaceCard,
     text: palette.textPrimary,
     textSecondary: palette.textSecondary,
-    textTertiary: palette.textDisabled,
+    // Was `palette.textDisabled` (#6B6B6B): ~3.4:1 on the background and
+    // ~2.9:1 on cards, below WCAG AA's 4.5:1 for normal text. Fine for an
+    // actually-disabled control, wrong for the readable meta text
+    // (timestamps, captions) screens reached for it for — aliased to
+    // textSecondary until there's a real third tone that's been checked
+    // against both surfaces.
+    textTertiary: palette.textSecondary,
     border: palette.borderDefault,
 
     // Subtle fills (inputs, pressed states).

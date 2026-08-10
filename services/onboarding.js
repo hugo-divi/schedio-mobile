@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { tokens } from '../theme/tokens';
+import { MAX_SUBJECTS_FREE } from './permissions';
 
 /** The design system's closed subject palette, as a flat list for assignment. */
 export const SUBJECT_COLORS = Object.values(tokens.colors.subjects);
@@ -10,7 +11,8 @@ export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
 export const BACHILLERATO_BRANCHES = ['Ciencias', 'Ciencias Sociales', 'Humanidades', 'Técnico'];
 
 export const MIN_SUBJECTS = 3;
-export const MAX_SUBJECTS = 10;
+// Nobody is Prime yet during onboarding, so the free cap always applies here.
+export const MAX_SUBJECTS = MAX_SUBJECTS_FREE;
 export const MIN_SUBJECT_NAME = 2;
 
 /**

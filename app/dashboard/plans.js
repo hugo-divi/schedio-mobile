@@ -30,7 +30,7 @@ import { startOfWeek, addDays, isSameDay, isToday, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 import { tokens } from '../../theme/tokens';
-import useUserStore, { FREE_WEEKLY_UPLOADS } from '../../store/userStore';
+import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import UploadModal from '../../components/UploadModal';
 import ResourceList from '../../components/ResourceList';
@@ -48,9 +48,13 @@ const font = tokens.typography.families.inter;
 const LIST_TRANSITION = LinearTransition.duration(250);
 
 // The generator plans forward from today (HORIZON_DAYS = 30) and reconcilePlan
-// rebuilds from it daily, so there is no past to navigate back into. Only this
-// week and the next carry real tasks.
-const MAX_WEEK_OFFSET = 1;
+// rebuilds from it daily, so there is no past to navigate back into. Free stays
+// at this week + next (the "2 semanas" sold in plus.js); Prime can reach into
+// week 4 — still safely inside the 30-day horizon the generator already fills,
+// so no change to plan generation itself. A true trimester view needs that
+// horizon extended and is a separate, bigger piece of work.
+const MAX_WEEK_OFFSET_FREE = 1;
+const MAX_WEEK_OFFSET_PRIME = 3;
 
 const DURATION_OPTIONS = [15, 30, 45, 60];
 
@@ -530,6 +534,15 @@ export default function PlansScreen() {
     return (uploadsHistory || []).filter((timestamp) => timestamp > oneWeekAgo).length;
   }, [uploadsHistory]);
 
+  // Prime raised the ceiling (15/week) but didn't remove it — still worth showing.
+  const uploadLimit = isPrime ? PRIME_WEEKLY_UPLOADS : FREE_WEEKLY_UPLOADS;
+  const maxWeekOffset = isPrime ? MAX_WEEK_OFFSET_PRIME : MAX_WEEK_OFFSET_FREE;
+
+  // A lapsed subscription shouldn't leave the view stranded past the free ceiling.
+  useEffect(() => {
+    setWeekOffset((o) => Math.min(o, maxWeekOffset));
+  }, [maxWeekOffset]);
+
   // Files grouped by the subject they were filed under. Anything uploaded
   // before subjects existed on resources lands in its own group rather than
   // disappearing.
@@ -744,31 +757,29 @@ export default function PlansScreen() {
         onPress={() => router.push('/dashboard/profile')}
       />
 
-      {/* The mock showed a GB quota. There isn't one: the free allowance is
-          three uploads per rolling week, which is what this reports. */}
-      {isPrime ? null : (
-        <View style={styles.quota}>
-          <View style={styles.quotaHead}>
-            <Text style={styles.quotaText}>
-              {uploadsUsed} de {FREE_WEEKLY_UPLOADS} subidas esta semana
-            </Text>
-            <Text style={styles.quotaText}>
-              {Math.round((Math.min(uploadsUsed, FREE_WEEKLY_UPLOADS) / FREE_WEEKLY_UPLOADS) * 100)}
-              %
-            </Text>
-          </View>
-          <View style={styles.quotaTrack}>
-            <View
-              style={[
-                styles.quotaFill,
-                {
-                  width: `${Math.min(100, (uploadsUsed / FREE_WEEKLY_UPLOADS) * 100)}%`,
-                },
-              ]}
-            />
-          </View>
+      {/* The mock showed a GB quota. There isn't one: the allowance is a
+          number of uploads per rolling week (3 free, 15 Prime), which is
+          what this reports. */}
+      <View style={styles.quota}>
+        <View style={styles.quotaHead}>
+          <Text style={styles.quotaText}>
+            {uploadsUsed} de {uploadLimit} subidas esta semana
+          </Text>
+          <Text style={styles.quotaText}>
+            {Math.round((Math.min(uploadsUsed, uploadLimit) / uploadLimit) * 100)}%
+          </Text>
         </View>
-      )}
+        <View style={styles.quotaTrack}>
+          <View
+            style={[
+              styles.quotaFill,
+              {
+                width: `${Math.min(100, (uploadsUsed / uploadLimit) * 100)}%`,
+              },
+            ]}
+          />
+        </View>
+      </View>
 
       {isPrime ? null : (
         <TouchableOpacity
@@ -805,8 +816,8 @@ export default function PlansScreen() {
             <NavArrow
               direction="right"
               label="Semana siguiente"
-              disabled={weekOffset >= MAX_WEEK_OFFSET}
-              onPress={() => setWeekOffset((o) => Math.min(MAX_WEEK_OFFSET, o + 1))}
+              disabled={weekOffset >= maxWeekOffset}
+              onPress={() => setWeekOffset((o) => Math.min(maxWeekOffset, o + 1))}
             />
           </View>
         </View>

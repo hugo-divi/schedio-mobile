@@ -4,8 +4,6 @@ import {
   getDocs,
   query,
   where,
-  orderBy,
-  limit,
   deleteDoc,
   doc,
   updateDoc,
@@ -54,6 +52,21 @@ export const getUpcomingExams = async (userId, limitCount = 10) => {
     );
   } catch (error) {
     console.error('Error getting upcoming exams:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get every exam for a user, completed or not — used by the Prime data export,
+ * which needs the full picture rather than any one of the filtered views above.
+ * @param {string} userId
+ */
+export const getAllExams = async (userId) => {
+  try {
+    const q = query(collection(db, 'exams'), where('userId', '==', userId));
+    return mapExamDocs(await getDocs(q)).sort((a, b) => a.date - b.date);
+  } catch (error) {
+    console.error('Error getting all exams:', error);
     throw error;
   }
 };

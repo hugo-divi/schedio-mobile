@@ -9,7 +9,9 @@ import {
   StatusBar,
   ActivityIndicator,
   Dimensions,
+  AppState,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
@@ -42,6 +44,12 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import { BASE_XP_PER_MINUTE } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
+import {
+  updateStudySessionNotification,
+  stopStudySessionNotification,
+  addNotificationActionListener,
+  ACTION,
+} from '../../services/studyNotification';
 import useAuthStore from '../../store/authStore';
 import useUserStore from '../../store/userStore';
 import usePreferencesStore from '../../store/preferencesStore';
@@ -58,6 +66,15 @@ const MIN_MINUTES = 15;
 const MAX_MINUTES = 120;
 const MINUTE_STEP = 5;
 const DEFAULT_MINUTES = 25;
+
+// Where an in-progress session is snapshotted so it survives the screen
+// locking, the app backgrounding, or Android killing the process outright —
+// none of which should cost the student their timer or their objectives.
+const SESSION_STORAGE_KEY = '@schedio/active_study_session';
+// Longer than the longest possible session (MAX_MINUTES) plus a grace window:
+// past this, a leftover snapshot is abandoned, not resumable, and shouldn't
+// prompt "continue?" for a session from days ago.
+const STALE_SESSION_MS = (MAX_MINUTES + 30) * 60 * 1000;
 
 // Timer ring geometry, scaled from the 220px circle in the design.
 const RING_SIZE = Math.min(220, SCREEN_WIDTH - 96);
@@ -368,6 +385,28 @@ function FocusReminderSheet({ visible, onClose, onStart, dontShow, onToggleDontS
   );
 }
 
+/** Offered on launch when a session was cut short by the app closing — the
+ * timer and objectives would otherwise just be gone. */
+function RecoverSessionSheet({ visible, subjectName, onContinue, onDiscard }) {
+  return (
+    <BottomSheet visible={visible} onClose={onDiscard}>
+      <View style={styles.sheetIcon}>
+        <Play size={24} color={tokens.colors.accent} fill={tokens.colors.accent} />
+      </View>
+      <Text style={styles.sheetTitle}>Tenías una sesión sin terminar</Text>
+      <Text style={styles.sheetBody}>
+        {subjectName ? `${subjectName} — ` : ''}se cerró la app antes de que acabara. Puedes seguir
+        donde lo dejaste o descartarla.
+      </Text>
+
+      <View style={{ marginTop: 20, gap: 10 }}>
+        <Button title="Continuar sesión" onPress={onContinue} fullWidth />
+        <Button title="Descartar" variant="secondary" onPress={onDiscard} fullWidth />
+      </View>
+    </BottomSheet>
+  );
+}
+
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function StudySessionScreen() {
@@ -407,9 +446,18 @@ export default function StudySessionScreen() {
   const [mood, setMood] = useState(null);
   const [notes, setNotes] = useState('');
   const [upcomingExams, setUpcomingExams] = useState([]);
+  // A snapshot found in storage on launch, offered before it's applied —
+  // null once there's nothing to recover or the student has answered.
+  const [recoverableSession, setRecoverableSession] = useState(null);
 
   const timerRef = useRef(null);
   const autoStartedRef = useRef(null);
+  // Wall-clock timestamps, not a counter: `timeLeft` is recomputed from these
+  // on every tick, so a gap where the interval didn't fire (screen locked,
+  // app backgrounded) self-corrects instead of freezing or drifting.
+  const sessionStartRef = useRef(null);
+  const pausedMsRef = useRef(0);
+  const pauseStartedAtRef = useRef(null);
   // The write kicked off when the timer stopped. Held as a promise, not an id,
   // so a student who types fast and taps "Volver a Inicio" before Firestore
   // answers still gets their notes attached.
@@ -440,6 +488,9 @@ export default function StudySessionScreen() {
 
   const startSession = useCallback((minutes) => {
     const total = Math.round(minutes) * 60;
+    sessionStartRef.current = Date.now();
+    pausedMsRef.current = 0;
+    pauseStartedAtRef.current = null;
     setTimeLeft(total);
     setIsActive(true);
     setIsPaused(false);
@@ -448,6 +499,49 @@ export default function StudySessionScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   }, []);
+
+  /** Applies a snapshot (fresh from storage, either resumed by the student or
+   * auto-applied because it had already finished) as the live session. */
+  const applyRecoveredSession = useCallback((snapshot) => {
+    sessionStartRef.current = snapshot.sessionStart;
+    pausedMsRef.current = snapshot.pausedMs || 0;
+    pauseStartedAtRef.current = null;
+    setSelectedSubject(snapshot.subjectId);
+    setDuration(snapshot.duration);
+    setGoals(snapshot.goals || []);
+    setIsPaused(false);
+    setIsActive(true);
+    setStep('timer');
+    setRecoverableSession(null);
+  }, []);
+
+  const discardRecoveredSession = useCallback(() => {
+    AsyncStorage.removeItem(SESSION_STORAGE_KEY).catch((error) =>
+      console.error('[Study] Error clearing persisted session:', error)
+    );
+    setRecoverableSession(null);
+  }, []);
+
+  // Pause/resume go through here rather than a bare `setIsPaused` so the
+  // paused span gets excluded from the elapsed-time calculation — otherwise
+  // time spent paused would still count against the student.
+  const pauseTimer = useCallback(() => {
+    pauseStartedAtRef.current = Date.now();
+    setIsPaused(true);
+  }, []);
+
+  const resumeTimer = useCallback(() => {
+    if (pauseStartedAtRef.current) {
+      pausedMsRef.current += Date.now() - pauseStartedAtRef.current;
+      pauseStartedAtRef.current = null;
+    }
+    setIsPaused(false);
+  }, []);
+
+  const togglePause = useCallback(() => {
+    if (isPaused) resumeTimer();
+    else pauseTimer();
+  }, [isPaused, pauseTimer, resumeTimer]);
 
   const handleStartPress = () => {
     if (!selectedSubject) return;
@@ -475,6 +569,9 @@ export default function StudySessionScreen() {
       setIsActive(false);
       setIsPaused(false);
       setStopConfirmVisible(false);
+      AsyncStorage.removeItem(SESSION_STORAGE_KEY).catch((error) =>
+        console.error('[Study] Error clearing persisted session:', error)
+      );
 
       const totalSeconds = duration * 60;
       const secondsSpent = Math.max(0, totalSeconds - timeLeft);
@@ -582,12 +679,12 @@ export default function StudySessionScreen() {
         })
         .onEnd((event) => {
           if (event.translationY > DRAG_TO_STOP) {
-            runOnJS(setIsPaused)(true);
+            runOnJS(pauseTimer)();
             runOnJS(setStopConfirmVisible)(true);
           }
           dragY.value = withSpring(0, { damping: 20, stiffness: 200 });
         }),
-    [isActive, stopConfirmVisible, dragY]
+    [isActive, stopConfirmVisible, dragY, pauseTimer]
   );
 
   const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dragY.value }] }));
@@ -681,14 +778,152 @@ export default function StudySessionScreen() {
     });
   }, [step, navigation]);
 
+  // Recomputed from `sessionStartRef`/`pausedMsRef` on every call rather than
+  // decremented — a call after a gap (interval throttled, app backgrounded)
+  // lands on the true remaining time instead of resuming from a stale count.
+  const tick = useCallback(() => {
+    if (!sessionStartRef.current) return null;
+    const elapsedMs = Date.now() - sessionStartRef.current - pausedMsRef.current;
+    const remaining = Math.max(0, duration * 60 - Math.floor(elapsedMs / 1000));
+    setTimeLeft(remaining);
+    if (remaining === 0) handleComplete(false);
+    return remaining;
+  }, [duration, handleComplete]);
+
   useEffect(() => {
-    if (isActive && !isPaused && timeLeft > 0) {
-      timerRef.current = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
-    } else if (isActive && timeLeft === 0) {
-      handleComplete(false);
-    }
+    if (!isActive || isPaused) return;
+    tick();
+    timerRef.current = setInterval(tick, 1000);
     return () => clearInterval(timerRef.current);
-  }, [isActive, isPaused, timeLeft, handleComplete]);
+  }, [isActive, isPaused, tick]);
+
+  // The interval above is what Android throttles or drops while the screen is
+  // locked — this catches the app coming back and snaps the display to the
+  // real elapsed time immediately, instead of waiting for the next tick.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && isActive && !isPaused) tick();
+    });
+    return () => subscription.remove();
+  }, [isActive, isPaused, tick]);
+
+  // Snapshotted on pause/resume and on every goal edit — not every tick,
+  // since the timestamps it stores don't change second to second and writing
+  // to disk once a second for no reason would be pure waste.
+  useEffect(() => {
+    if (step !== 'timer') return;
+    const snapshot = {
+      subjectId: selectedSubject,
+      duration,
+      goals,
+      sessionStart: sessionStartRef.current,
+      pausedMs: pausedMsRef.current,
+    };
+    AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot)).catch((error) =>
+      console.error('[Study] Error persisting session:', error)
+    );
+  }, [step, isPaused, goals, selectedSubject, duration]);
+
+  // Android only: the ongoing lock-screen notification, kept in lockstep with
+  // the same state the persistence effect above watches. The chronometer
+  // can't be paused natively, so a pause swaps it for a frozen text line
+  // instead — see services/studyNotification.js.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+
+    if (step !== 'timer') {
+      stopStudySessionNotification();
+      return;
+    }
+
+    const totalSeconds = duration * 60;
+
+    const publish = () => {
+      if (isPaused) {
+        updateStudySessionNotification({
+          subjectName: currentSubject?.name,
+          goals,
+          paused: true,
+          remainingSeconds: timeLeft,
+          totalSeconds,
+        });
+      } else {
+        const elapsedMs = Date.now() - sessionStartRef.current - pausedMsRef.current;
+        updateStudySessionNotification({
+          subjectName: currentSubject?.name,
+          goals,
+          paused: false,
+          endTimestamp: sessionStartRef.current + totalSeconds * 1000 + pausedMsRef.current,
+          elapsedSeconds: Math.floor(elapsedMs / 1000),
+          totalSeconds,
+        });
+      }
+    };
+
+    publish();
+
+    // The chronometer text updates natively every second on its own — this
+    // only nudges the progress bar forward periodically, since redrawing the
+    // whole notification every second would be exactly the battery-draining
+    // pattern Android's own notification guidance warns against.
+    const progressInterval = isPaused ? null : setInterval(publish, 60000);
+    return () => progressInterval && clearInterval(progressInterval);
+    // `timeLeft` is deliberately excluded: it ticks every second and this
+    // only needs to read whatever it was at the moment of pausing, not
+    // re-fire (and re-notify) on every subsequent tick while running.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isPaused, goals, currentSubject, duration]);
+
+  // Action buttons on the notification itself (Pausar/Reanudar, Terminar) —
+  // same handlers the on-screen controls use, so behavior can't drift apart.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const unsubscribe = addNotificationActionListener((action) => {
+      if (step !== 'timer') return;
+      if (action === ACTION.PAUSE) pauseTimer();
+      else if (action === ACTION.RESUME) resumeTimer();
+      else if (action === ACTION.STOP) handleComplete(true);
+    });
+    return unsubscribe;
+  }, [step, pauseTimer, resumeTimer, handleComplete]);
+
+  // Once, on launch: was a session left running when the app last closed?
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
+        if (!raw) return;
+        // Consumed immediately, not just on the stale/discard paths: this
+        // effect can run twice in quick succession (e.g. the app relaunching
+        // before the first pass finishes), and two reads of the same
+        // not-yet-cleared snapshot would both call applyRecoveredSession and
+        // write duplicate sessions. Continuing re-persists a fresh snapshot
+        // right after anyway (see the snapshot effect below), so clearing
+        // here doesn't lose anything on that path.
+        await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
+        const snapshot = JSON.parse(raw);
+        const elapsedSinceStart = Date.now() - snapshot.sessionStart;
+
+        if (elapsedSinceStart > STALE_SESSION_MS) {
+          return;
+        }
+
+        const totalSeconds = Math.round(snapshot.duration) * 60;
+        const elapsedSeconds = Math.floor((elapsedSinceStart - (snapshot.pausedMs || 0)) / 1000);
+
+        if (totalSeconds - elapsedSeconds <= 0) {
+          // It finished while the app was closed — land on the summary
+          // instead of asking "continue?" a session that's already over.
+          applyRecoveredSession(snapshot);
+          return;
+        }
+
+        setRecoverableSession(snapshot);
+      } catch (error) {
+        console.error('[Study] Error checking for a recoverable session:', error);
+      }
+    })();
+  }, [applyRecoveredSession]);
 
   // Rewind the reveal whenever a new session ends, so the second one animates
   // exactly like the first.
@@ -863,7 +1098,7 @@ export default function StudySessionScreen() {
             <TouchableOpacity
               style={styles.controlButton}
               activeOpacity={0.7}
-              onPress={() => setIsPaused((p) => !p)}
+              onPress={togglePause}
               accessibilityRole="button"
               accessibilityLabel={isPaused ? 'Reanudar sesión' : 'Pausar sesión'}
             >
@@ -886,7 +1121,7 @@ export default function StudySessionScreen() {
               style={styles.controlButton}
               activeOpacity={0.7}
               onPress={() => {
-                setIsPaused(true);
+                pauseTimer();
                 setStopConfirmVisible(true);
               }}
               accessibilityRole="button"
@@ -930,7 +1165,7 @@ export default function StudySessionScreen() {
                       fullWidth
                       onPress={() => {
                         setStopConfirmVisible(false);
-                        setIsPaused(false);
+                        resumeTimer();
                       }}
                     />
                   </View>
@@ -1067,6 +1302,13 @@ export default function StudySessionScreen() {
         onStart={confirmFocusSheet}
         dontShow={dontShowReminder}
         onToggleDontShow={() => setDontShowReminder((v) => !v)}
+      />
+
+      <RecoverSessionSheet
+        visible={!!recoverableSession}
+        subjectName={subjects.find((s) => s.id === recoverableSession?.subjectId)?.name}
+        onContinue={() => applyRecoveredSession(recoverableSession)}
+        onDiscard={discardRecoveredSession}
       />
     </View>
   );

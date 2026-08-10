@@ -5,6 +5,10 @@ import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
 import { configureRevenueCat } from '../services/revenuecat';
 import { initCrashlytics } from '../services/crashlytics';
+// Side-effect only: registers notifee's foreground service handler at module
+// scope, before any component mounts — required so Android can redeliver and
+// restart the study-session notification, not just start it the first time.
+import '../services/studyNotification';
 import { requestPermissions } from '../services/notificationService';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
@@ -56,8 +60,13 @@ export default function Layout() {
   }, [ready]);
 
   useEffect(() => {
-    const unsubscribe = initAuth();
-    configureRevenueCat();
+    let unsubscribe;
+    // RevenueCat must be configured before the auth listener can log a user
+    // into it, so this has to finish first rather than fire in parallel.
+    (async () => {
+      await configureRevenueCat();
+      unsubscribe = initAuth();
+    })();
     initCrashlytics();
 
     // Notification setup

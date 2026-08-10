@@ -9,6 +9,7 @@ import {
   TextInput,
   ActivityIndicator,
   StyleSheet,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,6 +29,8 @@ import {
   Briefcase,
   Trash2,
   LogOut,
+  Download,
+  RotateCcw,
 } from 'lucide-react-native';
 
 import { auth, db } from '../services/firebase';
@@ -35,6 +38,8 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { deleteAccount, usesPasswordSignIn } from '../services/account';
 import { registerForPushNotifications } from '../services/notificationService';
+import { exportGradesAndExamsPdf } from '../services/export';
+import { restorePurchases } from '../services/revenuecat';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -121,6 +126,7 @@ export default function SettingsScreen() {
 
   const clearUser = useAuthStore((state) => state.clearUser);
   const isPrime = useAuthStore((state) => state.isPrime);
+  const setIsPrime = useAuthStore((state) => state.setIsPrime);
   const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
   const setAutoGradePrompt = usePreferencesStore((state) => state.setAutoGradePrompt);
   const notificationsEnabled = usePreferencesStore((state) => state.notificationsEnabled);
@@ -149,9 +155,84 @@ export default function SettingsScreen() {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   const showAlert = (config) => setAlertConfig({ ...config, visible: true });
   const closeAlert = () => setAlertConfig((prev) => ({ ...prev, visible: false }));
+
+  // Prime already has a place to go (Google Play's own subscription
+  // management) — sending them back to the sales paywall would be a dead end.
+  const handleSubscriptionPress = () => {
+    if (isPrime) {
+      const pkg = Constants.expoConfig?.android?.package || 'com.schedio.mobile';
+      Linking.openURL(`https://play.google.com/store/account/subscriptions?package=${pkg}`);
+      return;
+    }
+    router.push('/plus');
+  };
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const restored = await restorePurchases();
+      if (restored) {
+        setIsPrime(true);
+        showAlert({
+          title: 'Compra restaurada',
+          message: 'Tu suscripción Schedio Prime se ha restaurado correctamente.',
+          singleButton: true,
+          onConfirm: closeAlert,
+        });
+      } else {
+        showAlert({
+          title: 'Nada que restaurar',
+          message:
+            'No hemos encontrado ninguna suscripción activa asociada a esta cuenta de Google Play.',
+          singleButton: true,
+          onConfirm: closeAlert,
+        });
+      }
+    } catch (error) {
+      console.error('[Settings] Error restoring purchases:', error);
+      showAlert({
+        title: 'No se pudo restaurar',
+        message: 'Ha habido un problema comprobando tus compras. Inténtalo de nuevo.',
+        singleButton: true,
+        onConfirm: closeAlert,
+      });
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!isPrime) {
+      router.push('/plus');
+      return;
+    }
+    if (!user) return;
+    setExporting(true);
+    try {
+      const { subjects, profile } = useUserStore.getState();
+      await exportGradesAndExamsPdf({
+        userId: user.uid,
+        studentName: profile?.displayName || user.displayName || '',
+        subjects,
+        averageGrade: profile?.averageGrade,
+      });
+    } catch (error) {
+      console.error('[Settings] Error exporting PDF:', error);
+      showAlert({
+        title: 'No se pudo exportar',
+        message: 'Ha habido un problema generando el PDF. Inténtalo de nuevo.',
+        singleButton: true,
+        onConfirm: closeAlert,
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleLogout = () =>
     showAlert({
@@ -297,8 +378,38 @@ export default function SettingsScreen() {
           <Row
             icon={CreditCard}
             label="Suscripción"
-            sub={isPrime ? 'Schedio Prime' : 'Plan Gratuito'}
-            onPress={() => router.push('/plus')}
+            sub={isPrime ? 'Schedio Prime · Gestionar en Google Play' : 'Plan Gratuito'}
+            onPress={handleSubscriptionPress}
+          />
+          {isPrime ? null : (
+            <Row
+              icon={RotateCcw}
+              label="Restaurar compra"
+              sub={restoring ? 'Comprobando…' : '¿Ya tienes Prime en otro dispositivo?'}
+              control={
+                restoring ? (
+                  <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
+                ) : undefined
+              }
+              onPress={restoring ? undefined : handleRestore}
+            />
+          )}
+          <Row
+            icon={Download}
+            label="Exportar notas y exámenes"
+            sub={
+              exporting
+                ? 'Generando PDF…'
+                : isPrime
+                  ? 'Descarga un PDF con tus notas y exámenes'
+                  : 'Función Prime'
+            }
+            control={
+              exporting ? (
+                <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
+              ) : undefined
+            }
+            onPress={exporting ? undefined : handleExport}
           />
         </Group>
 

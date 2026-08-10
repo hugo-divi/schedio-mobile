@@ -14,11 +14,13 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { useRouter } from 'expo-router';
 import { tokens } from '../theme/tokens';
 import { uploadFile } from '../services/storage';
-import useUserStore from '../store/userStore';
+import useUserStore, { PRIME_WEEKLY_UPLOADS } from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import { auth } from '../services/firebase';
+import PrimeLimitSheet from './PrimeLimitSheet';
 
 const UploadModal = ({
   visible,
@@ -33,20 +35,40 @@ const UploadModal = ({
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [subjectId, setSubjectId] = useState(initialSubjectId);
+  const [limitSheetVisible, setLimitSheetVisible] = useState(false);
   const canUpload = useUserStore((state) => state.canUpload);
   const recordUpload = useUserStore((state) => state.recordUpload);
+  const weeklyUploadLimit = useUserStore((state) => state.weeklyUploadLimit);
   const isPrime = useAuthStore((state) => state.isPrime);
+  const router = useRouter();
 
   useEffect(() => {
     if (visible) setSubjectId(initialSubjectId);
   }, [visible, initialSubjectId]);
 
+  // Prime has its own (much higher) cap purely against server abuse, not a
+  // marketing moment — a plain alert there, the Prime sheet only for free.
+  const handleLimitReached = () => {
+    if (isPrime) {
+      const limit = weeklyUploadLimit();
+      Alert.alert(
+        'Límite semanal alcanzado',
+        `Has llegado a tus ${limit} subidas de esta semana. Vuelve a intentarlo en unos días.`
+      );
+      return;
+    }
+    setLimitSheetVisible(true);
+  };
+
+  const goToPrime = () => {
+    setLimitSheetVisible(false);
+    onClose();
+    router.push('/plus');
+  };
+
   const handlePickImage = async () => {
     if (!canUpload()) {
-      Alert.alert(
-        'Límite Alcanzado',
-        'Has alcanzado el límite de 3 archivos semanales. Pásate a Schedio Prime para subidas ilimitadas.'
-      );
+      handleLimitReached();
       return;
     }
 
@@ -67,10 +89,7 @@ const UploadModal = ({
 
   const handlePickDocument = async () => {
     if (!canUpload()) {
-      Alert.alert(
-        'Límite Alcanzado',
-        'Has alcanzado el límite de 3 archivos semanales. Pásate a Schedio Prime para subidas ilimitadas.'
-      );
+      handleLimitReached();
       return;
     }
 
@@ -227,7 +246,7 @@ const UploadModal = ({
                     <Text style={styles.primeTitle}>Schedio Prime</Text>
                   </View>
                   <Text style={styles.primeText}>
-                    Límite: 3 archivos/semana. Actualiza para subidas ilimitadas y análisis con IA.
+                    Límite: 3 archivos/semana. Con Prime, {PRIME_WEEKLY_UPLOADS}/semana.
                   </Text>
                 </View>
               )}
@@ -235,6 +254,14 @@ const UploadModal = ({
           )}
         </View>
       </View>
+
+      <PrimeLimitSheet
+        visible={limitSheetVisible}
+        onClose={() => setLimitSheetVisible(false)}
+        title={`Has alcanzado el límite de ${weeklyUploadLimit()} archivos semanales`}
+        description={`Con Schedio Prime tienes hasta ${PRIME_WEEKLY_UPLOADS} subidas por semana para tu Mochila.`}
+        onUpgrade={goToPrime}
+      />
     </Modal>
   );
 };

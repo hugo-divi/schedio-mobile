@@ -348,7 +348,19 @@ exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
     return { text: sameDay ? (usage.lastRecommendation ?? null) : null, limited: true };
   }
 
-  const { text, costUsd } = await callGemini(prompt);
+  let text, costUsd;
+  try {
+    ({ text, costUsd } = await callGemini(prompt));
+  } catch (error) {
+    // Gemini itself failing (rate limit, outage, bad response) isn't the
+    // caller's fault and isn't billable — same shape as the daily-limit and
+    // budget-exhausted replies above, so the client's existing fallback path
+    // handles it without a crash reaching the student. Logged here (rather
+    // than left to surface as an "Unhandled error") so it's still visible in
+    // Cloud Functions logs.
+    logger.error('Gemini call failed in aiProxy', error);
+    return { text: null, limited: false };
+  }
 
   await usageRef.set({ date: todayKey, count: countSoFar + 1, lastRecommendation: text });
 
