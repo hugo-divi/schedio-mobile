@@ -2,6 +2,7 @@
  * Productivity Analysis Service
  * Logic to derive insights from study sessions (Golden Hour, Recommended Technique, etc.)
  */
+import { localDateKey } from './priority';
 
 /**
  * Calculates the "Golden Hour" - the hour of the day when the user study most.
@@ -109,14 +110,16 @@ export const getWeeklyStats = (sessions) => {
     const d = new Date();
     d.setDate(today.getDate() - i);
     last7Days.push({
-      dateStr: d.toISOString().split('T')[0],
+      dateStr: localDateKey(d),
       dayName: d.toLocaleDateString('es-ES', { weekday: 'short' }).toUpperCase(),
       minutes: 0,
     });
   }
 
   sessions.forEach((session) => {
-    const sessionDate = new Date(session.date).toISOString().split('T')[0];
+    // Local day, so a session at 00:30 counts towards the night it happened
+    // rather than being pushed into a neighbouring bar by the UTC offset.
+    const sessionDate = localDateKey(session.date);
     const dayMatch = last7Days.find((d) => d.dateStr === sessionDate);
     if (dayMatch) {
       dayMatch.minutes += session.duration;

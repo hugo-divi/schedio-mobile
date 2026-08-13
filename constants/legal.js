@@ -1,21 +1,29 @@
 import { Alert, Linking } from 'react-native';
 
 /**
- * Where the privacy policy and the terms of service live.
+ * Where the legal pages and other schedio.es-hosted screens live.
  *
- * Published on the GitHub Pages landing — the source Markdown these were
- * generated from is legal/privacidad.md and legal/terminos.md. If the
- * content changes, update both: this URL only serves what's already
- * published there, it doesn't pull from the repo automatically.
+ * Published from schedio-code/schedio-landing (source repo:
+ * github.com/schedio-landing/schedio-app). If the content changes there,
+ * this only points at it — it doesn't pull anything automatically.
+ *
+ * privacy/terms started as generated copies of legal/privacidad.md and
+ * legal/terminos.md, but privacidad.html has since had a section added (the
+ * beta waitlist form) that the .md hasn't — the two are not kept in sync
+ * automatically, the web page is the one actually published.
  */
 export const LEGAL_URLS = {
-  privacy: 'https://schedio-landing.github.io/schedio-app/privacidad.html',
-  terms: 'https://schedio-landing.github.io/schedio-app/terminos.html',
+  privacy: 'https://schedio.es/privacidad',
+  terms: 'https://schedio.es/terminos',
+  deleteAccount: 'https://schedio.es/eliminar-cuenta',
+  feedback: 'https://schedio.es/feedback',
 };
 
 export const LEGAL_LABELS = {
   privacy: 'Política de privacidad',
   terms: 'Términos de servicio',
+  deleteAccount: 'Eliminar cuenta',
+  feedback: 'Enviar feedback',
 };
 
 /** Opens a legal document, or says it isn't published yet. */

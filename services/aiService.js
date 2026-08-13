@@ -6,7 +6,7 @@
  * client bundle — extractable from any distributed APK, so effectively
  * public, and nothing stopped someone who pulled it out from calling it
  * outside the app with no limit at all. The proxy keeps the key server-side
- * and enforces a 5-per-day quota per signed-in user (see AI_DAILY_LIMIT in
+ * and enforces a 3-per-day quota per signed-in user (see AI_DAILY_LIMIT in
  * functions/index.js) — real enforcement, since it's tied to a verified
  * Firebase Auth token rather than anything the client claims about itself.
  */

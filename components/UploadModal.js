@@ -87,6 +87,36 @@ const UploadModal = ({
     }
   };
 
+  const handlePickCamera = async () => {
+    if (!canUpload()) {
+      handleLimitReached();
+      return;
+    }
+
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permiso denegado',
+          'Activa el acceso a la cámara en los ajustes del sistema para poder hacer fotos.'
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        processUpload(result.assets[0].uri, 'image');
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      Alert.alert('Error', 'No se pudo abrir la cámara');
+    }
+  };
+
   const handlePickDocument = async () => {
     if (!canUpload()) {
       handleLimitReached();
@@ -220,11 +250,20 @@ const UploadModal = ({
               )}
 
               <View style={styles.actions}>
+                <TouchableOpacity style={styles.actionButton} onPress={handlePickCamera}>
+                  <View
+                    style={[styles.iconContainer, { backgroundColor: 'rgba(90, 185, 138, 0.1)' }]}
+                  >
+                    <Ionicons name="camera" size={26} color="#5AB98A" />
+                  </View>
+                  <Text style={styles.actionText}>Cámara</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.actionButton} onPress={handlePickImage}>
                   <View
                     style={[styles.iconContainer, { backgroundColor: 'rgba(255, 159, 10, 0.1)' }]}
                   >
-                    <Ionicons name="images" size={28} color="#FF9F0A" />
+                    <Ionicons name="images" size={26} color="#FF9F0A" />
                   </View>
                   <Text style={styles.actionText}>Galería</Text>
                 </TouchableOpacity>
@@ -233,7 +272,7 @@ const UploadModal = ({
                   <View
                     style={[styles.iconContainer, { backgroundColor: 'rgba(74, 144, 226, 0.1)' }]}
                   >
-                    <Ionicons name="document-text" size={28} color="#4A90E2" />
+                    <Ionicons name="document-text" size={26} color="#4A90E2" />
                   </View>
                   <Text style={styles.actionText}>Documento</Text>
                 </TouchableOpacity>
@@ -350,30 +389,31 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     marginBottom: 24,
   },
   actionButton: {
     flex: 1,
     backgroundColor: '#2C2C2E',
     borderRadius: 16,
-    padding: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   actionText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 15,
+    fontSize: 13,
   },
   progressContainer: {
     alignItems: 'center',

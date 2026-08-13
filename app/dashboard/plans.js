@@ -202,7 +202,10 @@ function TaskRow({ task, highlighted, onPress, onEdit, onToggle }) {
           {task.isPanicMode ? (
             <AlertCircle size={11} color={tokens.colors.danger} strokeWidth={2} />
           ) : null}
-          <Text style={[styles.taskMeta, task.isPanicMode && { color: tokens.colors.danger }]}>
+          <Text
+            style={[styles.taskMeta, task.isPanicMode && { color: tokens.colors.danger }]}
+            numberOfLines={1}
+          >
             {meta}
           </Text>
         </View>
@@ -293,7 +296,7 @@ function TaskSheet({ visible, onClose, days, subjects, editing, onSave, onDelete
   const canSave = text.trim().length > 0;
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} avoidKeyboard>
+    <BottomSheet visible={visible} onClose={onClose}>
       <Text style={styles.sheetTitle}>{editing ? 'Editar tarea' : 'Añadir tarea suelta'}</Text>
 
       {/* The scheduler's own explanation for a generated task. It already
@@ -875,7 +878,7 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
   screenTitle: {
@@ -1109,6 +1112,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   taskMeta: {
+    flexShrink: 1,
     fontFamily: font.medium,
     fontSize: 12,
     color: tokens.colors.textSecondary,

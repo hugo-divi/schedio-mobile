@@ -223,7 +223,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
   // ── Render ──
 
   return (
-    <BottomSheet visible={visible} onClose={close} avoidKeyboard>
+    <BottomSheet visible={visible} onClose={close}>
       {view === VIEW_MAIN ? (
         <>
           <SheetHeader title="Acciones rápidas" />

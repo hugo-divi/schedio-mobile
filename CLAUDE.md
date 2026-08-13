@@ -50,10 +50,52 @@ Antes de escribir código para cualquier pendiente, preguntar:
 
 ## Diseño
 
-Inspiración: Apple + Notion. Minimalismo, mucho blanco, sensación premium.
-Colores: blanco `#FFFFFF` (fondo), negro `#000000` (texto), azul `#2979FF` (acento).
-Tipografía: Inter.
-Pantallas: Home (vista global), Calendario, Mochila, Sesiones, IA/Coach (futuro), Perfil.
+**Fuente de verdad:** el proyecto "Schedio Design System" en Claude Design
+(`35c26065-80d8-4fe5-af1e-b876a8a66edc`). `theme/tokens.js` lo espeja: se cambia
+allí primero y luego se refleja aquí, nunca al revés.
+
+**Tema oscuro único.** No hay modo claro. `colors.dark` y `colors.light` tienen
+a propósito los mismos valores, para que las pantallas que todavía ramifican por
+`isDarkMode` sigan funcionando mientras esperan su rediseño. Código nuevo no debe
+leer `colors.light`.
+
+- Fondo `#191919` · card `#242424` · hover `#2C2C2C`
+- Borde `#373737`, 1px
+- Texto `#EDEDED`, secundario `#9B9B9B`
+- Acento `#2979FF`
+- Radios: 8 botón, 12 card, 24 sheet, `pill` 100
+- Bezier `[0.2, 0.8, 0.2, 1]`, transición estándar 180 ms
+
+**Lenguaje plano: bordes, no sombras.** Nada de gradientes ni efecto cristal. Los
+`shadows` que quedan en `tokens.js` son solo para las pantallas sin rediseñar.
+
+**Tipografía.** Inter se elige **por familia, no por `fontWeight`**
+(`Inter_400Regular`, `_500Medium`, `_600SemiBold`, `_700Bold`): React Native
+resuelve el peso por nombre de familia, así que combinar `fontWeight` con la
+familia `sans` renderiza en regular en Android sin avisar. BebasNeue
+(`families.display`) solo para números grandes.
+
+**Componentes.** Las pantallas rediseñadas se montan con `components/ui/`: `Card`,
+`Button`, `Chip`, `IconButton`, `Input`, `Toggle`, `SectionTitle`/`OverlineLabel`,
+`BottomSheet`, `CalendarPicker`, `PrimeBadge`. `GlassCard`/`GlassView` son legado:
+siguen en uso en `history.js` y `recommendations.js`, las dos pantallas que aún no
+se han rediseñado, pero no se usan en código nuevo.
+
+**Pantallas reales** (`app/dashboard/`) — cuatro pestañas más el botón "+" central:
+
+| Pestaña  | Fichero               | Contenido                                  |
+| -------- | --------------------- | ------------------------------------------ |
+| Inicio   | `index.js`            | Vista global del curso                     |
+| Estudiar | `study.js`            | Sesión de estudio y temporizador           |
+| —        | `session_redirect.js` | Botón "+" central, no es pestaña           |
+| Plan     | `plans.js`            | Dos solapas internas: Planes y **Mochila** |
+| Perfil   | `profile.js`          |                                            |
+
+Fuera de las pestañas, alcanzables por navegación (`href: null`): `ranks.js`
+(rangos y racha), `history.js` (estadísticas) y `recommendations.js`.
+
+No existe pantalla de Calendario ni de IA/Coach: la Mochila vive dentro de Plan, y
+el coach sigue fuera del lanzamiento inicial.
 
 ## Cómo comportarte como agente en este repo
 

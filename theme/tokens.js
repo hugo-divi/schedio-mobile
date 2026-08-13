@@ -44,6 +44,27 @@ const palette = {
     ingles: '#D46A9A',
     lengua: '#6C6FD4',
   },
+  /**
+   * Unlocked with Prime, whose subject cap (20, see MAX_SUBJECTS_PRIME in
+   * services/permissions.js) would otherwise run past the eight tones above
+   * and force two subjects to share a colour. Same desaturated weight as
+   * `subjects`, spaced by hue so each one still reads as distinct at the
+   * ~34px dot the picker renders.
+   */
+  subjectsExtra: {
+    geologia: '#CC3E3E',
+    economia: '#B9AC31',
+    biologia: '#94AD2E',
+    geografia: '#6EAD2E',
+    musica: '#47AD2E',
+    griego: '#2EAD3B',
+    informatica: '#2EAD87',
+    fisica: '#56ADD2',
+    arte: '#9E66D6',
+    dibujo: '#C066D6',
+    latin: '#D45EC8',
+    religion: '#D45E81',
+  },
   // Semantic exceptions — restricted use, never decorative.
   trendUp: '#5AB98A',
   danger: '#D8604A',

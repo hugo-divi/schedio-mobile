@@ -1,10 +1,10 @@
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { tokens } from '../theme/tokens';
-import { MAX_SUBJECTS_FREE } from './permissions';
+import { MAX_SUBJECTS_FREE, SUBJECT_COLORS_FREE } from './permissions';
 
-/** The design system's closed subject palette, as a flat list for assignment. */
-export const SUBJECT_COLORS = Object.values(tokens.colors.subjects);
+// Nobody is Prime yet during onboarding (see MAX_SUBJECTS below), so this
+// always hands out the free eight — never the Prime-only extras.
+export const SUBJECT_COLORS = SUBJECT_COLORS_FREE;
 
 export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
 
@@ -249,7 +249,14 @@ export const saveOnboardingStep = async (uid, patch) => {
  * exist inside `onboardingData` and no other screen can see them.
  */
 export const completeOnboarding = async (uid, data) => {
-  const { educationLevel, branch, currentGrade, subjects = [], taskManagement } = data;
+  const {
+    educationLevel,
+    branch,
+    currentGrade,
+    subjects = [],
+    taskManagement,
+    reviewFrequency,
+  } = data;
 
   const created = await Promise.all(
     subjects.map((subject) =>
@@ -270,6 +277,11 @@ export const completeOnboarding = async (uid, data) => {
     branch: branch || 'General',
     grade: currentGrade,
     organizationLevel: organizationLevelFor(taskManagement),
+    // Promoted out of `onboardingData` because the planner reads it: it sets how
+    // much of the work the plan leaves for the end (`gammaFor` in
+    // microplanService). It was already being asked and only feeding the
+    // potential-grade estimate, so this is a free signal, not a new question.
+    reviewFrequency: reviewFrequency || null,
     onboardingCompleted: true,
     isNewAccount: true,
     'onboardingData.completedAt': new Date().toISOString(),

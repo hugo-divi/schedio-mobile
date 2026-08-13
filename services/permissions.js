@@ -5,6 +5,8 @@
  * entitlement status on the backend (e.g., via Cloud Functions).
  */
 
+import { tokens } from '../theme/tokens';
+
 /**
  * Feature Flags and Plan Levels
  */
@@ -45,3 +47,17 @@ export const MAX_SUBJECTS_PRIME = 20;
 
 export const getMaxSubjects = (userData) =>
   hasPrimeAccess(userData) ? MAX_SUBJECTS_PRIME : MAX_SUBJECTS_FREE;
+
+/**
+ * Colores de materia: la paleta gratuita cubre justo MAX_SUBJECTS_FREE (8).
+ * Prime sube el tope a 20, así que necesita los 12 tonos extra o dos materias
+ * acabarían compartiendo color.
+ */
+export const SUBJECT_COLORS_FREE = Object.values(tokens.colors.subjects);
+export const SUBJECT_COLORS_PRIME = [
+  ...SUBJECT_COLORS_FREE,
+  ...Object.values(tokens.colors.subjectsExtra),
+];
+
+export const getSubjectColors = (userData) =>
+  hasPrimeAccess(userData) ? SUBJECT_COLORS_PRIME : SUBJECT_COLORS_FREE;

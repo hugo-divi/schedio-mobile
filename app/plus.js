@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, X, Check, Star } from 'lucide-react-native';
+import Animated, { ZoomIn } from 'react-native-reanimated';
+import ConfettiCannon from 'react-native-confetti-cannon';
 import { tokens } from '../theme/tokens';
 import { getOfferings, purchasePackage } from '../services/revenuecat';
 import useAuthStore from '../store/authStore';
@@ -172,20 +182,44 @@ export default function SchedioPlusScreen() {
   if (step === 'success') {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.successBody}>
-          <View style={styles.successIconCircle}>
+        <ScrollView
+          style={styles.successScroll}
+          contentContainerStyle={styles.successBody}
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View entering={ZoomIn.duration(420)} style={styles.successIconCircle}>
             <Check size={36} color={tokens.colors.premiumText} strokeWidth={2.5} />
-          </View>
+          </Animated.View>
           <PremiumBadge>Prime</PremiumBadge>
           <Text style={styles.successTitle}>¡Bienvenido a Schedio Prime!</Text>
           <Text style={styles.successSubtitle}>
             Tu suscripción se ha activado. Ya tienes acceso a todo, sin límites.
           </Text>
-        </View>
+
+          <View style={styles.successUnlocked}>
+            <Text style={styles.successUnlockedTitle}>Qué has desbloqueado</Text>
+            <View style={styles.bulletList}>
+              {BULLETS.map((bullet) => (
+                <View key={bullet} style={styles.bullet}>
+                  <View style={styles.bulletIcon}>
+                    <Star
+                      size={11}
+                      color={tokens.colors.premiumText}
+                      fill={tokens.colors.premiumText}
+                    />
+                  </View>
+                  <Text style={styles.bulletText}>{bullet}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </ScrollView>
 
         <View style={[styles.planFooter, { paddingBottom: 16 + insets.bottom }]}>
           <PrimeButton title="Empezar" onPress={() => router.back()} />
         </View>
+
+        <ConfettiCannon count={160} origin={{ x: -10, y: 0 }} fadeOut />
       </View>
     );
   }
@@ -203,7 +237,11 @@ export default function SchedioPlusScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.planBody}>
+        <ScrollView
+          style={styles.planScroll}
+          contentContainerStyle={styles.planBody}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.planHead}>
             <PremiumBadge>Prime</PremiumBadge>
             <Text style={styles.planTitle}>Schedio Prime</Text>
@@ -249,7 +287,7 @@ export default function SchedioPlusScreen() {
             />
             <Text style={styles.cancelNote}>Cancela cuando quieras</Text>
           </View>
-        </View>
+        </ScrollView>
 
         <View style={[styles.planFooter, { paddingBottom: 16 + insets.bottom }]}>
           <Button
@@ -446,11 +484,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
   },
-  planBody: {
+  // The ScrollView itself takes the space between header and footer; its
+  // contentContainerStyle grows to fill (and centers within) that space when
+  // short, and scrolls instead of overlapping planFooter when it doesn't fit
+  // — small screens, a longer testimonial, or larger system font settings.
+  planScroll: {
     flex: 1,
+  },
+  planBody: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
-    gap: 24,
+    paddingVertical: 12,
+    gap: 18,
   },
   planHead: {
     alignItems: 'center',
@@ -471,16 +517,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: tokens.colors.premiumBorder,
     borderRadius: tokens.radius.card,
-    paddingVertical: 28,
+    paddingVertical: 20,
     paddingHorizontal: 24,
     alignItems: 'center',
-    gap: 22,
+    gap: 16,
   },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
     gap: 6,
-    minHeight: 60,
+    minHeight: 52,
     justifyContent: 'center',
   },
   priceValue: {
@@ -501,7 +547,7 @@ const styles = StyleSheet.create({
   },
   bulletList: {
     width: '100%',
-    gap: 14,
+    gap: 10,
   },
   bullet: {
     flexDirection: 'row',
@@ -529,8 +575,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: tokens.colors.premiumBorder,
     borderRadius: tokens.radius.card,
-    padding: 18,
-    gap: 10,
+    padding: 14,
+    gap: 8,
   },
   testimonialQuote: {
     fontFamily: font.regular,
@@ -573,11 +619,15 @@ const styles = StyleSheet.create({
   },
 
   // Success screen
-  successBody: {
+  successScroll: {
     flex: 1,
+  },
+  successBody: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
+    paddingVertical: 24,
     gap: 14,
   },
   successIconCircle: {
@@ -604,6 +654,23 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: tokens.colors.textSecondary,
     textAlign: 'center',
+  },
+  successUnlocked: {
+    width: '100%',
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.premiumBorder,
+    borderRadius: tokens.radius.card,
+    padding: 18,
+    marginTop: 8,
+    gap: 12,
+  },
+  successUnlockedTitle: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    color: tokens.colors.textSecondary,
   },
 
   // Shared premium CTA

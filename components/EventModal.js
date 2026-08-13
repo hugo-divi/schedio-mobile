@@ -111,7 +111,6 @@ export default function EventModal({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      avoidKeyboard
       title={existingEvent ? `Editar ${typeNoun}` : 'Nuevo evento'}
       subtitle={
         existingEvent

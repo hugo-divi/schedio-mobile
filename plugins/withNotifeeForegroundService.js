@@ -1,4 +1,8 @@
-const { withAndroidManifest } = require('@expo/config-plugins');
+const {
+  withAndroidManifest,
+  withProjectBuildGradle,
+  withPlugins,
+} = require('@expo/config-plugins');
 
 /**
  * Notifee ships no Expo config plugin of its own — the foreground-service
@@ -47,4 +51,27 @@ const withNotifeeForegroundService = (config) =>
     return config;
   });
 
-module.exports = withNotifeeForegroundService;
+/**
+ * The other half of the same gap: Notifee's compiled `app.notifee:core` AAR
+ * lives in a local Maven repo bundled inside its own npm package, not on
+ * Maven Central — without this repository entry, Gradle can't resolve
+ * `app.notifee:core:+` at all and the build fails during dependency
+ * resolution, before any manifest or code is even touched. `expo prebuild`
+ * regenerates android/build.gradle from scratch every time, so this can't be
+ * fixed by editing that file directly.
+ */
+const withNotifeeMavenRepo = (config) =>
+  withProjectBuildGradle(config, (config) => {
+    const marker = '@notifee/react-native/android/libs';
+    if (config.modResults.contents.includes(marker)) return config;
+
+    config.modResults.contents = config.modResults.contents.replace(
+      /(allprojects\s*{\s*repositories\s*{)/,
+      '$1\n    maven { url "$rootDir/../node_modules/@notifee/react-native/android/libs" }'
+    );
+
+    return config;
+  });
+
+module.exports = (config) =>
+  withPlugins(config, [withNotifeeForegroundService, withNotifeeMavenRepo]);

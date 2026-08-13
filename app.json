@@ -12,7 +12,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FFFFFF"
+      "backgroundColor": "#191919"
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +28,6 @@
         "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
       ],
       "blockedPermissions": [
-        "android.permission.CAMERA",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.SYSTEM_ALERT_WINDOW"
       ]
@@ -68,7 +67,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Schedio necesita acceder a tus fotos para que puedas guardar apuntes en tu mochila.",
-          "cameraPermission": false,
+          "cameraPermission": "Schedio necesita acceder a tu cámara para que puedas fotografiar apuntes y guardarlos en tu mochila.",
           "microphonePermission": false
         }
       ],

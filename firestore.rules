@@ -22,6 +22,13 @@ service cloud.firestore {
       allow update: if isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPrime']);
 
+      // Server-only usage counters (e.g. daily AI quota in functions/index.js).
+      // The Admin SDK bypasses rules entirely, so the client should never be
+      // able to touch this — otherwise anyone can reset their own quota.
+      match /meta/{docId} {
+        allow read, write: if false;
+      }
+
       // Allow nested collections (notes, resources, etc.)
       match /{allPaths=**} {
         allow read, write: if isOwner(userId);
@@ -70,6 +77,25 @@ service cloud.firestore {
       allow read: if isOwner(resource.data.userId);
       allow create: if isOwner(request.resource.data.userId);
       allow update, delete: if isOwner(resource.data.userId);
+    }
+
+    // 📝 Beta signups (landing en schedio.es)
+    // Solo-crear, sin lectura desde el cliente: la web escribe altas, nadie
+    // puede leer la lista salvo desde la consola de Firebase (que usa el
+    // Admin SDK y salta las reglas). Sin isOwner porque quien rellena el
+    // formulario no tiene cuenta ni sesión todavía.
+    match /betaSignups/{docId} {
+      allow create: if request.resource.data.keys().hasOnly(
+                         ['email', 'curso', 'android', 'dolor', 'creado'])
+        && request.resource.data.email is string
+        && request.resource.data.email.size() > 5
+        && request.resource.data.email.size() < 200
+        && request.resource.data.email.matches('^[^@]+@[^@]+[.][^@]+$')
+        && request.resource.data.curso in ['ESO', 'Bachillerato', 'Universidad', 'Otro']
+        && request.resource.data.android is bool
+        && request.resource.data.dolor is string
+        && request.resource.data.dolor.size() < 1000;
+      allow read, update, delete: if false;
     }
   }
 }

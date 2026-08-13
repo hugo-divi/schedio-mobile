@@ -4,7 +4,7 @@ import {
   Text,
   Modal,
   StyleSheet,
-  KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   Dimensions,
@@ -37,6 +37,13 @@ const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
 const DISMISS_DISTANCE = 110;
 const DISMISS_VELOCITY = 900;
 
+// RN's Modal renders in its own native window, which doesn't reliably inherit
+// the activity's keyboard-resize behavior — KeyboardAvoidingView alone does
+// nothing inside it on Android. Tracking the keyboard directly and nudging
+// the sheet up ourselves works regardless of that.
+const KEYBOARD_SHOW_EVENT = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+const KEYBOARD_HIDE_EVENT = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
 /**
  * The sheet every home-screen modal sits in: dimmed backdrop, rounded top,
  * grab handle, slide-up entrance, and drag-down-to-dismiss.
@@ -47,23 +54,47 @@ const DISMISS_VELOCITY = 900;
  * Pass `title`/`subtitle` for the standard heading, or render your own header
  * in `children` and leave them out.
  */
-export function BottomSheet({
-  visible,
-  onClose,
-  title,
-  subtitle,
-  children,
-  avoidKeyboard = false,
-}) {
+export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
+  const keyboardShift = useSharedValue(0);
 
   useEffect(() => {
     if (!visible) return;
     // Modal mounts its content on open, so start from off-screen every time.
     translateY.value = SCREEN_HEIGHT;
     translateY.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
-  }, [visible, translateY]);
+    keyboardShift.value = 0;
+  }, [visible, translateY, keyboardShift]);
+
+  // Shifts the sheet up by however much the keyboard actually overlaps it —
+  // insets.bottom is padding the sheet already reserves, so only the part of
+  // the keyboard beyond that needs to be compensated for.
+  useEffect(() => {
+    if (!visible) return;
+
+    const onShow = (event) => {
+      const height = event?.endCoordinates?.height ?? 0;
+      const overlap = Math.max(0, height - insets.bottom);
+      keyboardShift.value = withTiming(-overlap, {
+        duration: event?.duration || 220,
+        easing: Easing.out(Easing.cubic),
+      });
+    };
+    const onHide = (event) => {
+      keyboardShift.value = withTiming(0, {
+        duration: event?.duration || 200,
+        easing: Easing.out(Easing.cubic),
+      });
+    };
+
+    const showSub = Keyboard.addListener(KEYBOARD_SHOW_EVENT, onShow);
+    const hideSub = Keyboard.addListener(KEYBOARD_HIDE_EVENT, onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible, insets.bottom, keyboardShift]);
 
   // Animate out, then let the parent unmount us.
   const dismiss = useCallback(() => {
@@ -98,7 +129,7 @@ export function BottomSheet({
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
+    transform: [{ translateY: translateY.value + keyboardShift.value }],
   }));
 
   const sheet = (
@@ -132,16 +163,7 @@ export function BottomSheet({
           GestureHandlerRootView, so gestures inside it need their own. */}
       <GestureHandlerRootView style={styles.flex}>
         <Pressable style={styles.overlay} onPress={dismiss}>
-          {avoidKeyboard ? (
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={styles.keyboardView}
-            >
-              {sheet}
-            </KeyboardAvoidingView>
-          ) : (
-            sheet
-          )}
+          {sheet}
         </Pressable>
       </GestureHandlerRootView>
     </Modal>
@@ -184,9 +206,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.55)',
     justifyContent: 'flex-end',
   },
-  keyboardView: {
-    justifyContent: 'flex-end',
-  },
   sheet: {
     backgroundColor: tokens.colors.surfaceCard,
     borderTopWidth: 1,
@@ -202,9 +221,12 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 24,
   },
+  // The Pan gesture is bound to this area alone (see the comment above), so
+  // its size *is* the drag-to-dismiss target — padded well past the 4px bar
+  // itself rather than just enough to not look cramped.
   handleArea: {
-    paddingTop: 12,
-    paddingBottom: 16,
+    paddingTop: 20,
+    paddingBottom: 28,
     alignItems: 'center',
   },
   handle: {

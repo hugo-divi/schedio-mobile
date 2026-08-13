@@ -4,7 +4,9 @@ import {
   summarizeStudyLoad,
   daysBetween,
   toDate,
+  localDateKey,
 } from './priority';
+import { inferExamFormat, pickTaskText, taskHandInText } from './taskCopy';
 
 /**
  * Study plan generation.
@@ -62,6 +64,53 @@ export const PREFERRED_BLOCK_MINUTES = 40;
  */
 export const BURN_GAMMA = 2;
 
+/**
+ * Everything that changes with the education level, in one table.
+ *
+ * Keys match `EDUCATION_LEVELS` in services/onboarding.js exactly, and the value
+ * is already stored on the profile as `course`, so this costs the student
+ * nothing: no new question, no new field.
+ *
+ * The numbers below are not guesses about how much a student *should* study —
+ * they're bounded by what the plan can actually schedule. With a ~30-day window
+ * and ~90 min a day, five university subjects share about 3.100 minutes, so
+ * anything above ~600 per subject would make every plan report an overload and
+ * the warning would stop meaning anything.
+ *
+ * That fixes the frame too: the plan is a spine, not a total. It schedules the
+ * sessions that have to land on particular days for the spacing to work; the
+ * student puts their own hours on top. A plan that tries to account for every
+ * hour of exam-period study becomes a second job and is always wrong.
+ */
+export const LEVEL_PROFILES = {
+  ESO: { exam: 70, task: 25, leadDays: 10, block: 25 },
+  Bachillerato: { exam: 150, task: 45, leadDays: 21, block: 40 },
+  Universidad: { exam: 450, task: 90, leadDays: 30, block: 50 },
+};
+
+/** 'Otro' and anything unrecognised sit in the middle rather than at an extreme. */
+export const DEFAULT_LEVEL = 'Bachillerato';
+
+export const levelProfileFor = (course) => LEVEL_PROFILES[course] || LEVEL_PROFILES[DEFAULT_LEVEL];
+
+/**
+ * How much of the work the plan leaves for the end, from the student's own
+ * answer about reviewing — a question the onboarding already asks.
+ *
+ * Deliberately meets them slightly ahead of where they are rather than where
+ * they say they are: someone who never reviews won't follow a plan that
+ * front-loads everything, but nudging them earlier than their habit is the whole
+ * point. So "nunca" gets a late curve, not the latest one imaginable.
+ */
+export const GAMMA_BY_REVIEW_HABIT = {
+  never: 2.5,
+  sometimes: 2.2,
+  regularly: 1.8,
+  always: 1.5,
+};
+
+export const gammaFor = (reviewFrequency) => GAMMA_BY_REVIEW_HABIT[reviewFrequency] ?? BURN_GAMMA;
+
 /** Minutes per day by self-reported organisation level (1 "caos total" ..
  *  5 "muy organizado", from onboarding). Blended with observed history when
  *  there's enough of it. */
@@ -101,38 +150,17 @@ const DEFAULT_SUBJECT_COLOR = '#4F46E5';
  * study → practice → review arc; the old absolute thresholds dropped it straight
  * into "PRÁCTICA" and it never saw a review phase at all.
  */
+// The bands carry no copy any more. Wording lives in services/taskCopy.js, keyed
+// by phase *and* exam format, so the same phase reads as "10 ejercicios sin mirar
+// apuntes" in Matemáticas and "desarrolla una pregunta entera" in Historia.
 const PHASES = [
-  {
-    until: 0.35,
-    phase: 'INTRODUCCIÓN',
-    type: 'read',
-    label: (s) => `Lectura ligera / Introducción a ${s}`,
-  },
-  {
-    until: 0.65,
-    phase: 'ESTUDIO PROFUNDO',
-    type: 'study',
-    label: (s) => `Estudio de temas complejos de ${s}`,
-  },
-  {
-    until: 0.85,
-    phase: 'PRÁCTICA',
-    type: 'practice',
-    label: (s) => `Ejercicios prácticos de ${s}`,
-  },
-  {
-    until: Infinity,
-    phase: 'REPASO FINAL',
-    type: 'review',
-    label: (s) => `Repaso relámpago de ${s} (Conceptos Clave)`,
-  },
+  { until: 0.35, phase: 'INTRODUCCIÓN', type: 'read' },
+  { until: 0.65, phase: 'ESTUDIO PROFUNDO', type: 'study' },
+  { until: 0.85, phase: 'PRÁCTICA', type: 'practice' },
+  { until: Infinity, phase: 'REPASO FINAL', type: 'review' },
 ];
 
-const PANIC_PHASE = {
-  phase: 'MODO PÁNICO 🔥',
-  type: 'review',
-  label: (s) => `Cramming: Esquemas y lectura rápida de ${s}`,
-};
+const PANIC_PHASE = { phase: 'MODO PÁNICO 🔥', type: 'review' };
 
 /**
  * A `type: 'task'` is a hand-in, not an exam. It doesn't get an introduction →
@@ -141,11 +169,7 @@ const PANIC_PHASE = {
  * reading "Lectura ligera / Introducción a Historia" for what the student had
  * entered as "Trabajo Roma".
  */
-const taskBand = (eventName, isFinalBlock) => ({
-  phase: 'ENTREGA',
-  type: 'practice',
-  label: () => (isFinalBlock ? `Terminar: ${eventName}` : `Avanzar con: ${eventName}`),
-});
+const TASK_PHASE = { phase: 'ENTREGA', type: 'practice' };
 
 // ─── Helpers ───
 
@@ -161,12 +185,9 @@ const startOfDay = (date) => {
   return copy;
 };
 
-const formatDate = (date) => {
-  // Local calendar date. `toISOString()` would shift to UTC and, for anyone east
-  // of Greenwich in summer, file a late-evening task under the following day.
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-};
+// Local calendar date, shared with the UI so both sides agree on which day a
+// task belongs to. See `localDateKey` in services/priority.js.
+const formatDate = (date) => localDateKey(date);
 
 const roundTo5 = (minutes) => Math.round(minutes / 5) * 5;
 
@@ -270,11 +291,23 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     if (subject?.id) subjectsById[subject.id] = subject;
   });
 
+  // Everything level-dependent resolves once, here. `course` and
+  // `reviewFrequency` are both already on the profile from onboarding, so none of
+  // this costs the student an extra question.
+  const level = levelProfileFor(profile?.course);
+  const effortBase = { exam: level.exam, task: level.task };
+  const leadDays = level.leadDays;
+  const preferredBlock = clamp(level.block, MIN_BLOCK_MINUTES, MAX_BLOCK_MINUTES);
+  const gamma = gammaFor(profile?.reviewFrequency);
+
+  diagnostics.level = profile?.course || DEFAULT_LEVEL;
+  diagnostics.preferredBlock = preferredBlock;
+
   const dailyCapacity = estimateDailyCapacity({ profile, sessions, now });
   diagnostics.dailyCapacity = dailyCapacity;
 
   const studiedMinutesBySubject = summarizeStudyLoad(sessions, { now });
-  const ctx = { now, studiedMinutesBySubject };
+  const ctx = { now, studiedMinutesBySubject, effortBase };
 
   // ─── 1. Build one work item per exam ───
   const items = [];
@@ -303,8 +336,10 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       subjectName,
       subjectColor: subject?.color || (subject ? DEFAULT_SUBJECT_COLOR : FALLBACK_SUBJECT_COLOR),
       daysUntil,
-      // Study opens MAX_LEAD_DAYS before the exam at the earliest.
-      startDay: Math.max(0, daysUntil - MAX_LEAD_DAYS),
+      // Study opens `leadDays` before the exam at the earliest.
+      startDay: Math.max(0, daysUntil - leadDays),
+      // How this subject is examined, which decides the wording of every task.
+      format: inferExamFormat(subjectName),
       totalEffort: detail.effortMinutes,
       remaining: detail.effortMinutes,
       sessions: 0,
@@ -329,7 +364,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
   const targetRemaining = (item, day) => {
     const windowLength = Math.max(1, item.daysUntil - item.startDay);
     const progress = (day - item.startDay + 1) / (windowLength + 1);
-    return item.totalEffort * (1 - Math.min(1, progress) ** BURN_GAMMA);
+    return item.totalEffort * (1 - Math.min(1, progress) ** gamma);
   };
 
   // ─── 2. Walk the calendar, filling each day's budget ───
@@ -356,6 +391,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         const detail = computeExamPriority(item.exam, item.subject, {
           now: date,
           studiedMinutesBySubject,
+          effortBase,
         });
         return { item, score: detail.score, detail };
       })
@@ -376,7 +412,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       // left always comes due then rather than quietly expiring.
       if (!isPanic && item.remaining <= targetRemaining(item, day)) return;
 
-      const target = Math.min(PREFERRED_BLOCK_MINUTES, item.remaining);
+      const target = Math.min(preferredBlock, item.remaining);
       const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
       let block = Math.max(5, roundTo5(Math.min(target, allowance)));
 
@@ -405,7 +441,10 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       const windowLength = Math.max(1, item.daysUntil - item.startDay);
       const progress = (day - item.startDay) / windowLength;
       const isTask = item.exam.type === 'task';
-      const isFinalBlock = block >= item.remaining;
+      // Final if nothing schedulable is left afterwards. Comparing `block` against
+      // the full remainder called a task "Avanzar con…" when the 11 minutes left
+      // were about to be dropped as rounding and nothing more was ever coming.
+      const isFinalBlock = item.remaining - block < MIN_BLOCK_MINUTES;
 
       // The last session before an exam is a review, whatever the arithmetic says.
       // In a short window the effort runs out before the exam day, so `progress`
@@ -413,19 +452,32 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       // without ever being revised.
       const closesExam = isFinalBlock && item.sessions > 0 && !isPanic;
       const band = isTask
-        ? taskBand(item.exam.name || item.subjectName, isFinalBlock)
+        ? TASK_PHASE
         : closesExam
           ? PHASES[PHASES.length - 1]
           : phaseFor(progress, isPanic);
 
+      const id = `${item.exam.id || `generated-${item.subjectName}`}-${dateKey}`;
+      const text = isTask
+        ? taskHandInText(item.exam.name || item.subjectName, {
+            isFinal: isFinalBlock,
+            isOnly: isFinalBlock && item.sessions === 0,
+          })
+        : pickTaskText({
+            phase: band.phase,
+            format: item.format,
+            subjectName: item.subjectName,
+            seed: id,
+          });
+
       tasks.push({
-        id: `${item.exam.id || `generated-${item.subjectName}`}-${dateKey}`,
+        id,
         examId: item.exam.id,
         subjectId: item.exam.subjectId,
         subjectName: item.subjectName,
         subjectColor: item.subjectColor,
         date: date.toISOString(),
-        text: band.label(item.subjectName),
+        text,
         phase: band.phase,
         type: band.type,
         completed: false,

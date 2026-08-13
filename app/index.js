@@ -1,13 +1,25 @@
 import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
-import { LoadingScreen } from '../components/LoadingScreen';
+import * as SplashScreen from 'expo-splash-screen';
 import useAuthStore from '../store/authStore';
 import { needsOnboarding } from '../services/onboarding';
+
+// The auth listener resolves on its own in practice (see
+// store/authStore.js), but startup must never be able to hang behind the
+// native splash forever if it somehow doesn't — same guard app/_layout.js
+// applies to font loading.
+const AUTH_TIMEOUT_MS = 5000;
 
 export default function Home() {
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   const loading = useAuthStore((state) => state.loading);
+
+  useEffect(() => {
+    if (!loading) return;
+    const timeout = setTimeout(() => useAuthStore.getState().setLoading(false), AUTH_TIMEOUT_MS);
+    return () => clearTimeout(timeout);
+  }, [loading]);
 
   useEffect(() => {
     // This used to route to /login unconditionally, ignoring whatever
@@ -18,8 +30,7 @@ export default function Home() {
     // before deciding, rather than guessing on a fixed timer.
     if (loading) return;
 
-    // Small delay to show branding rather than a hard cut.
-    const timer = setTimeout(async () => {
+    (async () => {
       if (!user) {
         router.replace('/login');
       } else if (!user.emailVerified) {
@@ -31,10 +42,11 @@ export default function Home() {
         // into it rather than landing on a dashboard with no subjects.
         router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
       }
-    }, 1200);
-
-    return () => clearTimeout(timer);
+      // Only now — the native splash covers this whole decision, so the
+      // student never sees anything but it until we know where they land.
+      SplashScreen.hideAsync().catch(() => {});
+    })();
   }, [loading, user, router]);
 
-  return <LoadingScreen />;
+  return null;
 }

@@ -4,6 +4,7 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   RefreshControl,
   StyleSheet,
   ActivityIndicator,
@@ -14,14 +15,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { ChevronRight, HelpCircle, Plus, Trophy } from 'lucide-react-native';
+import { ChevronRight, Plus } from 'lucide-react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
 import { db } from '../../services/firebase';
 import { auth } from '../../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkDailyStreak } from '../../services/streaks';
-import { calculateXpForLevel, calculateXpForNextLevel } from '../../services/gamification';
+import {
+  calculateXpForLevel,
+  calculateXpForNextLevel,
+  getNextRank,
+} from '../../services/gamification';
 import {
   getUpcomingExams,
   getPendingExams,
@@ -29,12 +34,17 @@ import {
   updateExam,
   deleteExam,
 } from '../../services/exams';
-import { rankExams, summarizeStudyLoad, HIGH_PRIORITY_SCORE } from '../../services/priority';
+import {
+  rankExams,
+  summarizeStudyLoad,
+  localDateKey,
+  HIGH_PRIORITY_SCORE,
+} from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
 import usePreferencesStore from '../../store/preferencesStore';
 import { registerForPushNotifications } from '../../services/notificationService';
-import ConfettiCannon from 'react-native-confetti-cannon';
 import useUserStore from '../../store/userStore';
+import useAuthStore from '../../store/authStore';
 import Skeleton from '../../components/Skeleton';
 import GradeModal from '../../components/GradeModal';
 import StreakModal from '../../components/StreakModal';
@@ -45,9 +55,9 @@ import GuidedTour from '../../components/GuidedTour';
 import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
 import Button from '../../components/ui/Button';
-import IconButton from '../../components/ui/IconButton';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
+import { Emoji } from '../../components/ui/Emoji';
 
 // How long the dashboard data stays fresh before returning to the tab
 // triggers a refetch.
@@ -58,6 +68,7 @@ export default function Dashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
+  const isPrime = useAuthStore((state) => state.isPrime);
 
   const [refreshing, setRefreshing] = useState(false);
   const [userData, setUserData] = useState({
@@ -103,9 +114,12 @@ export default function Dashboard() {
   const [eventsForSelectedDay, setEventsForSelectedDay] = useState([]);
   const [examsExpanded, setExamsExpanded] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
-  const [rankCelebrationVisible, setRankCelebrationVisible] = useState(false);
-  const [newRank, setNewRank] = useState('');
-  const previousRankRef = useRef(null);
+
+  const [easterEggVisible, setEasterEggVisible] = useState(false);
+  // Timestamps of recent taps on the header logo, pruned to the trailing
+  // window on every tap — cheaper than a timer per tap and self-resets if
+  // the student pauses partway through.
+  const logoTapsRef = useRef([]);
 
   const calculateDaysLeft = (date) => {
     const now = new Date();
@@ -124,7 +138,12 @@ export default function Dashboard() {
     return `En ${diffDays} días`;
   };
 
-  const fetchData = async () => {
+  // Memoized against its real dependencies (refreshing, autoGradePrompt) so
+  // useFocusEffect and onRefresh below always call the current closure —
+  // an unmemoized fetchData handed to a useCallback with an empty dep array
+  // is exactly what froze the auto-grade prompt at whatever autoGradePrompt
+  // was on mount, deaf to the student turning it off in Ajustes afterwards.
+  const fetchData = useCallback(async () => {
     try {
       const user = auth.currentUser;
       if (!user) return;
@@ -171,16 +190,6 @@ export default function Dashboard() {
       setExams(examsData || []);
       setPendingExams(pendingExamsData || []);
 
-      // --- Rank Celebration Check ---
-      const currentRank = profileData?.gamification?.rank;
-      if (previousRankRef.current && currentRank && previousRankRef.current !== currentRank) {
-        // Skip celebration if moving "down" (though unlikely in Schedio)
-        // or if it's the very first load of the session
-        setNewRank(currentRank);
-        setRankCelebrationVisible(true);
-      }
-      previousRankRef.current = currentRank;
-
       loadAIRecommendation(profileData, examsData, streakData);
 
       // Auto-Prompt logic
@@ -197,7 +206,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [refreshing, autoGradePrompt]);
 
   const loadAIRecommendation = async (profileData, examsData, streakData) => {
     try {
@@ -238,6 +247,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
+    // `fetchData` deliberately excluded: it's now memoized against
+    // `refreshing` (see its own definition), and this effect has no
+    // throttle guard the way useFocusEffect below does — reacting to every
+    // identity change here would re-fetch mid pull-to-refresh, right when
+    // `refreshing` flips and hands this effect a new `fetchData` closure.
+    // examRefreshTrigger is the only thing that should start a fetch here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [examRefreshTrigger]);
 
   useFocusEffect(
@@ -249,8 +265,11 @@ export default function Dashboard() {
       if (!lastFetchRef.current) return;
       if (Date.now() - lastFetchRef.current < FOCUS_REFETCH_MS) return;
       fetchData();
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [])
+      // `fetchData` isn't memoized (a fresh closure every render, reading
+      // current prefs like autoGradePrompt), so it belongs in the deps —
+      // an empty array froze this callback on its first-ever closure,
+      // permanently reading whatever autoGradePrompt was at mount.
+    }, [fetchData])
   );
 
   // Session history feeds StreakModal's calendar. Kept out of fetchData so the
@@ -286,15 +305,16 @@ export default function Dashboard() {
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchData();
-  }, []);
+  }, [fetchData]);
 
   // Calendar Handlers
   const handleDayClick = (date) => {
-    const dateStr = date.toISOString().split('T')[0];
-    const eventsOnDay = exams.filter((e) => {
-      const eDate = new Date(e.date).toISOString().split('T')[0];
-      return eDate === dateStr;
-    });
+    // Compared as local calendar days. Read through `toISOString()` these never
+    // matched: a calendar cell carries local midnight, which is the previous day
+    // in UTC, while an exam carries its real time, which isn't — so tapping a day
+    // that had exams on it opened as if it were empty.
+    const dateStr = localDateKey(date);
+    const eventsOnDay = exams.filter((e) => localDateKey(e.date) === dateStr);
 
     setSelectedDate(date);
 
@@ -324,6 +344,23 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Error deleting event:', error);
       Alert.alert('Error', 'No se pudo eliminar el evento.');
+    }
+  };
+
+  const LOGO_TAP_COUNT = 4;
+  const LOGO_TAP_WINDOW_MS = 1500;
+
+  const handleLogoPress = () => {
+    const now = Date.now();
+    const recent = [...logoTapsRef.current, now].filter((t) => now - t < LOGO_TAP_WINDOW_MS);
+    logoTapsRef.current = recent;
+    if (recent.length < LOGO_TAP_COUNT) return;
+
+    logoTapsRef.current = [];
+    setEasterEggVisible(true);
+    if (Platform.OS !== 'web') {
+      const Haptics = require('expo-haptics');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   };
 
@@ -365,7 +402,7 @@ export default function Dashboard() {
     setGradeModalVisible(true);
   };
 
-  const handleSaveGrade = async (examId, grade) => {
+  const handleSaveGrade = async (examId, grade, weight) => {
     if (!examId) {
       console.error('Cannot save grade: examId is null');
       Alert.alert('Error', 'Ocurrió un error al identificar el examen. Intenta recargar.');
@@ -374,7 +411,8 @@ export default function Dashboard() {
 
     try {
       await updateExam(examId, {
-        grade: grade,
+        grade,
+        weight,
         completed: true,
       });
 
@@ -440,31 +478,40 @@ export default function Dashboard() {
     return Math.min(100, Math.max(0, ((userData.xp - floor) / span) * 100));
   })();
 
+  // The near-miss nudge: this used to only live on the ranks screen, so the
+  // "almost there" pull never showed up unless the student had already
+  // gone looking for it.
+  const nextRank = getNextRank(userData.level);
+  const xpToNextRank = nextRank
+    ? Math.max(0, Math.round(calculateXpForLevel(nextRank.minLevel) - userData.xp))
+    : null;
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <View style={styles.logoPill}>
-            {/* The asset is square (1056x992) with the wordmark banded across
-                the middle, so it needs `cover` to crop to that band — `contain`
-                shrinks the whole square down to the pill height. */}
-            <Image
-              source={require('../../assets/images/schedio-icon.png')}
-              style={styles.logoImage}
-              resizeMode="cover"
-            />
-          </View>
+          <TouchableOpacity
+            style={styles.brand}
+            onPress={handleLogoPress}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Schedio"
+          >
+            {/* Small badge + wordmark, not the old wordmark-crop pill — one
+                fixed white surface the size of an icon reads as a mark, not
+                as a loud card competing with PrimeBadge for attention. */}
+            <View style={styles.brandBadge}>
+              <Image
+                source={require('../../assets/images/schedio-mark.png')}
+                style={styles.brandMark}
+                resizeMode="contain"
+              />
+            </View>
+            <Text style={styles.brandName}>Schedio</Text>
+          </TouchableOpacity>
 
-          <View style={styles.headerActions}>
-            <IconButton
-              onPress={() => setTourVisible(true)}
-              accessibilityLabel="Ver la guía de ayuda"
-            >
-              <HelpCircle size={18} color={tokens.colors.textSecondary} />
-            </IconButton>
-            <PrimeBadge onPress={() => router.push('/plus')} />
-          </View>
+          <PrimeBadge active={isPrime} onPress={() => router.push('/plus')} />
         </View>
       </View>
 
@@ -490,7 +537,7 @@ export default function Dashboard() {
                 onPress={() => setStreakModalOpen(true)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.statEmoji}>🔥</Text>
+                <Emoji name="fire" style={styles.statEmoji} />
                 <View style={styles.statTextWrap}>
                   <OverlineLabel style={styles.statLabel}>Racha</OverlineLabel>
                   <Text
@@ -511,7 +558,7 @@ export default function Dashboard() {
                 onPress={() => router.push('/dashboard/ranks')}
                 activeOpacity={0.7}
               >
-                <Text style={styles.statEmoji}>⚡</Text>
+                <Emoji name="highVoltage" style={styles.statEmoji} />
                 <View style={styles.statTextWrap}>
                   <OverlineLabel style={styles.statLabel}>Nivel</OverlineLabel>
                   <Text style={[styles.statValue, { color: tokens.colors.accent }]}>
@@ -521,6 +568,11 @@ export default function Dashboard() {
                   <View style={styles.xpTrack}>
                     <View style={[styles.xpFill, { width: `${levelProgress}%` }]} />
                   </View>
+                  {xpToNextRank !== null ? (
+                    <Text style={styles.nextRankHint} numberOfLines={1}>
+                      {xpToNextRank} XP para {nextRank.title}
+                    </Text>
+                  ) : null}
                 </View>
               </TouchableOpacity>
 
@@ -531,7 +583,7 @@ export default function Dashboard() {
                 onPress={() => router.push('/dashboard/profile')}
                 activeOpacity={0.7}
               >
-                <Text style={styles.statEmoji}>📊</Text>
+                <Emoji name="barChart" style={styles.statEmoji} />
                 <View style={styles.statTextWrap}>
                   <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
                   <Text
@@ -801,26 +853,23 @@ export default function Dashboard() {
         onSave={handleSaveGrade}
       />
 
-      {/* Rank Celebration */}
-      <Modal visible={rankCelebrationVisible} transparent animationType="fade">
-        <View style={styles.celebrationOverlay}>
-          <Card padding={28} style={styles.celebrationCard}>
-            <Trophy
-              size={56}
-              color={tokens.colors.premiumText}
-              style={{ marginBottom: 16, alignSelf: 'center' }}
-            />
-            <Text style={styles.celebrationTitle}>¡NUEVO RANGO!</Text>
-            <Text style={styles.celebrationRank}>{newRank}</Text>
-            <Text style={styles.celebrationText}>
-              Tu esfuerzo está dando sus frutos. ¡Sigue así para desbloquear más ventajas!
-            </Text>
-            <Button title="¡Vamos!" fullWidth onPress={() => setRankCelebrationVisible(false)} />
-          </Card>
-          {rankCelebrationVisible && (
-            <ConfettiCannon count={200} origin={{ x: -10, y: 0 }} fadeOut />
-          )}
-        </View>
+      {/* Easter egg: four quick taps on the header logo */}
+      <Modal
+        visible={easterEggVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEasterEggVisible(false)}
+      >
+        <Pressable style={styles.easterEggOverlay} onPress={() => setEasterEggVisible(false)}>
+          <Pressable onPress={() => {}}>
+            <Card padding={28} style={styles.easterEggCard}>
+              <Text style={styles.easterEggText}>
+                Hecho en A Coruña con la misión de que el estudio sea fácil
+              </Text>
+              <Text style={styles.easterEggAuthor}>~ Divi ~</Text>
+            </Card>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -845,23 +894,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  logoPill: {
-    height: 48,
-    paddingHorizontal: 14,
-    borderRadius: tokens.radius.pill,
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-  logoImage: {
-    width: 148,
-    height: 40,
-  },
-  headerActions: {
+  brand: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  brandBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandMark: {
+    width: 17,
+    height: 17,
+  },
+  brandName: {
+    fontFamily: font.bold,
+    fontSize: 17,
+    letterSpacing: 0.1,
+    color: tokens.colors.textPrimary,
   },
 
   // Streak / level strip
@@ -874,7 +928,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
   },
   statEmoji: {
-    fontSize: 17,
+    width: 22,
+    height: 22,
   },
   statTextWrap: {
     flex: 1,
@@ -904,6 +959,12 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 2,
     backgroundColor: tokens.colors.accent,
+  },
+  nextRankHint: {
+    fontFamily: font.medium,
+    fontSize: 10,
+    color: tokens.colors.textSecondary,
+    marginTop: 4,
   },
 
   // Scroll body
@@ -1035,36 +1096,28 @@ const styles = StyleSheet.create({
   },
 
   // Rank celebration
-  celebrationOverlay: {
+  // Easter egg
+  easterEggOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     padding: 24,
   },
-  celebrationCard: {
-    alignItems: 'stretch',
+  easterEggCard: {
+    alignItems: 'center',
   },
-  celebrationTitle: {
+  easterEggText: {
     fontFamily: font.semibold,
-    fontSize: 13,
-    letterSpacing: 1,
-    textAlign: 'center',
-    color: tokens.colors.textSecondary,
-  },
-  celebrationRank: {
-    fontFamily: font.bold,
-    fontSize: 26,
+    fontSize: 16,
+    lineHeight: 24,
     textAlign: 'center',
     color: tokens.colors.textPrimary,
-    marginTop: 4,
-    marginBottom: 12,
   },
-  celebrationText: {
+  easterEggAuthor: {
     fontFamily: font.regular,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 14,
     textAlign: 'center',
     color: tokens.colors.textSecondary,
-    marginBottom: 24,
+    marginTop: 12,
   },
 });

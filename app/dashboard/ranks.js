@@ -2,13 +2,21 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMemo } from 'react';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, Award } from 'lucide-react-native';
+import { ChevronLeft, Check } from 'lucide-react-native';
 
 import { tokens } from '../../theme/tokens';
 import useUserStore from '../../store/userStore';
-import { RANKS, getRankForLevel, calculateXpForLevel } from '../../services/gamification';
+import {
+  RANKS,
+  BADGES,
+  getRankForLevel,
+  calculateXpForLevel,
+  getIcon,
+} from '../../services/gamification';
+import { softBg } from '../../utils/color';
 
 const font = tokens.typography.families.inter;
+const iconFor = (entry) => getIcon(entry.icon);
 
 const formatXp = (value) => Math.round(value).toLocaleString('es-ES');
 
@@ -35,11 +43,18 @@ function RankRow({ rank, state }) {
   const locked = state === 'locked';
   const current = state === 'current';
   const iconColor = locked ? tokens.colors.textDisabled : rank.color;
+  const Icon = iconFor(rank);
 
   return (
     <View style={[styles.row, current && styles.rowCurrent]}>
-      <View style={[styles.rowIcon, locked && styles.rowIconLocked]}>
-        <Award
+      <View
+        style={[
+          styles.rowIcon,
+          locked && styles.rowIconLocked,
+          !locked && { backgroundColor: softBg(rank.color) },
+        ]}
+      >
+        <Icon
           size={20}
           color={iconColor}
           fill={locked ? 'none' : iconColor}
@@ -59,6 +74,43 @@ function RankRow({ rank, state }) {
   );
 }
 
+/**
+ * Unlike ranks — where a locked row hides nothing but the "current" tag —
+ * badges show their condition even when locked. That's the point: a hidden
+ * goal can't pull anyone toward it.
+ */
+function BadgeRow({ badge, unlocked }) {
+  const Icon = iconFor(badge);
+  const iconColor = unlocked ? badge.color : tokens.colors.textDisabled;
+
+  return (
+    <View style={[styles.row, unlocked && styles.rowCurrent]}>
+      <View
+        style={[
+          styles.rowIcon,
+          !unlocked && styles.rowIconLocked,
+          unlocked && { backgroundColor: softBg(badge.color) },
+        ]}
+      >
+        <Icon size={20} color={iconColor} fill={unlocked ? iconColor : 'none'} strokeWidth={1.75} />
+      </View>
+      <View style={styles.rowBody}>
+        <Text style={[styles.rowName, !unlocked && { color: tokens.colors.textDisabled }]}>
+          {badge.name}
+        </Text>
+        <Text style={styles.badgeDescription} numberOfLines={2}>
+          {badge.description}
+        </Text>
+      </View>
+      {unlocked ? (
+        <View style={styles.badgeCheck}>
+          <Check size={13} color={tokens.colors.bgBase} strokeWidth={3} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export default function RanksScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -66,9 +118,11 @@ export default function RanksScreen() {
 
   const level = gamification?.level || 1;
   const xp = gamification?.xp || 0;
+  const unlockedBadgeIds = gamification?.badges || [];
 
   const ladder = useMemo(buildLadder, []);
   const current = useMemo(() => getRankForLevel(level), [level]);
+  const HeroIcon = iconFor(current);
   const currentIndex = ladder.findIndex((rank) => rank.title === current.title);
   const next = currentIndex >= 0 ? ladder[currentIndex + 1] : null;
 
@@ -88,6 +142,9 @@ export default function RanksScreen() {
           <ChevronLeft size={24} color={tokens.colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Rango del Estudiante</Text>
+        {/* Mirrors `back`'s width so the title centers on the screen, not
+            just in the space left over next to the button. */}
+        <View style={styles.headerSpacer} />
       </View>
 
       <ScrollView
@@ -96,13 +153,8 @@ export default function RanksScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
-          <View style={styles.heroBadge}>
-            <Award
-              size={48}
-              color={tokens.colors.accent}
-              fill={tokens.colors.accent}
-              strokeWidth={1.5}
-            />
+          <View style={[styles.heroBadge, { backgroundColor: softBg(current.color) }]}>
+            <HeroIcon size={48} color={current.color} fill={current.color} strokeWidth={1.5} />
           </View>
           <Text style={styles.heroRank}>{current.title}</Text>
 
@@ -139,6 +191,13 @@ export default function RanksScreen() {
             />
           ))}
         </View>
+
+        <Text style={styles.ladderTitle}>Insignias</Text>
+        <View style={styles.ladder}>
+          {BADGES.map((badge) => (
+            <BadgeRow key={badge.id} badge={badge} unlocked={unlockedBadgeIds.includes(badge.id)} />
+          ))}
+        </View>
       </ScrollView>
     </View>
   );
@@ -163,13 +222,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+    flex: 1,
     textAlign: 'center',
     fontFamily: font.semibold,
     fontSize: 17,
     color: tokens.colors.textPrimary,
+  },
+  headerSpacer: {
+    width: 40,
   },
   scroll: {
     flex: 1,
@@ -296,5 +356,21 @@ const styles = StyleSheet.create({
     fontFamily: font.semibold,
     fontSize: 12,
     color: tokens.colors.accent,
+  },
+
+  // Badges
+  badgeDescription: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  badgeCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.trendUp,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -4,7 +4,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Switch,
   Modal,
   TextInput,
   ActivityIndicator,
@@ -26,7 +25,6 @@ import {
   Shield,
   ScrollText,
   MessageSquare,
-  Briefcase,
   Trash2,
   LogOut,
   Download,
@@ -46,6 +44,7 @@ import usePreferencesStore from '../store/preferencesStore';
 import { tokens } from '../theme/tokens';
 import { openLegal } from '../constants/legal';
 import CustomAlert from '../components/CustomAlert';
+import { Toggle } from '../components/ui/Toggle';
 
 const font = tokens.typography.families.inter;
 
@@ -103,17 +102,6 @@ function Row({ icon: Icon, label, sub, control, danger, onPress }) {
           />
         ) : null)}
     </TouchableOpacity>
-  );
-}
-
-function Toggle({ value, onValueChange }) {
-  return (
-    <Switch
-      value={value}
-      onValueChange={onValueChange}
-      trackColor={{ false: tokens.colors.surfaceHover, true: tokens.colors.accent }}
-      thumbColor="#FFFFFF"
-    />
   );
 }
 
@@ -289,14 +277,6 @@ export default function SettingsScreen() {
     });
   };
 
-  const comingSoon = (what) =>
-    showAlert({
-      title: what,
-      message: 'Estará disponible próximamente.',
-      singleButton: true,
-      onConfirm: closeAlert,
-    });
-
   const openDelete = () => {
     setDeletePassword('');
     setDeleteError(
@@ -438,16 +418,7 @@ export default function SettingsScreen() {
         </Group>
 
         <Group title="Comunidad">
-          <Row
-            icon={MessageSquare}
-            label="Enviar feedback"
-            onPress={() => comingSoon('Enviar feedback')}
-          />
-          <Row
-            icon={Briefcase}
-            label="Trabaja con nosotros"
-            onPress={() => comingSoon('Trabaja con nosotros')}
-          />
+          <Row icon={MessageSquare} label="Enviar feedback" onPress={() => openLegal('feedback')} />
         </Group>
 
         <Group>

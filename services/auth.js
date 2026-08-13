@@ -208,6 +208,17 @@ export const signInWithGoogle = async () => {
     return userCredential.user;
   } catch (error) {
     console.error('Error signing in with Google (native):', error);
+    // TEMPORARY, alongside the diagnostic message in login.js: a durable copy
+    // in Crashlytics in case the on-screen message isn't caught/relayed in
+    // time. Fire-and-forget — reporting a sign-in failure must never itself
+    // block or fail the error the student is already seeing.
+    import('@react-native-firebase/crashlytics')
+      .then(({ default: crashlytics }) =>
+        crashlytics().recordError(
+          new Error(`GoogleSignIn failed — code: ${error?.code}, message: ${error?.message}`)
+        )
+      )
+      .catch(() => {});
     throw error;
   }
 };

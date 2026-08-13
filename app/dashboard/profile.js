@@ -23,6 +23,7 @@ import {
   Check,
   X,
   User as UserIcon,
+  BadgeCheck,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Animated, {
@@ -49,6 +50,7 @@ import {
   detectOverloadRisk,
 } from '../../services/productivityService';
 import { getUpcomingExams } from '../../services/exams';
+import { getSubjectColors } from '../../services/permissions';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import IconButton from '../../components/ui/IconButton';
@@ -58,9 +60,6 @@ import SectionTitle from '../../components/ui/SectionTitle';
 const font = tokens.typography.families.inter;
 
 const SUBJECT_FALLBACK_COLOR = tokens.colors.textDisabled;
-
-/** The design system's closed subject palette, in the order it defines them. */
-const SUBJECT_PALETTE = Object.values(tokens.colors.subjects);
 
 const SWIPE_REVEAL = 88;
 const SWIPE_COMMIT = 56;
@@ -217,6 +216,9 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
   const isPrime = useAuthStore((state) => state.isPrime);
+  // Prime's 20-subject cap needs more than the free eight tones, or two
+  // materias would end up sharing a colour — see services/permissions.js.
+  const subjectPalette = useMemo(() => getSubjectColors({ isPrime }), [isPrime]);
 
   // One selector per key rather than destructuring the store: destructuring
   // subscribed this screen — the biggest in the app — to every write, so it
@@ -245,7 +247,7 @@ export default function ProfileScreen() {
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [editSubName, setEditSubName] = useState('');
   const [editSubDifficulty, setEditSubDifficulty] = useState('5');
-  const [editSubColor, setEditSubColor] = useState(SUBJECT_PALETTE[0]);
+  const [editSubColor, setEditSubColor] = useState(subjectPalette[0]);
   const [subjectExams, setSubjectExams] = useState([]);
   const [editingExamId, setEditingExamId] = useState(null);
   const [tempGrade, setTempGrade] = useState('');
@@ -397,8 +399,8 @@ export default function ProfileScreen() {
     setEditSubName(subject?.name ?? '');
     setEditSubDifficulty(String(subject?.difficulty ?? 5));
     // A subject created before the palette existed keeps whatever colour it
-    // has; the picker just doesn't show any of the eight as selected.
-    setEditSubColor(subject?.color ?? SUBJECT_PALETTE[0]);
+    // has; the picker just doesn't show any of the swatches as selected.
+    setEditSubColor(subject?.color ?? subjectPalette[0]);
     setSubjectExams([]);
     setEditingExamId(null);
     setSubjectSheet(true);
@@ -575,6 +577,15 @@ export default function ProfileScreen() {
                 <Text style={styles.userName} numberOfLines={1}>
                   {profile?.displayName || 'Usuario'}
                 </Text>
+                {isPrime ? (
+                  <BadgeCheck
+                    size={17}
+                    color={tokens.colors.premiumText}
+                    fill={tokens.colors.premiumBg}
+                    strokeWidth={2}
+                    accessibilityLabel="Cuenta Prime"
+                  />
+                ) : null}
                 <Pencil size={16} color={tokens.colors.textSecondary} />
               </TouchableOpacity>
             )}
@@ -597,32 +608,39 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.body}>
-          {/* Level */}
-          <Card padding={20}>
-            <View style={styles.levelRow}>
-              <View style={styles.levelBadge}>
-                <Text style={styles.levelNumber}>{level}</Text>
+          {/* Level — same rank ladder the header pill opens. */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/dashboard/ranks')}
+            accessibilityRole="button"
+            accessibilityLabel="Ver rango del estudiante"
+          >
+            <Card padding={20}>
+              <View style={styles.levelRow}>
+                <View style={styles.levelBadge}>
+                  <Text style={styles.levelNumber}>{level}</Text>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.levelTitle}>Nivel del Estudiante</Text>
+                  <Text style={styles.levelSub}>
+                    <Text style={styles.levelXp}>{xp}</Text> XP acumulados
+                  </Text>
+                </View>
               </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.levelTitle}>Nivel del Estudiante</Text>
-                <Text style={styles.levelSub}>
-                  <Text style={styles.levelXp}>{xp}</Text> XP acumulados
+
+              <View style={styles.levelTrack}>
+                <View style={[styles.levelFill, { width: `${levelPercent}%` }]} />
+              </View>
+              <View style={styles.levelLabels}>
+                <Text style={styles.levelLabel}>
+                  {xpIntoLevel} / {levelSpan} XP
+                </Text>
+                <Text style={[styles.levelLabel, { color: tokens.colors.accent }]}>
+                  {levelPercent}%
                 </Text>
               </View>
-            </View>
-
-            <View style={styles.levelTrack}>
-              <View style={[styles.levelFill, { width: `${levelPercent}%` }]} />
-            </View>
-            <View style={styles.levelLabels}>
-              <Text style={styles.levelLabel}>
-                {xpIntoLevel} / {levelSpan} XP
-              </Text>
-              <Text style={[styles.levelLabel, { color: tokens.colors.accent }]}>
-                {levelPercent}%
-              </Text>
-            </View>
-          </Card>
+            </Card>
+          </TouchableOpacity>
 
           {/* Stats */}
           <View style={styles.statsRow}>
@@ -802,7 +820,6 @@ export default function ProfileScreen() {
           setEditingNote(null);
         }}
         title={editingNote ? 'Editar apunte' : 'Nuevo apunte'}
-        avoidKeyboard
       >
         <TextInput
           style={styles.noteInput}
@@ -829,7 +846,6 @@ export default function ProfileScreen() {
         visible={subjectSheet}
         onClose={() => setSubjectSheet(false)}
         title={selectedSubject ? 'Gestionar materia' : 'Nueva materia'}
-        avoidKeyboard
       >
         <Text style={styles.fieldLabel}>Nombre</Text>
         <TextInput
@@ -853,10 +869,11 @@ export default function ProfileScreen() {
 
         {/* A closed palette on purpose: these colours categorise subjects
             across the whole app, so a free colour wheel would let two subjects
-            end up indistinguishable. */}
+            end up indistinguishable. Prime unlocks 12 more so its higher
+            subject cap doesn't run out of them. */}
         <Text style={styles.fieldLabel}>Color</Text>
         <View style={styles.colorRow}>
-          {SUBJECT_PALETTE.map((color) => {
+          {subjectPalette.map((color) => {
             const active = color === editSubColor;
             return (
               <TouchableOpacity

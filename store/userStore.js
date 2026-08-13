@@ -155,6 +155,11 @@ const useUserStore = create((set, get) => ({
           course: data.course || null,
           grade: data.grade || null,
           organizationLevel: data.organizationLevel || null,
+          // Both feed the planner: `course` picks the level profile (effort,
+          // window, block size) and `reviewFrequency` shapes the burn-down curve.
+          // Dropping either here would silently send the planner back to its
+          // Bachillerato defaults for everyone.
+          reviewFrequency: data.reviewFrequency || null,
           onboardingCompleted: data.onboardingCompleted || false,
           averageGrade: data.profile?.averageGrade || 0,
         };

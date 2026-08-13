@@ -42,7 +42,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { tokens } from '../../theme/tokens';
-import { BASE_XP_PER_MINUTE } from '../../services/gamification';
+import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
 import {
   updateStudySessionNotification,
@@ -58,6 +58,8 @@ import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import SchedioLogoReveal from '../../components/SchedioLogoReveal';
+import AchievementCelebration from '../../components/AchievementCelebration';
+import { Emoji } from '../../components/ui/Emoji';
 
 const font = tokens.typography.families.inter;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -120,10 +122,10 @@ const formatTime = (seconds) => {
 };
 
 const sessionPhrase = (mins) => {
-  if (mins < 30) return '😌 Estudio de chill';
-  if (mins < 45) return '🎯 Alto foco';
-  if (mins < 60) return '🧠 Deep work';
-  return '⚡️ Modo Schedio activado';
+  if (mins < 30) return { emoji: 'relievedFace', label: 'Estudio de chill' };
+  if (mins < 45) return { emoji: 'bullseye', label: 'Alto foco' };
+  if (mins < 60) return { emoji: 'brain', label: 'Deep work' };
+  return { emoji: 'highVoltage', label: 'Modo Schedio activado' };
 };
 
 // The four faces map onto the 1–5 focusScore that history.js renders as stars.
@@ -443,6 +445,9 @@ export default function StudySessionScreen() {
   const [summary, setSummary] = useState(null);
   // 'draw' while the mark is being traced, 'settled' once the summary can land.
   const [endPhase, setEndPhase] = useState('draw');
+  // Filled once addSession resolves with an actual rank-up or badge unlock —
+  // held back until the reveal settles, so it never competes with it.
+  const [celebrationQueue, setCelebrationQueue] = useState(null);
   const [mood, setMood] = useState(null);
   const [notes, setNotes] = useState('');
   const [upcomingExams, setUpcomingExams] = useState([]);
@@ -605,20 +610,52 @@ export default function StudySessionScreen() {
 
       // A session shorter than a minute earns nothing and isn't worth a row.
       if (minutesSpent >= 1) {
-        savedSessionRef.current = useUserStore
-          .getState()
-          .addSession(user.uid, {
-            subjectId: selectedSubject,
-            duration: minutesSpent,
-            goals,
-            focusScore: 5,
-            notes: '',
-          })
+        // Snapshotted before addSession's optimistic update overwrites the
+        // store — otherwise there'd be no way to tell a rank/level the
+        // student just reached from one they already held.
+        const previousRank = useUserStore.getState().gamification.rank;
+        const previousLevel = useUserStore.getState().gamification.level;
+
+        const sessionPromise = useUserStore.getState().addSession(user.uid, {
+          subjectId: selectedSubject,
+          duration: minutesSpent,
+          goals,
+          focusScore: 5,
+          notes: '',
+        });
+
+        savedSessionRef.current = sessionPromise
           .then((result) => result?.sessionId ?? null)
           .catch((error) => {
             console.error('Error saving session:', error);
             return null;
           });
+
+        // Separate subscriber on the same promise — doesn't call addSession
+        // again, just also reads what it resolved with.
+        sessionPromise
+          .then((result) => {
+            if (!result) return;
+
+            const queue = [];
+            if (result.newRank && result.newRank !== previousRank) {
+              const rank = RANKS.find((r) => r.title === result.newRank);
+              if (rank) queue.push({ type: 'rank', rank });
+            }
+            (result.unlockedBadges || []).forEach((badgeId) => {
+              const badge = BADGES.find((b) => b.id === badgeId);
+              if (badge) queue.push({ type: 'badge', badge });
+            });
+            if (queue.length > 0) setCelebrationQueue(queue);
+
+            // A level-up without a rank change is common enough that a full
+            // celebration for each one would get old fast — this gets a
+            // quiet line in the summary instead (see renderEnd).
+            if (result.newLevel && result.newLevel !== previousLevel) {
+              setSummary((prev) => (prev ? { ...prev, newLevel: result.newLevel } : prev));
+            }
+          })
+          .catch(() => {});
       }
     },
     [duration, timeLeft, subjects, selectedSubject, goals, user?.uid, taskId]
@@ -930,6 +967,7 @@ export default function StudySessionScreen() {
   useEffect(() => {
     if (step !== 'end') {
       setEndPhase('draw');
+      setCelebrationQueue(null);
       flash.value = 0;
     }
   }, [step, flash]);
@@ -1004,7 +1042,10 @@ export default function StudySessionScreen() {
             maximumTrackTintColor={tokens.colors.borderDefault}
             thumbTintColor={tokens.colors.accent}
           />
-          <Text style={styles.durationPhrase}>{sessionPhrase(duration)}</Text>
+          <View style={styles.durationPhraseRow}>
+            <Emoji name={sessionPhrase(duration).emoji} size={15} />
+            <Text style={styles.durationPhrase}>{sessionPhrase(duration).label}</Text>
+          </View>
         </Card>
       </View>
 
@@ -1261,6 +1302,15 @@ export default function StudySessionScreen() {
                 {summary.totalGoals} objetivos completados
               </Animated.Text>
 
+              {summary.newLevel ? (
+                <Animated.Text
+                  entering={FadeInDown.duration(460).delay(220)}
+                  style={styles.levelUpLine}
+                >
+                  Subiste a nivel {summary.newLevel}
+                </Animated.Text>
+              ) : null}
+
               <Animated.View
                 entering={FadeInDown.duration(460).delay(260)}
                 style={styles.notesWrap}
@@ -1286,6 +1336,13 @@ export default function StudySessionScreen() {
             </>
           ) : null}
         </ScrollView>
+
+        {settled && celebrationQueue ? (
+          <AchievementCelebration
+            queue={celebrationQueue}
+            onFinish={() => setCelebrationQueue(null)}
+          />
+        ) : null}
       </View>
     );
   };
@@ -1437,11 +1494,16 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 40,
   },
+  durationPhraseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
   durationPhrase: {
     fontFamily: font.semibold,
     fontSize: 13,
     color: tokens.colors.textSecondary,
-    textAlign: 'center',
   },
 
   // Objectives
@@ -1454,6 +1516,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
     height: 40,
     paddingHorizontal: 12,
+    paddingVertical: 0,
     borderRadius: tokens.radius.btn,
     backgroundColor: tokens.colors.background,
     borderWidth: 1,
@@ -1461,6 +1524,8 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 15,
     color: tokens.colors.textPrimary,
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   addButton: {
     width: 40,
@@ -1501,15 +1566,18 @@ const styles = StyleSheet.create({
   swipeWrap: {
     borderRadius: 10,
     overflow: 'hidden',
+    backgroundColor: tokens.colors.surfaceCard,
   },
   swipeAction: {
     ...StyleSheet.absoluteFillObject,
+    borderRadius: 10,
     backgroundColor: tokens.colors.danger,
     alignItems: 'flex-end',
     justifyContent: 'center',
     paddingRight: 18,
   },
   swipeContent: {
+    borderRadius: 10,
     backgroundColor: tokens.colors.surfaceCard,
   },
   swipeHint: {
@@ -1721,6 +1789,15 @@ const styles = StyleSheet.create({
     color: tokens.colors.textSecondary,
     textAlign: 'center',
     marginTop: 26,
+  },
+  // Deliberately quiet — a level-up happens most sessions, so it gets a line
+  // here rather than the full celebration a rank-up or badge gets.
+  levelUpLine: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.accent,
+    textAlign: 'center',
+    marginTop: 8,
   },
   notesWrap: {
     width: '100%',

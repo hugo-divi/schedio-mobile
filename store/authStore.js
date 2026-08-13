@@ -35,13 +35,28 @@ const useAuthStore = create((set) => ({
   initAuth: () => {
     try {
       console.log('[AuthStore] Initializing auth listener...');
+      // Firebase fires this listener once immediately with whatever session
+      // it already had persisted before this call — that first event is the
+      // only one that can legitimately be a stale, weeks-old session. Every
+      // later event within this same app run was triggered by an
+      // interactive signIn/signUp/signOut call, which writes its own fresh
+      // `markSessionStart()` timestamp — but *after* the credential promise
+      // resolves, racing this very listener. On a device with no timestamp
+      // yet (fresh install, fresh emulator), that race lost: a brand-new
+      // login read `isSessionExpired()` before the write landed, saw no
+      // record, and immediately force-signed the student back out.
+      let isRestoringSession = true;
       const unsubscribe = onAuthChange(async (user) => {
         console.log('[AuthStore] Auth change detected. User:', user?.uid || 'guest');
+        const checkingRestoredSession = isRestoringSession;
+        isRestoringSession = false;
 
         // Firebase's refresh token doesn't expire on its own, so a restored
         // session is otherwise good forever. Force a fresh login once a
         // month, same as most apps, instead of trusting it indefinitely.
-        if (user && (await isSessionExpired())) {
+        // Only checked when restoring a session from before this app run —
+        // see the comment above `isRestoringSession`.
+        if (user && checkingRestoredSession && (await isSessionExpired())) {
           console.log('[AuthStore] Session older than 30 days, signing out.');
           await signOut();
           return; // onAuthChange fires again with user=null; that pass sets state

@@ -52,12 +52,9 @@ export default function Layout() {
 
   const ready = fontsLoaded || !!fontError || waitedLongEnough;
 
-  // Hide from an effect rather than the root view's onLayout: onLayout depends
-  // on the wrapper forwarding it, and if it doesn't fire the splash stays up
-  // forever. An effect is tied to `ready` itself.
-  useEffect(() => {
-    if (ready) SplashScreen.hideAsync().catch(() => {});
-  }, [ready]);
+  // The native splash stays up past this point on purpose — `app/index.js`
+  // hides it once it knows where the student is actually headed (login,
+  // onboarding, dashboard...), so nothing else ever flashes on screen first.
 
   useEffect(() => {
     let unsubscribe;

@@ -82,11 +82,15 @@ export default function Login() {
         router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
       }
     } catch (err) {
-      setError(
-        err?.code === 'DEVELOPER_ERROR'
-          ? 'Google Sign-In no está bien configurado en este build todavía.'
-          : getAuthErrorMessage(err)
-      );
+      // TEMPORARY, for diagnosing the current Google Sign-In failure: the
+      // generic getAuthErrorMessage() fallback was hiding the actual error
+      // code (nothing in Google Sign-In's own error codes is in
+      // AUTH_ERROR_MESSAGES, and it wasn't literally 'DEVELOPER_ERROR'
+      // either), so there was no way to tell what was actually failing
+      // without a device plugged into adb. Shows the raw code/message
+      // instead of guessing. Revert to getAuthErrorMessage(err) once this is
+      // diagnosed.
+      setError(`Error de Google Sign-In — code: ${err?.code}, message: ${err?.message}`);
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);

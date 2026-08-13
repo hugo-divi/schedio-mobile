@@ -19,11 +19,6 @@ import { MANUAL_PRIORITY_NEUTRAL } from './priority';
  * @param {Object} data - Onboarding form data
  */
 export const saveOnboardingData = async (userId, data) => {
-  console.log('saveOnboardingData called with:', {
-    userId,
-    subjectCount: data.subjects?.length,
-    data,
-  });
   try {
     // Update user profile
     await updateDoc(doc(db, 'users', userId), {

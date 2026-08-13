@@ -109,6 +109,26 @@ const startOfDay = (date) => {
 export const daysBetween = (from, to) =>
   Math.round((startOfDay(to) - startOfDay(from)) / MS_PER_DAY);
 
+/**
+ * `YYYY-MM-DD` for the day this instant falls on **locally**.
+ *
+ * The one function that decides which day a task belongs to. It exists because
+ * that decision used to be made in two places by two different methods: the
+ * generator built task ids from the local date, while the Planes screen grouped
+ * rows with `date.split('T')[0]`, which reads the day in UTC.
+ *
+ * For anyone east of Greenwich those disagree. Generated tasks carry local
+ * midnight, which is the previous day in UTC, while a manual task carries the
+ * time it was created, which is not — so a manual task and the plan's own tasks
+ * for the same day landed in two separate groups on screen.
+ */
+export const localDateKey = (value) => {
+  const date = toDate(value);
+  if (!date) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
 const normalizeDifficulty = (subject) => {
   const raw = Number(subject?.difficulty);
   if (!Number.isFinite(raw) || raw <= 0) return DIFFICULTY_NEUTRAL;
@@ -156,9 +176,17 @@ export const manualBoost = (event) => {
   return clamp(boost, MANUAL_BOOST_RANGE[0], MANUAL_BOOST_RANGE[1]);
 };
 
-/** Total minutes this event is worth studying. */
-export const estimateEffortMinutes = (event, subject) => {
-  const base = BASE_EFFORT_MINUTES[normalizeType(event)];
+/**
+ * Total minutes this event is worth studying.
+ *
+ * @param {Object} [baseByType] - overrides BASE_EFFORT_MINUTES. An exam means
+ *   very different amounts of work in 3º de la ESO and in a university final, so
+ *   the base comes from the student's education level (see LEVEL_PROFILES in
+ *   microplanService) rather than being one global constant.
+ */
+export const estimateEffortMinutes = (event, subject, baseByType = BASE_EFFORT_MINUTES) => {
+  const type = normalizeType(event);
+  const base = baseByType[type] ?? BASE_EFFORT_MINUTES[type];
   const [lo, hi] = EFFORT_DIFFICULTY_RANGE;
   const multiplier = lo + difficultyFactor(subject) * (hi - lo);
   return Math.round(base * multiplier);
@@ -213,11 +241,11 @@ export const summarizeStudyLoad = (sessions, { windowDays = 21, now = new Date()
  * @returns {{ score, factors, weighted, boost, daysUntil, isOverdue, isUndated, effortMinutes }}
  */
 export const computeExamPriority = (event, subject, ctx = {}) => {
-  const { now = new Date(), studiedMinutesBySubject = {} } = ctx;
+  const { now = new Date(), studiedMinutesBySubject = {}, effortBase } = ctx;
 
   const date = toDate(event?.date);
   const daysUntil = date === null ? null : daysBetween(now, date);
-  const effortMinutes = estimateEffortMinutes(event, subject);
+  const effortMinutes = estimateEffortMinutes(event, subject, effortBase || BASE_EFFORT_MINUTES);
   const studied = studiedMinutesBySubject[event?.subjectId] || 0;
 
   const factors = {

@@ -9,17 +9,22 @@ const font = tokens.typography.families.inter;
 /**
  * Bottom sheet for grading a finished exam.
  *
- * Only the grade is collected. The previous version also asked for a weight,
- * but the caller's handler signature is (examId, grade) — the weight was
- * discarded before it ever reached Firestore, and `updateAverageGrade` already
- * treats a missing weight as 1. Asking for a value we throw away is worse than
- * not asking.
+ * Collects both grade and weight, matching QuickActionsModal's "Nota de
+ * examen" flow — `updateAverageGrade` weighs every completed exam
+ * (`parseFloat(exam.weight) || 1`), so a grade saved from here without a
+ * weight was silently averaging in at weight 1 regardless of what the
+ * student actually entered, out of step with the one other place a grade
+ * can be added.
  */
 export default function GradeModal({ visible, onClose, exam, onSave }) {
   const [grade, setGrade] = useState('');
+  const [weight, setWeight] = useState('100');
 
   useEffect(() => {
-    if (visible) setGrade('');
+    if (visible) {
+      setGrade('');
+      setWeight('100');
+    }
   }, [visible]);
 
   const numeric = parseFloat(grade.replace(',', '.'));
@@ -27,9 +32,14 @@ export default function GradeModal({ visible, onClose, exam, onSave }) {
   const isValid = !isEmpty && !isNaN(numeric) && numeric >= 0 && numeric <= 10;
   const showError = !isEmpty && !isValid;
 
+  const weightNumeric = parseFloat(weight.replace(',', '.'));
+  const weightEmpty = weight.trim() === '';
+  const isWeightValid = !weightEmpty && !isNaN(weightNumeric) && weightNumeric > 0;
+  const showWeightError = !weightEmpty && !isWeightValid;
+
   const handleSave = () => {
-    if (!isValid) return;
-    onSave(exam.id, numeric);
+    if (!isValid || !isWeightValid) return;
+    onSave(exam.id, numeric, weightNumeric / 100);
     onClose();
   };
 
@@ -41,7 +51,6 @@ export default function GradeModal({ visible, onClose, exam, onSave }) {
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      avoidKeyboard
       title="Añadir nota"
       subtitle={`${exam?.name ?? ''}${formattedDate ? ` · Examen ${formattedDate}` : ''}`}
     >
@@ -58,9 +67,25 @@ export default function GradeModal({ visible, onClose, exam, onSave }) {
           maxLength={4}
         />
         <Text style={[sheetStyles.helper, showError && sheetStyles.helperError]}>
-          {showError
-            ? 'Introduce una nota entre 0 y 10.'
-            : 'Se usará para recalcular tu media de la asignatura.'}
+          {showError ? 'Introduce una nota entre 0 y 10.' : ' '}
+        </Text>
+      </View>
+
+      <View style={styles.field}>
+        <FieldLabel>Peso %</FieldLabel>
+        <TextInput
+          style={[styles.input, showWeightError && styles.inputError]}
+          value={weight}
+          onChangeText={setWeight}
+          placeholder="Ej. 100"
+          placeholderTextColor={tokens.colors.textDisabled}
+          keyboardType="decimal-pad"
+          maxLength={4}
+        />
+        <Text style={[sheetStyles.helper, showWeightError && sheetStyles.helperError]}>
+          {showWeightError
+            ? 'Introduce un peso válido (por ejemplo, 100).'
+            : 'Cuánto cuenta este examen en la media de la asignatura.'}
         </Text>
       </View>
 
@@ -74,7 +99,7 @@ export default function GradeModal({ visible, onClose, exam, onSave }) {
         <Button
           title="Guardar nota"
           onPress={handleSave}
-          disabled={!isValid}
+          disabled={!isValid || !isWeightValid}
           style={sheetStyles.actionButton}
         />
       </View>
