@@ -13,6 +13,7 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
@@ -35,7 +36,13 @@ expo_logs.txt
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# service account / admin credentials
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+functions/.runtimeconfig.json
 
 # typescript
 *.tsbuildinfo
@@ -43,3 +50,8 @@ expo_logs.txt
 # generated native folders
 /ios
 /android
+
+# internal dev notes (not for public repo)
+task.md
+CLAUDE.md
+AGENTS.md
