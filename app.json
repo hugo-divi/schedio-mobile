@@ -77,7 +77,47 @@
       "@react-native-google-signin/google-signin",
       "@react-native-firebase/app",
       "@react-native-firebase/crashlytics",
-      "./plugins/withNotifeeForegroundService.js"
+      "./plugins/withNotifeeForegroundService.js",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "Small",
+              "label": "Schedio · Próximo examen",
+              "description": "Cuenta atrás y racha, en pequeño.",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 2,
+              "resizeMode": "none",
+              "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Medium",
+              "label": "Schedio · Resumen del día",
+              "description": "Próximo examen, tarea de hoy y tu racha.",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Large",
+              "label": "Schedio · Plan del día (Prime)",
+              "description": "El resumen completo con tus tareas de hoy.",
+              "minWidth": "250dp",
+              "minHeight": "250dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 4,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
+            }
+          ]
+        }
+      ]
     ]
   }
 }

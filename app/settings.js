@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   Linking,
+  AppState,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ import {
   LogOut,
   Download,
   RotateCcw,
+  BellOff,
 } from 'lucide-react-native';
 
 import { auth, db } from '../services/firebase';
@@ -38,6 +40,7 @@ import { deleteAccount, usesPasswordSignIn } from '../services/account';
 import { registerForPushNotifications } from '../services/notificationService';
 import { exportGradesAndExamsPdf } from '../services/export';
 import { restorePurchases } from '../services/revenuecat';
+import { hasDndPermission, openDndPermissionSettings } from '../services/focusMode';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -119,6 +122,8 @@ export default function SettingsScreen() {
   const setAutoGradePrompt = usePreferencesStore((state) => state.setAutoGradePrompt);
   const notificationsEnabled = usePreferencesStore((state) => state.notificationsEnabled);
   const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
+  const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
+  const setFocusModeEnabled = usePreferencesStore((state) => state.setFocusModeEnabled);
 
   // The switch used to be decorative — this is what actually turns the
   // server-side pipeline (Cloud Functions + FCM) on and off for this device.
@@ -137,6 +142,32 @@ export default function SettingsScreen() {
       });
     }
   };
+
+  // Android has no in-app dialog for Notification Policy Access — turning
+  // this on sends the student to system Settings to grant it by hand, so we
+  // can't know synchronously whether they actually did. `awaitingDndReturn`
+  // tracks that we sent them there, and the AppState listener below
+  // re-checks and silently reverts the switch if they came back without
+  // granting it, instead of leaving it stuck "on" and doing nothing.
+  const awaitingDndReturn = useRef(false);
+  const handleFocusModeToggle = (value) => {
+    if (value && !hasDndPermission()) {
+      awaitingDndReturn.current = true;
+      openDndPermissionSettings();
+    }
+    setFocusModeEnabled(value);
+  };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active' || !awaitingDndReturn.current) return;
+      awaitingDndReturn.current = false;
+      if (!hasDndPermission()) {
+        setFocusModeEnabled(false);
+      }
+    });
+    return () => subscription.remove();
+  }, [setFocusModeEnabled]);
 
   const [alertConfig, setAlertConfig] = useState({ visible: false });
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -407,6 +438,12 @@ export default function SettingsScreen() {
             label="Prompt de calificación"
             sub="Preguntar nota al finalizar"
             control={<Toggle value={autoGradePrompt} onValueChange={setAutoGradePrompt} />}
+          />
+          <Row
+            icon={BellOff}
+            label="Silenciar al estudiar"
+            sub="Activa No Molestar mientras dura la sesión"
+            control={<Toggle value={focusModeEnabled} onValueChange={handleFocusModeToggle} />}
           />
         </Group>
 

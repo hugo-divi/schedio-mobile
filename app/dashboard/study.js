@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Dimensions,
   AppState,
+  KeyboardAvoidingView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,6 +45,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
+import { hasDndPermission, enableStudyFocus, disableStudyFocus } from '../../services/focusMode';
 import {
   updateStudySessionNotification,
   stopStudySessionNotification,
@@ -424,6 +426,7 @@ export default function StudySessionScreen() {
   const stats = useUserStore((state) => state.stats);
   const hideFocusReminder = usePreferencesStore((state) => state.hideFocusReminder);
   const setHideFocusReminder = usePreferencesStore((state) => state.setHideFocusReminder);
+  const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
 
   const params = useLocalSearchParams();
   const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
@@ -548,9 +551,52 @@ export default function StudySessionScreen() {
     else pauseTimer();
   }, [isPaused, pauseTimer, resumeTimer]);
 
+  // Whether Do Not Disturb is genuinely engaged right now — not just "the
+  // toggle is on", but "the native call actually succeeded" (it returns
+  // false if the permission was revoked since). Drives the badge in the
+  // timer header, so the student sees confirmation instead of trusting a
+  // silent background effect.
+  const [focusModeActive, setFocusModeActive] = useState(false);
+
+  // A process kill mid-session (swiped from recents, killed by the OS) skips
+  // this effect's cleanup entirely, which would leave DND stuck on forever
+  // with nothing left alive to turn it back off. This runs once on mount,
+  // before we know whether there's a session to resume, specifically to
+  // clear that stuck state — if a session *does* get resumed via
+  // `applyRecoveredSession` right after, the effect below reacts to that and
+  // re-enables it properly, so this can't fight a legitimate resume.
+  useEffect(() => {
+    disableStudyFocus();
+  }, []);
+
+  // Do Not Disturb tracks `isActive`, not `isPaused` — pausing mid-session
+  // shouldn't flicker the phone's notification filter on and off. The
+  // cleanup function is what guarantees this gets turned back off: on
+  // `handleComplete` (isActive -> false), on unmount (leaving the screen
+  // mid-session), and if the toggle itself gets switched off from Settings.
+  useEffect(() => {
+    if (!focusModeEnabled) {
+      setFocusModeActive(false);
+      return;
+    }
+    if (step === 'timer' && isActive) {
+      setFocusModeActive(enableStudyFocus());
+    } else {
+      disableStudyFocus();
+      setFocusModeActive(false);
+    }
+    return () => {
+      disableStudyFocus();
+      setFocusModeActive(false);
+    };
+  }, [focusModeEnabled, step, isActive]);
+
   const handleStartPress = () => {
     if (!selectedSubject) return;
-    if (hideFocusReminder) {
+    // The manual reminder exists because the app couldn't silence the phone
+    // itself — if focus mode is on and actually granted, it's about to do
+    // that for real, so asking the student to do it by hand is redundant.
+    if (hideFocusReminder || (focusModeEnabled && hasDndPermission())) {
       startSession(duration);
       return;
     }
@@ -975,116 +1021,121 @@ export default function StudySessionScreen() {
   // ── Render: setup ──
 
   const renderSetup = () => (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={styles.flex}
     >
-      <Animated.View entering={FadeInDown.duration(320)}>
-        <Text style={styles.screenTitle}>Estudiar</Text>
-        <Text style={styles.screenSubtitle}>Elige materia, tiempo y objetivos de hoy.</Text>
-      </Animated.View>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Animated.View entering={FadeInDown.duration(320)}>
+          <Text style={styles.screenTitle}>Estudiar</Text>
+          <Text style={styles.screenSubtitle}>Elige materia, tiempo y objetivos de hoy.</Text>
+        </Animated.View>
 
-      {/* Materia */}
-      <View style={styles.section}>
-        <SectionTitle>Materia</SectionTitle>
+        {/* Materia */}
+        <View style={styles.section}>
+          <SectionTitle>Materia</SectionTitle>
 
-        {subjectsLoading ? (
-          <View style={styles.subjectsPlaceholder}>
-            <ActivityIndicator color={tokens.colors.accent} />
-          </View>
-        ) : subjects.length === 0 ? (
-          <TouchableOpacity
-            style={styles.subjectsEmpty}
-            activeOpacity={0.8}
-            onPress={() => router.push('/dashboard/profile')}
-          >
-            <Plus size={20} color={tokens.colors.textSecondary} />
-            <Text style={styles.subjectsEmptyText}>Añadir materias</Text>
-          </TouchableOpacity>
-        ) : (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.subjectsRow}
-          >
-            {subjects.map((subject) => (
-              <SubjectChip
-                key={subject.id}
-                subject={subject}
-                reason={reasonBySubject[subject.id]}
-                selected={selectedSubject === subject.id}
-                onPress={() => setSelectedSubject(subject.id)}
-              />
-            ))}
-          </ScrollView>
-        )}
-      </View>
-
-      {/* Tiempo */}
-      <View style={styles.section}>
-        <SectionTitle>Tiempo de sesión</SectionTitle>
-
-        <Card padding={20}>
-          <View style={styles.durationRow}>
-            <Text style={styles.durationValue}>{duration}</Text>
-            <Text style={styles.durationUnit}>min</Text>
-          </View>
-          <Slider
-            style={styles.slider}
-            minimumValue={MIN_MINUTES}
-            maximumValue={MAX_MINUTES}
-            step={MINUTE_STEP}
-            value={duration}
-            onValueChange={(value) => setDuration(Math.round(value))}
-            minimumTrackTintColor={tokens.colors.accent}
-            maximumTrackTintColor={tokens.colors.borderDefault}
-            thumbTintColor={tokens.colors.accent}
-          />
-          <View style={styles.durationPhraseRow}>
-            <Emoji name={sessionPhrase(duration).emoji} size={15} />
-            <Text style={styles.durationPhrase}>{sessionPhrase(duration).label}</Text>
-          </View>
-        </Card>
-      </View>
-
-      {/* Objetivos */}
-      <View style={styles.section}>
-        <SectionTitle>Objetivos de hoy</SectionTitle>
-
-        <Card padding={16}>
-          <AddObjectiveRow value={newGoalText} onChangeText={setNewGoalText} onAdd={addGoal} />
-          {goals.length > 0 ? (
-            <View style={{ marginTop: 8 }}>
-              {goals.map((g) => (
-                <SwipeToDelete key={g.id} onDelete={() => removeGoal(g.id)}>
-                  <CheckRow
-                    label={g.text}
-                    checked={g.completed}
-                    onToggle={() => toggleGoal(g.id)}
-                  />
-                </SwipeToDelete>
-              ))}
-              <Text style={styles.swipeHint}>
-                Desliza un objetivo a la izquierda para borrarlo.
-              </Text>
+          {subjectsLoading ? (
+            <View style={styles.subjectsPlaceholder}>
+              <ActivityIndicator color={tokens.colors.accent} />
             </View>
-          ) : null}
-        </Card>
-      </View>
+          ) : subjects.length === 0 ? (
+            <TouchableOpacity
+              style={styles.subjectsEmpty}
+              activeOpacity={0.8}
+              onPress={() => router.push('/dashboard/profile')}
+            >
+              <Plus size={20} color={tokens.colors.textSecondary} />
+              <Text style={styles.subjectsEmptyText}>Añadir materias</Text>
+            </TouchableOpacity>
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.subjectsRow}
+            >
+              {subjects.map((subject) => (
+                <SubjectChip
+                  key={subject.id}
+                  subject={subject}
+                  reason={reasonBySubject[subject.id]}
+                  selected={selectedSubject === subject.id}
+                  onPress={() => setSelectedSubject(subject.id)}
+                />
+              ))}
+            </ScrollView>
+          )}
+        </View>
 
-      {/* Pushes the action to the bottom of the viewport when the content is
+        {/* Tiempo */}
+        <View style={styles.section}>
+          <SectionTitle>Tiempo de sesión</SectionTitle>
+
+          <Card padding={20}>
+            <View style={styles.durationRow}>
+              <Text style={styles.durationValue}>{duration}</Text>
+              <Text style={styles.durationUnit}>min</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={MIN_MINUTES}
+              maximumValue={MAX_MINUTES}
+              step={MINUTE_STEP}
+              value={duration}
+              onValueChange={(value) => setDuration(Math.round(value))}
+              minimumTrackTintColor={tokens.colors.accent}
+              maximumTrackTintColor={tokens.colors.borderDefault}
+              thumbTintColor={tokens.colors.accent}
+            />
+            <View style={styles.durationPhraseRow}>
+              <Emoji name={sessionPhrase(duration).emoji} size={15} />
+              <Text style={styles.durationPhrase}>{sessionPhrase(duration).label}</Text>
+            </View>
+          </Card>
+        </View>
+
+        {/* Objetivos */}
+        <View style={styles.section}>
+          <SectionTitle>Objetivos de hoy</SectionTitle>
+
+          <Card padding={16}>
+            <AddObjectiveRow value={newGoalText} onChangeText={setNewGoalText} onAdd={addGoal} />
+            {goals.length > 0 ? (
+              <View style={{ marginTop: 8 }}>
+                {goals.map((g) => (
+                  <SwipeToDelete key={g.id} onDelete={() => removeGoal(g.id)}>
+                    <CheckRow
+                      label={g.text}
+                      checked={g.completed}
+                      onToggle={() => toggleGoal(g.id)}
+                    />
+                  </SwipeToDelete>
+                ))}
+                <Text style={styles.swipeHint}>
+                  Desliza un objetivo a la izquierda para borrarlo.
+                </Text>
+              </View>
+            ) : null}
+          </Card>
+        </View>
+
+        {/* Pushes the action to the bottom of the viewport when the content is
           short, and keeps a clear gap when it isn't. */}
-      <View style={styles.bottomSpacer} />
+        <View style={styles.bottomSpacer} />
 
-      <Button
-        title="Comenzar sesión"
-        onPress={handleStartPress}
-        disabled={!selectedSubject}
-        fullWidth
-      />
-    </ScrollView>
+        <Button
+          title="Comenzar sesión"
+          onPress={handleStartPress}
+          disabled={!selectedSubject}
+          fullWidth
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 
   // ── Render: timer ──
@@ -1103,6 +1154,12 @@ export default function StudySessionScreen() {
           <View style={styles.timerHeader}>
             <Text style={styles.timerSubject}>{currentSubject?.name || 'Estudio'}</Text>
             <Text style={styles.timerReason}>{reason || 'Sesión enfocada'}</Text>
+            {focusModeActive && (
+              <View style={styles.focusModeBadge}>
+                <BellOff size={12} color={tokens.colors.accent} strokeWidth={2} />
+                <Text style={styles.focusModeBadgeText}>Modo enfoque activo</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.ringWrap}>
@@ -1376,6 +1433,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: tokens.colors.background,
   },
+  flex: {
+    flex: 1,
+  },
   scroll: {
     flex: 1,
   },
@@ -1633,6 +1693,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: tokens.colors.textSecondary,
     marginTop: 2,
+  },
+  focusModeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+    borderRadius: tokens.radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 10,
+  },
+  focusModeBadgeText: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.accent,
   },
   ringWrap: {
     width: RING_SIZE,

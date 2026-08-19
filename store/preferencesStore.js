@@ -19,6 +19,13 @@ const usePreferencesStore = create(
       // controls now, checked by every call in notificationService.
       notificationsEnabled: true,
       setNotificationsEnabled: (value) => set({ notificationsEnabled: value }),
+
+      // Opt-in on purpose: enabling it sends the student to Android's system
+      // settings to grant Notification Policy Access (Do Not Disturb), a
+      // special-access permission Android won't let us request silently.
+      // Off by default until they've actually granted it.
+      focusModeEnabled: false,
+      setFocusModeEnabled: (value) => set({ focusModeEnabled: value }),
     }),
     {
       name: 'schedio-preferences-storage',

@@ -32,6 +32,7 @@ const ResourceList = ({ resources, onDelete, isDarkMode }) => {
       // stale record should still be cleared instead of getting stuck
       // forever. Any other error is a real failure.
       if (error?.code !== 'storage/object-not-found') {
+        console.error('Error deleting resource:', error);
         setDeleting(false);
         setDeleteError(true);
         return;

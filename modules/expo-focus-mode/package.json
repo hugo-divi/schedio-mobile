@@ -1,0 +1,14 @@
+{
+  "name": "expo-focus-mode",
+  "version": "1.0.0",
+  "description": "Toggle Android's system Do Not Disturb (Notification Policy Access) for the duration of a Schedio study session.",
+  "main": "index.js",
+  "platforms": [
+    "android"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "peerDependencies": {
+    "expo": "*"
+  }
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -48,16 +48,24 @@ const KEYBOARD_HIDE_EVENT = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboa
  * The sheet every home-screen modal sits in: dimmed backdrop, rounded top,
  * grab handle, slide-up entrance, and drag-down-to-dismiss.
  *
- * The drag is bound to the handle area rather than the whole sheet, so it never
- * competes with a ScrollView or a horizontal chip list inside the content.
+ * The drag is bound to the handle + title/subtitle block rather than the whole
+ * sheet, so it never competes with a ScrollView or a horizontal chip list
+ * inside the content. That block used to be just the 4px handle bar's own
+ * small hit area — too small to find by feel, forcing a drag to start from a
+ * very precise, very high spot on a tall sheet. Folding the title in gives a
+ * much larger, still-safe target, since title/subtitle are never interactive.
  *
  * Pass `title`/`subtitle` for the standard heading, or render your own header
- * in `children` and leave them out.
+ * in `children` and leave them out — that header won't be draggable, only the
+ * handle will.
  */
 export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const keyboardShift = useSharedValue(0);
+  // Set by the sheet's onLayout so the keyboard-avoidance effect below knows
+  // how tall the actual (possibly short) sheet is, not just the screen.
+  const sheetHeightRef = useRef(0);
 
   useEffect(() => {
     if (!visible) return;
@@ -70,13 +78,21 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   // Shifts the sheet up by however much the keyboard actually overlaps it —
   // insets.bottom is padding the sheet already reserves, so only the part of
   // the keyboard beyond that needs to be compensated for.
+  //
+  // Capped so a short sheet (e.g. the subject editor, just a couple of fields)
+  // never gets pushed past a comfortable top margin — uncapped, shifting by the
+  // full keyboard height crowded the title right up against the status bar on
+  // sheets much shorter than the keyboard is tall.
   useEffect(() => {
     if (!visible) return;
 
     const onShow = (event) => {
       const height = event?.endCoordinates?.height ?? 0;
       const overlap = Math.max(0, height - insets.bottom);
-      keyboardShift.value = withTiming(-overlap, {
+      const safeTop = insets.top + 24;
+      const maxRise = Math.max(0, SCREEN_HEIGHT - sheetHeightRef.current - safeTop);
+      const clampedOverlap = Math.min(overlap, maxRise);
+      keyboardShift.value = withTiming(-clampedOverlap, {
         duration: event?.duration || 220,
         easing: Easing.out(Easing.cubic),
       });
@@ -94,7 +110,7 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
       showSub.remove();
       hideSub.remove();
     };
-  }, [visible, insets.bottom, keyboardShift]);
+  }, [visible, insets.bottom, insets.top, keyboardShift]);
 
   // Animate out, then let the parent unmount us.
   const dismiss = useCallback(() => {
@@ -134,11 +150,20 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
 
   const sheet = (
     <Pressable onPress={() => {}}>
-      <Animated.View style={[styles.sheet, sheetStyle]}>
+      <Animated.View
+        style={[styles.sheet, sheetStyle]}
+        onLayout={(event) => {
+          sheetHeightRef.current = event.nativeEvent.layout.height;
+        }}
+      >
         <GestureDetector gesture={pan}>
-          {/* Padded so the 4px bar isn't the whole target */}
-          <View style={styles.handleArea}>
-            <View style={styles.handle} />
+          <View style={styles.header}>
+            {/* Padded so the 4px bar isn't the whole target */}
+            <View style={styles.handleArea}>
+              <View style={styles.handle} />
+            </View>
+            {title ? <Text style={styles.title}>{title}</Text> : null}
+            {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
           </View>
         </GestureDetector>
 
@@ -149,8 +174,6 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
           bounces={false}
           keyboardShouldPersistTaps="handled"
         >
-          {title ? <Text style={styles.title}>{title}</Text> : null}
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
           {children}
         </ScrollView>
       </Animated.View>
@@ -221,9 +244,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 24,
   },
-  // The Pan gesture is bound to this area alone (see the comment above), so
-  // its size *is* the drag-to-dismiss target — padded well past the 4px bar
-  // itself rather than just enough to not look cramped.
+  // The Pan gesture is bound to this block (see the comment above), so its
+  // size *is* the drag-to-dismiss target. Same horizontal padding as
+  // scrollContent so title/subtitle stay aligned with the body now that
+  // they've moved out of the ScrollView.
+  header: {
+    paddingHorizontal: 24,
+  },
   handleArea: {
     paddingTop: 20,
     paddingBottom: 28,

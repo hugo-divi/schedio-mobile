@@ -41,6 +41,7 @@ import {
   HIGH_PRIORITY_SCORE,
 } from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
+import { syncHomeScreenWidgets } from '../../services/widgetData';
 import usePreferencesStore from '../../store/preferencesStore';
 import { registerForPushNotifications } from '../../services/notificationService';
 import useUserStore from '../../store/userStore';
@@ -55,6 +56,7 @@ import GuidedTour from '../../components/GuidedTour';
 import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
 import Button from '../../components/ui/Button';
+import { BottomSheet, sheetStyles } from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
 import { Emoji } from '../../components/ui/Emoji';
@@ -63,11 +65,17 @@ import { Emoji } from '../../components/ui/Emoji';
 // triggers a refetch.
 const FOCUS_REFETCH_MS = 60_000;
 
+// Mirrors the 3/5/9 scale EventModal.js offers under "Prioridad" — this is
+// what the student actually picked. The exam row's badge used to show only
+// "Prioridad alta" (when the computed urgency score cleared the threshold) or
+// else "Normal" unconditionally, so picking "Baja" always displayed as
+// "Normal" the moment it wasn't also urgent.
+const MANUAL_PRIORITY_LABELS = { 3: 'Baja', 5: 'Normal', 9: 'Alta' };
+
 // Main Dashboard component - Refactored for global subject sync
 export default function Dashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const autoGradePrompt = usePreferencesStore((state) => state.autoGradePrompt);
   const isPrime = useAuthStore((state) => state.isPrime);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -111,6 +119,7 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedEvent, setSelectedEvent] = useState(null);
   const [examToGrade, setExamToGrade] = useState(null);
+  const [examToDelete, setExamToDelete] = useState(null);
   const [eventsForSelectedDay, setEventsForSelectedDay] = useState([]);
   const [examsExpanded, setExamsExpanded] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
@@ -138,11 +147,12 @@ export default function Dashboard() {
     return `En ${diffDays} días`;
   };
 
-  // Memoized against its real dependencies (refreshing, autoGradePrompt) so
-  // useFocusEffect and onRefresh below always call the current closure —
-  // an unmemoized fetchData handed to a useCallback with an empty dep array
-  // is exactly what froze the auto-grade prompt at whatever autoGradePrompt
-  // was on mount, deaf to the student turning it off in Ajustes afterwards.
+  // Memoized against its real dependency (refreshing) so useFocusEffect and
+  // onRefresh below always call the current closure. autoGradePrompt is
+  // intentionally not a dependency here — it's re-read live from the store
+  // (see the auto-prompt block below) rather than captured in this closure,
+  // since the mount effect further down fires before the store's
+  // AsyncStorage-backed value has rehydrated.
   const fetchData = useCallback(async () => {
     try {
       const user = auth.currentUser;
@@ -190,11 +200,29 @@ export default function Dashboard() {
       setExams(examsData || []);
       setPendingExams(pendingExamsData || []);
 
+      // Home screen widget: pushed on every dashboard refresh, not just on
+      // app open, so it stays right without depending on the 30-min OS
+      // update alarm. See services/widgetData.js for why this reads from
+      // the store instead of re-fetching.
+      syncHomeScreenWidgets({
+        exams: examsData || [],
+        microplans: useUserStore.getState().microplans,
+        subjects: useUserStore.getState().subjects,
+        streak: streakData.currentStreak || 0,
+        isPrime: useAuthStore.getState().isPrime,
+      });
+
       loadAIRecommendation(profileData, examsData, streakData);
 
-      // Auto-Prompt logic
-      if (pendingExamsData && pendingExamsData.length > 0 && autoGradePrompt) {
+      // Auto-Prompt logic. The live preference is re-read here rather than
+      // trusting the `autoGradePrompt` closure above: on a cold start this
+      // effect fires before AsyncStorage's persisted value has rehydrated, so
+      // that closure is still the in-memory default (true) even when the
+      // student had turned the prompt off in Ajustes. By the time this
+      // timeout fires, rehydration has long since finished.
+      if (pendingExamsData && pendingExamsData.length > 0) {
         setTimeout(() => {
+          if (!usePreferencesStore.getState().autoGradePrompt) return;
           setExamToGrade(pendingExamsData[0]);
           setGradeModalVisible(true);
         }, 1000);
@@ -206,7 +234,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [refreshing, autoGradePrompt]);
+  }, [refreshing]);
 
   const loadAIRecommendation = async (profileData, examsData, streakData) => {
     try {
@@ -265,10 +293,8 @@ export default function Dashboard() {
       if (!lastFetchRef.current) return;
       if (Date.now() - lastFetchRef.current < FOCUS_REFETCH_MS) return;
       fetchData();
-      // `fetchData` isn't memoized (a fresh closure every render, reading
-      // current prefs like autoGradePrompt), so it belongs in the deps —
-      // an empty array froze this callback on its first-ever closure,
-      // permanently reading whatever autoGradePrompt was at mount.
+      // `fetchData` belongs in the deps so this callback always calls the
+      // current closure rather than whichever one existed on mount.
     }, [fetchData])
   );
 
@@ -708,7 +734,12 @@ export default function Dashboard() {
                         </Text>
                       </View>
 
-                      <Chip active={urgent}>{urgent ? 'Prioridad alta' : 'Normal'}</Chip>
+                      <Chip active={urgent}>
+                        {urgent
+                          ? 'Prioridad alta'
+                          : (MANUAL_PRIORITY_LABELS[exam.manualPriority ?? exam.priority] ??
+                            'Normal')}
+                      </Chip>
                     </TouchableOpacity>
                   );
                 })
@@ -745,27 +776,7 @@ export default function Dashboard() {
                     style={[styles.pendingRow, isLast && styles.rowLast]}
                     activeOpacity={0.9}
                     delayLongPress={500}
-                    onLongPress={() => {
-                      Alert.alert(
-                        'Eliminar examen',
-                        `¿Estás seguro de que quieres eliminar "${exam.name}"?`,
-                        [
-                          { text: 'Cancelar', style: 'cancel' },
-                          {
-                            text: 'Eliminar',
-                            style: 'destructive',
-                            onPress: async () => {
-                              try {
-                                await deleteExam(exam.id);
-                                fetchData();
-                              } catch {
-                                Alert.alert('Error', 'No se pudo eliminar el examen.');
-                              }
-                            },
-                          },
-                        ]
-                      );
-                    }}
+                    onLongPress={() => setExamToDelete(exam)}
                   >
                     <View style={styles.rowMain}>
                       <Text style={styles.pendingName} numberOfLines={1}>
@@ -852,6 +863,41 @@ export default function Dashboard() {
         exam={examToGrade}
         onSave={handleSaveGrade}
       />
+
+      {/* Deleting from "Por calificar" used to go through the OS's own
+          Alert.alert — a native Android dialog dropped in the middle of an
+          otherwise fully themed screen. */}
+      <BottomSheet
+        visible={!!examToDelete}
+        onClose={() => setExamToDelete(null)}
+        title="Eliminar examen"
+        subtitle={`¿Seguro que quieres eliminar "${examToDelete?.name ?? ''}"?`}
+      >
+        <View style={sheetStyles.actions}>
+          <Button
+            title="Cancelar"
+            variant="secondary"
+            style={sheetStyles.actionButton}
+            onPress={() => setExamToDelete(null)}
+          />
+          <Button
+            title="Eliminar"
+            variant="danger"
+            style={sheetStyles.actionButton}
+            onPress={async () => {
+              const exam = examToDelete;
+              setExamToDelete(null);
+              try {
+                await deleteExam(exam.id);
+                fetchData();
+              } catch (error) {
+                console.error('Error deleting exam:', error);
+                Alert.alert('Error', 'No se pudo eliminar el examen.');
+              }
+            }}
+          />
+        </View>
+      </BottomSheet>
 
       {/* Easter egg: four quick taps on the header logo */}
       <Modal

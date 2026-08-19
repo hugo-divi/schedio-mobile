@@ -321,7 +321,11 @@ export default function SchedioPlusScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={{ flex: 1 }}>
+      {/* A fixed View here (no scroll) let the row list run under the footer
+          on a short screen or with larger system font settings — the same
+          overlap `planScroll` below was built to avoid. Same fix, same
+          reasoning: scroll instead of overlapping compareFooter. */}
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={styles.compareColumnHead}>
           <View style={{ flex: 1 }} />
           <Text style={styles.compareColumnLabel}>Free</Text>
@@ -337,8 +341,8 @@ export default function SchedioPlusScreen() {
         <View style={styles.comingSoon}>
           <Text style={styles.comingSoonLabel}>Próximamente</Text>
           <Text style={styles.comingSoonText}>
-            Coach IA, vista de trimestre y widget de inicio en Android — incluidos con Prime en
-            cuanto estén listos.
+            Coach IA y vista de trimestre — incluidos con Prime en cuanto estén listos. El widget de
+            inicio en Android llegará gratis para todos; Prime añadirá el tamaño grande.
           </Text>
         </View>
 
@@ -346,7 +350,7 @@ export default function SchedioPlusScreen() {
           Schedio lo hace un equipo pequeño e independiente — tu suscripción nos ayuda a seguir
           mejorando la app para estudiantes.
         </Text>
-      </View>
+      </ScrollView>
 
       <View style={[styles.compareFooter, { paddingBottom: 16 + insets.bottom }]}>
         <PrimeButton title="Suscríbete a Prime" onPress={() => setStep('plan')} />

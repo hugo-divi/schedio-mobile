@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
   Lock,
   Plus,
@@ -567,9 +567,17 @@ export default function PlansScreen() {
     );
   }, [subjects, resources]);
 
-  useEffect(() => {
-    if (user) useUserStore.getState().initDailyMicroplans(user.uid);
-  }, [user]);
+  // Was a plain mount-only effect ([user] never changes during a session), so
+  // a plan generated yesterday kept showing until the app was fully killed
+  // and relaunched — the only thing that re-ran it. initDailyMicroplans
+  // itself already gates on the date (see its `shouldGenerate` check), so
+  // re-running it on every return to the tab is safe: it's a no-op except
+  // right after the day actually rolls over.
+  useFocusEffect(
+    useCallback(() => {
+      if (user) useUserStore.getState().initDailyMicroplans(user.uid);
+    }, [user])
+  );
 
   // ── Task handlers ──
 

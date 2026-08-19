@@ -7,9 +7,13 @@ service firebase.storage {
       // Same ownership check, plus a hard cap per file — the weekly upload
       // count (3 free / 15 Prime, enforced client-side) limits how often
       // someone can upload, not how large a single file can be.
-      allow write: if request.auth != null
+      allow create, update: if request.auth != null
         && request.auth.uid == userId
         && request.resource.size < 20 * 1024 * 1024;
+      // Delete has no incoming `request.resource` to size-check — folding it
+      // into `write` above meant every delete evaluated `request.resource.size`
+      // against null and was denied as unauthorized.
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
   }
 }

@@ -12,6 +12,7 @@ module.exports = {
     clearTimeout: 'readonly',
     setInterval: 'readonly',
     clearInterval: 'readonly',
+    Intl: 'readonly',
   },
   rules: {
     'no-console': 'warn',
