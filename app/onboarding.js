@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, Check, X, Plus, Bell } from 'lucide-react-native';
+import { ChevronLeft, ChevronDown, Check, X, Plus, Bell } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { addDays, format, isBefore, startOfDay } from 'date-fns';
@@ -23,11 +23,14 @@ import { tokens } from '../theme/tokens';
 import useAuthStore from '../store/authStore';
 import useUserStore from '../store/userStore';
 import usePreferencesStore from '../store/preferencesStore';
-import { requestPermissions } from '../services/notificationService';
+import { registerForPushNotifications } from '../services/notificationService';
 import { createExam } from '../services/exams';
 import {
+  ACQUISITION_SOURCES,
   EDUCATION_LEVELS,
   BACHILLERATO_BRANCHES,
+  REGIONS,
+  regionLabelFor,
   SUBJECT_COLORS,
   MIN_SUBJECTS,
   MAX_SUBJECTS,
@@ -99,12 +102,15 @@ export default function Onboarding() {
 
   const [educationLevel, setEducationLevel] = useState(null);
   const [currentGrade, setCurrentGrade] = useState('');
+  const [region, setRegion] = useState(null);
+  const [regionSheet, setRegionSheet] = useState(false);
   const [branch, setBranch] = useState(null);
   const [subjects, setSubjects] = useState([]);
   const [newSubject, setNewSubject] = useState('');
   const [subjectError, setSubjectError] = useState('');
   const [paletteFor, setPaletteFor] = useState(null);
   const [reviewFrequency, setReviewFrequency] = useState(null);
+  const [acquisitionSource, setAcquisitionSource] = useState(null);
   const [taskManagement, setTaskManagement] = useState(null);
   const [howSheet, setHowSheet] = useState(false);
   const [notificationsConsent, setNotificationsConsent] = useState(null);
@@ -127,9 +133,11 @@ export default function Onboarding() {
       if (saved) {
         if (saved.educationLevel) setEducationLevel(saved.educationLevel);
         if (saved.currentGrade != null) setCurrentGrade(String(saved.currentGrade));
+        if (saved.region) setRegion(saved.region);
         if (saved.branch) setBranch(saved.branch);
         if (Array.isArray(saved.subjects)) setSubjects(saved.subjects);
         if (saved.reviewFrequency) setReviewFrequency(saved.reviewFrequency);
+        if (saved.acquisitionSource) setAcquisitionSource(saved.acquisitionSource);
         if (saved.taskManagement) setTaskManagement(saved.taskManagement);
         if (saved.notificationsConsent != null) setNotificationsConsent(saved.notificationsConsent);
         if (saved.step) setStep(Math.min(TOTAL_STEPS, saved.step));
@@ -156,7 +164,7 @@ export default function Onboarding() {
   const canAdvance = () => {
     switch (step) {
       case 1:
-        return !!educationLevel && currentGrade.trim() !== '' && !gradeError;
+        return !!educationLevel && !!region && currentGrade.trim() !== '' && !gradeError;
       case 2:
         return subjects.length >= MIN_SUBJECTS;
       case 3:
@@ -196,20 +204,24 @@ export default function Onboarding() {
       step: nextStep,
       educationLevel,
       currentGrade: Number.isNaN(gradeValue) ? null : gradeValue,
+      region,
       branch,
       subjects,
       reviewFrequency,
       taskManagement,
       notificationsConsent,
+      acquisitionSource,
     }),
     [
       educationLevel,
       gradeValue,
+      region,
       branch,
       subjects,
       reviewFrequency,
       taskManagement,
       notificationsConsent,
+      acquisitionSource,
     ]
   );
 
@@ -264,8 +276,13 @@ export default function Onboarding() {
         educationLevel,
         branch,
         currentGrade: Number.isNaN(gradeValue) ? null : gradeValue,
+        region,
         subjects,
         taskManagement,
+        reviewFrequency,
+        estimatedRange: estimate.range,
+        estimationReason: estimate.reasons,
+        acquisitionSource,
       });
 
       const chosen = skipGoal ? null : created[goalSubject];
@@ -280,6 +297,9 @@ export default function Onboarding() {
           type: 'exam',
           priority: 5,
           completed: false,
+          // Lets the guided tour recognise and call out this exact item as
+          // "what you just created" instead of speaking generically.
+          fromOnboarding: true,
         });
       } else if (goal === 'session' && chosen) {
         // There is no "planned session" in the model; a manual plan task is
@@ -291,6 +311,7 @@ export default function Onboarding() {
           subjectId: chosen.id,
           subjectName: chosen.name,
           subjectColor: chosen.color,
+          fromOnboarding: true,
         });
       }
 
@@ -369,6 +390,28 @@ export default function Onboarding() {
                   }}
                 />
               ))}
+            </View>
+
+            <View style={{ marginTop: 28 }}>
+              <Text style={styles.fieldLabel}>¿En qué comunidad estudias?</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setRegionSheet(true)}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  region ? `Comunidad: ${regionLabelFor(region)}` : 'Elegir comunidad'
+                }
+                style={[styles.select, region && styles.selectOn]}
+              >
+                <Text style={region ? styles.selectValue : styles.selectPlaceholder}>
+                  {region ? regionLabelFor(region) : 'Elígela en la lista'}
+                </Text>
+                <ChevronDown size={18} color={tokens.colors.textSecondary} strokeWidth={1.75} />
+              </TouchableOpacity>
+              <Text style={styles.hint}>
+                El temario cambia según la comunidad. Nos sirve para ajustar la app a lo que
+                realmente estudias.
+              </Text>
             </View>
 
             <View style={{ marginTop: 28 }}>
@@ -570,6 +613,41 @@ export default function Onboarding() {
             <TouchableOpacity onPress={() => setHowSheet(true)} style={{ marginTop: 20 }}>
               <Text style={styles.link}>¿Cómo se calcula esto?</Text>
             </TouchableOpacity>
+
+            {/* Attribution. Deliberately here and nowhere else: step 5 is the
+                only one that asks nothing of the student, so this costs no
+                extra step and blocks nothing — `canAdvance` still returns an
+                unconditional true, and leaving it untouched saves null.
+                Below the fold on purpose, under a divider, so it reads as an
+                aside rather than as one more thing to fill in. */}
+            <View style={styles.sourceBlock}>
+              <Text style={styles.sourceTitle}>¿Cómo llegaste a Schedio?</Text>
+              <Text style={styles.sourceLead}>Opcional. Nos ayuda a saber dónde encontrarte.</Text>
+              <View style={styles.sourceWrap}>
+                {ACQUISITION_SOURCES.map((option) => {
+                  const selected = acquisitionSource === option.value;
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      activeOpacity={0.8}
+                      // Tapping the chosen one again clears it — the only way
+                      // back out of a question that never had to be answered.
+                      onPress={() => {
+                        setAcquisitionSource(selected ? null : option.value);
+                        if (Platform.OS !== 'web') Haptics.selectionAsync();
+                      }}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      style={[styles.sourceChip, selected && styles.sourceChipOn]}
+                    >
+                      <Text style={[styles.sourceChipText, selected && styles.sourceChipTextOn]}>
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
           </>
         );
 
@@ -602,7 +680,26 @@ export default function Onboarding() {
                 title="Permitir notificaciones"
                 fullWidth
                 onPress={async () => {
-                  const granted = await requestPermissions();
+                  // registerForPushNotifications, not requestPermissions: the
+                  // latter only asks the OS. The FCM token used to be written
+                  // solely from the dashboard, which you reach by finishing
+                  // this flow — so an account that said yes here and then
+                  // stopped at step 7 had granted permission and still had no
+                  // token, leaving it unreachable by every Cloud Function we
+                  // run. That is the cohort worth recovering most.
+                  //
+                  // Guarded because this can throw where the dashboard's
+                  // fire-and-forget call could afford not to care: fetching
+                  // the token fails on a device with no Play Services, and an
+                  // unhandled rejection here would leave `notificationsConsent`
+                  // null — which `canAdvance` reads, trapping the student on
+                  // this step with no way forward.
+                  let granted = false;
+                  try {
+                    granted = await registerForPushNotifications(auth.currentUser?.uid);
+                  } catch (error) {
+                    console.warn('[Onboarding] Could not register for push:', error?.message);
+                  }
                   setNotificationsConsent(granted);
                   setNotificationsEnabled(granted);
                 }}
@@ -793,6 +890,40 @@ export default function Onboarding() {
       </KeyboardAvoidingView>
 
       <BottomSheet
+        visible={regionSheet}
+        onClose={() => setRegionSheet(false)}
+        title="¿En qué comunidad estudias?"
+        subtitle="Solo para ajustar el temario y las fechas a tu zona."
+      >
+        <ScrollView style={styles.regionList} showsVerticalScrollIndicator={false}>
+          {REGIONS.map((item) => {
+            const selected = region === item.code;
+            return (
+              <TouchableOpacity
+                key={item.code}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setRegion(item.code);
+                  setRegionSheet(false);
+                  if (Platform.OS !== 'web') Haptics.selectionAsync();
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={styles.regionRow}
+              >
+                <Text style={[styles.regionLabel, selected && styles.regionLabelOn]}>
+                  {item.label}
+                </Text>
+                {selected ? (
+                  <Check size={18} color={tokens.colors.accent} strokeWidth={2.5} />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </BottomSheet>
+
+      <BottomSheet
         visible={howSheet}
         onClose={() => setHowSheet(false)}
         title="¿Cómo se calcula?"
@@ -854,6 +985,50 @@ const styles = StyleSheet.create({
     borderTopColor: tokens.colors.borderDefault,
   },
 
+  sourceBlock: {
+    marginTop: 28,
+    paddingTop: 20,
+    borderTopWidth: 1,
+    borderTopColor: tokens.colors.borderDefault,
+  },
+  sourceTitle: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  sourceLead: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textDisabled,
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  sourceWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sourceChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  sourceChipOn: {
+    borderColor: tokens.colors.accentSoftBorder,
+    backgroundColor: tokens.colors.accentSoftBg,
+  },
+  sourceChipText: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  sourceChipTextOn: {
+    color: tokens.colors.accentSoftText,
+  },
   title: { fontFamily: font.bold, fontSize: 24, color: tokens.colors.textPrimary, marginBottom: 6 },
   lead: {
     fontFamily: font.regular,
@@ -892,6 +1067,40 @@ const styles = StyleSheet.create({
     color: tokens.colors.textSecondary,
     paddingTop: 2,
   },
+
+  // Nineteen communities are too many for pills, so the field opens a sheet.
+  select: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    height: 46,
+    paddingHorizontal: 14,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  selectOn: { borderColor: tokens.colors.accent },
+  selectValue: { fontFamily: font.medium, fontSize: 15, color: tokens.colors.textPrimary },
+  selectPlaceholder: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textDisabled,
+  },
+  // Capped so the sheet scrolls its own list instead of growing past the
+  // screen on the shorter phones.
+  regionList: { marginTop: 12, maxHeight: 380 },
+  regionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
+  },
+  regionLabel: { fontFamily: font.regular, fontSize: 15, color: tokens.colors.textPrimary },
+  regionLabelOn: { fontFamily: font.semibold, color: tokens.colors.accent },
 
   pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pill: {

@@ -341,6 +341,16 @@ export const rankExams = (events, subjects, ctx = {}) => {
 export const HIGH_PRIORITY_SCORE = 60;
 
 /**
+ * Score at or above which the UI shows the middle band of the urgency
+ * thermometer (amber) instead of the neutral default (below this) or red
+ * (above HIGH_PRIORITY_SCORE). Roughly half of a typical "high" score, so the
+ * middle band actually spans a meaningful range instead of being a sliver
+ * next to the red cutoff — same provisional caveat as HIGH_PRIORITY_SCORE:
+ * revisit against real usage, not derived from data yet.
+ */
+export const MEDIUM_PRIORITY_SCORE = 35;
+
+/**
  * Compress a 0-100 score into the legacy 1-10 `priority` field.
  *
  * Kept because that field is already persisted on every exam doc and read by

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Schedio</title>
+<style>
+  :root {
+    --bg: #191919;
+    --card: #242424;
+    --border: #373737;
+    --text: #EDEDED;
+    --text-secondary: #9B9B9B;
+    --accent: #2979FF;
+    --success: #5AB98A;
+    --danger: #D8604A;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    min-height: 100%;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 400px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    text-align: center;
+  }
+  .brand {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0 0 24px;
+    letter-spacing: 0.2px;
+  }
+  .icon {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 16px;
+    border-radius: 100px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+  }
+  .icon.success { background: rgba(90, 185, 138, 0.14); color: var(--success); }
+  .icon.error { background: rgba(216, 96, 74, 0.14); color: var(--danger); }
+  .icon.loading { background: rgba(41, 121, 255, 0.14); color: var(--accent); }
+  h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  p {
+    font-size: 15px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    margin: 0 0 24px;
+  }
+  p:last-child { margin-bottom: 0; }
+  input {
+    width: 100%;
+    background: #2C2C2C;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 15px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    outline: none;
+  }
+  input:focus { border-color: var(--accent); }
+  button {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    padding: 13px 14px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.6; cursor: default; }
+  .field-error {
+    color: var(--danger);
+    font-size: 13px;
+    text-align: left;
+    margin: -6px 0 12px;
+    display: none;
+  }
+  .link {
+    display: inline-block;
+    margin-top: 20px;
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <p class="brand">Schedio</p>
+    <div id="content">
+      <div class="icon loading">⏳</div>
+      <h1>Procesando…</h1>
+      <p>Un momento, estamos comprobando tu enlace.</p>
+    </div>
+  </div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-app.js";
+  import {
+    getAuth,
+    applyActionCode,
+    checkActionCode,
+    verifyPasswordResetCode,
+    confirmPasswordReset,
+  } from "https://www.gstatic.com/firebasejs/12.16.0/firebase-auth.js";
+
+  // Public Firebase web config — same non-secret values shipped in the app
+  // bundle (see services/firebase.js). Real security lives in Firestore/
+  // Storage rules, not in hiding this.
+  const firebaseConfig = {
+    apiKey: "AIzaSyCZbNOQ8Q_ns69iPG7t27zTohiI8p3RuZE",
+    authDomain: "schedio-b3958.firebaseapp.com",
+    projectId: "schedio-b3958",
+    storageBucket: "schedio-b3958.firebasestorage.app",
+    messagingSenderId: "97363652124",
+    appId: "1:97363652124:web:c4948a388c0b2f0f5439d9",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+
+  const content = document.getElementById("content");
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode");
+  const oobCode = params.get("oobCode");
+
+  const APP_LINK = '<a class="link" href="schedio://">Volver a Schedio</a>';
+
+  const ERROR_MESSAGES = {
+    "auth/expired-action-code": "Este enlace ha caducado. Pide uno nuevo desde la app.",
+    "auth/invalid-action-code": "Este enlace ya no es válido — puede que ya se haya usado o esté mal copiado.",
+    "auth/user-disabled": "Esta cuenta está deshabilitada.",
+    "auth/user-not-found": "No encontramos ninguna cuenta asociada a este enlace.",
+    "auth/weak-password": "La contraseña debe tener al menos 6 caracteres.",
+  };
+
+  function renderError(title, message) {
+    content.innerHTML = `
+      <div class="icon error">✕</div>
+      <h1>${title}</h1>
+      <p>${message}</p>
+      ${APP_LINK}
+    `;
+  }
+
+  function renderSuccess(title, message) {
+    content.innerHTML = `
+      <div class="icon success">✓</div>
+      <h1>${title}</h1>
+      <p>${message}</p>
+      ${APP_LINK}
+    `;
+  }
+
+  function messageFor(error) {
+    return ERROR_MESSAGES[error?.code] || "No hemos podido completar la acción. Inténtalo de nuevo desde la app.";
+  }
+
+  async function handleVerifyEmail() {
+    try {
+      await applyActionCode(auth, oobCode);
+      renderSuccess("Cuenta verificada", "Ya puedes volver a Schedio e iniciar sesión con normalidad.");
+    } catch (error) {
+      renderError("No se pudo verificar", messageFor(error));
+    }
+  }
+
+  async function handleResetPassword() {
+    let email;
+    try {
+      email = await verifyPasswordResetCode(auth, oobCode);
+    } catch (error) {
+      renderError("Enlace no válido", messageFor(error));
+      return;
+    }
+
+    content.innerHTML = `
+      <div class="icon loading">🔑</div>
+      <h1>Nueva contraseña</h1>
+      <p>Elige una nueva contraseña para <strong>${email}</strong>.</p>
+      <input id="password" type="password" placeholder="Nueva contraseña" autocomplete="new-password" />
+      <input id="password2" type="password" placeholder="Repite la contraseña" autocomplete="new-password" />
+      <p id="formError" class="field-error"></p>
+      <button id="submit">Guardar contraseña</button>
+    `;
+
+    const passwordInput = document.getElementById("password");
+    const password2Input = document.getElementById("password2");
+    const formError = document.getElementById("formError");
+    const submitBtn = document.getElementById("submit");
+
+    submitBtn.addEventListener("click", async () => {
+      const password = passwordInput.value;
+      const password2 = password2Input.value;
+
+      if (password.length < 6) {
+        formError.textContent = "La contraseña debe tener al menos 6 caracteres.";
+        formError.style.display = "block";
+        return;
+      }
+      if (password !== password2) {
+        formError.textContent = "Las contraseñas no coinciden.";
+        formError.style.display = "block";
+        return;
+      }
+      formError.style.display = "none";
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Guardando…";
+
+      try {
+        await confirmPasswordReset(auth, oobCode, password);
+        renderSuccess("Contraseña actualizada", "Ya puedes volver a Schedio e iniciar sesión con tu nueva contraseña.");
+      } catch (error) {
+        formError.textContent = messageFor(error);
+        formError.style.display = "block";
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Guardar contraseña";
+      }
+    });
+  }
+
+  async function handleRecoverEmail() {
+    try {
+      const info = await checkActionCode(auth, oobCode);
+      await applyActionCode(auth, oobCode);
+      const restoredEmail = info.data.email;
+      renderSuccess("Correo restaurado", `Tu correo se ha restaurado a ${restoredEmail}. Si no reconoces este cambio, contacta con nosotros.`);
+    } catch (error) {
+      renderError("No se pudo restaurar", messageFor(error));
+    }
+  }
+
+  if (!mode || !oobCode) {
+    renderError("Enlace no válido", "Falta información en este enlace. Vuelve a pedirlo desde la app.");
+  } else if (mode === "verifyEmail") {
+    handleVerifyEmail();
+  } else if (mode === "resetPassword") {
+    handleResetPassword();
+  } else if (mode === "recoverEmail") {
+    handleRecoverEmail();
+  } else {
+    renderError("Enlace no reconocido", "Este tipo de enlace no está soportado.");
+  }
+</script>
+</body>
+</html>

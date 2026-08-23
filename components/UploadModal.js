@@ -19,6 +19,7 @@ import { tokens } from '../theme/tokens';
 import { uploadFile } from '../services/storage';
 import useUserStore, { PRIME_WEEKLY_UPLOADS } from '../store/userStore';
 import useAuthStore from '../store/authStore';
+import usePrimeIntentStore, { PRIME_INTENTS } from '../store/primeIntentStore';
 import { auth } from '../services/firebase';
 import PrimeLimitSheet from './PrimeLimitSheet';
 
@@ -31,6 +32,9 @@ const UploadModal = ({
   // Opening the sheet from inside a subject pre-selects it.
   subjects = [],
   initialSubjectId = null,
+  // Which mount this is, so that after a Prime purchase only the screen that
+  // actually opened this sheet reopens it. See store/primeIntentStore.js.
+  intentOrigin = null,
 }) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -62,6 +66,11 @@ const UploadModal = ({
 
   const goToPrime = () => {
     setLimitSheetVisible(false);
+    // Closing this modal is unavoidable — it can't sit under the paywall —
+    // so record what they were doing. Whichever screen owns this modal
+    // reopens it once the purchase goes through, instead of leaving them to
+    // find the button and pick the file all over again right after paying.
+    usePrimeIntentStore.getState().startIntent(PRIME_INTENTS.MOCHILA, intentOrigin);
     onClose();
     router.push('/plus');
   };
@@ -210,10 +219,6 @@ const UploadModal = ({
             </View>
           ) : (
             <>
-              <Text style={styles.subtitle}>
-                Sube apuntes, fotos o PDFs para tenerlos siempre a mano.
-              </Text>
-
               {subjects.length > 0 && (
                 <View style={styles.subjectBlock}>
                   <Text style={styles.subjectLabel}>Materia</Text>
@@ -251,28 +256,22 @@ const UploadModal = ({
 
               <View style={styles.actions}>
                 <TouchableOpacity style={styles.actionButton} onPress={handlePickCamera}>
-                  <View
-                    style={[styles.iconContainer, { backgroundColor: 'rgba(90, 185, 138, 0.1)' }]}
-                  >
-                    <Ionicons name="camera" size={26} color="#5AB98A" />
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="camera" size={24} color={tokens.colors.textSecondary} />
                   </View>
                   <Text style={styles.actionText}>Cámara</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.actionButton} onPress={handlePickImage}>
-                  <View
-                    style={[styles.iconContainer, { backgroundColor: 'rgba(255, 159, 10, 0.1)' }]}
-                  >
-                    <Ionicons name="images" size={26} color="#FF9F0A" />
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="images" size={24} color={tokens.colors.textSecondary} />
                   </View>
                   <Text style={styles.actionText}>Galería</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity style={styles.actionButton} onPress={handlePickDocument}>
-                  <View
-                    style={[styles.iconContainer, { backgroundColor: 'rgba(74, 144, 226, 0.1)' }]}
-                  >
-                    <Ionicons name="document-text" size={26} color="#4A90E2" />
+                  <View style={styles.iconContainer}>
+                    <Ionicons name="document-text" size={24} color={tokens.colors.textSecondary} />
                   </View>
                   <Text style={styles.actionText}>Documento</Text>
                 </TouchableOpacity>
@@ -338,12 +337,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  subtitle: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 24,
-    lineHeight: 20,
-  },
   closeButton: {
     padding: 4,
   },
@@ -402,6 +395,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
   },
+  // Neutral on purpose: three saturated fills (green/orange/blue) made the
+  // picker the loudest thing in an app that is otherwise flat, bordered and
+  // monochrome. The icon glyph already says camera/gallery/document.
   iconContainer: {
     width: 44,
     height: 44,
@@ -409,6 +405,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 10,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
   },
   actionText: {
     color: '#FFFFFF',

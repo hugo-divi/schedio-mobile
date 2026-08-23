@@ -168,6 +168,75 @@ exports.examAlerts = onSchedule({ schedule: '5 8 * * *', timeZone: TIMEZONE }, a
   }
 });
 
+// ── Category 1b: abandoned onboarding ────────────────────────────────────
+
+// Accounts that registered and never finished setting up. They are the worst
+// cohort there is — they handed over an email and never got far enough to see
+// what the app does — and until now they were also structurally unreachable:
+// the FCM token was written only from the dashboard, which you reach by
+// finishing this very flow, so someone who said yes to notifications at step 6
+// and stopped at step 7 had no token for anything to send to.
+// app/onboarding.js registers the token at that step now, which is what makes
+// this function possible at all.
+//
+// Deliberately once and only once. Someone who ignored a nudge to finish
+// signing up does not want a second one, and this is the least invested
+// audience we have — the fastest to uninstall over a pushy app.
+const ABANDONED_COPY =
+  'Te faltaba poco para tener tu plan de estudio listo. ¿Lo terminamos en un minuto?';
+const ABANDONED_MIN_HOURS = 24;
+// Past a fortnight this stops being a nudge and starts being a cold email.
+const ABANDONED_MAX_DAYS = 14;
+
+exports.abandonedOnboarding = onSchedule(
+  { schedule: '20 17 * * *', timeZone: TIMEZONE },
+  async () => {
+    const now = Date.now();
+    const notBefore = now - ABANDONED_MIN_HOURS * 3600000;
+    const notAfter = now - ABANDONED_MAX_DAYS * 86400000;
+
+    // Two range filters on the SAME field, so this needs only the single-field
+    // index Firestore maintains automatically — no composite to forget to
+    // deploy, which is the trap that broke examAlerts' first real run.
+    //
+    // Filtering on the date rather than on `onboardingCompleted` is what keeps
+    // this bounded. The set of accounts that never finished onboarding only
+    // ever grows, so querying it meant re-reading every abandoned account ever
+    // created, every day, forever — until one day the whole result no longer
+    // fits in the function's memory and every notification stops at once. What
+    // this reads instead is "everyone who signed up in the last 14 days", which
+    // is capped by the signup rate rather than by the lifetime total.
+    const usersSnap = await db
+      .collection('users')
+      .where('createdAt', '>=', new Date(notAfter))
+      .where('createdAt', '<=', new Date(notBefore))
+      .get();
+
+    for (const doc of usersSnap.docs) {
+      const data = doc.data();
+      // Now the cheap check rather than the query filter. Accounts with no
+      // `createdAt`, or with it stored as anything other than a Timestamp,
+      // simply don't match the range — same as the old code, which skipped
+      // them when `.toDate?.()` came back undefined.
+      if (data.onboardingCompleted) continue;
+      if (!data.fcmToken) continue;
+      if (data.abandonedOnboardingSentAt) continue;
+      if (alreadyNotifiedToday(data)) continue;
+
+      const sent = await sendToUser(doc.id, data.fcmToken, {
+        title: 'Schedio',
+        body: ABANDONED_COPY,
+      });
+      if (!sent) continue;
+
+      await doc.ref.update({
+        abandonedOnboardingSentAt: FieldValue.serverTimestamp(),
+        lastNotifiedDate: madridDateKey(new Date()),
+      });
+    }
+  }
+);
+
 // ── Category 2: re-engagement ────────────────────────────────────────────
 
 const REENGAGEMENT_COPY =

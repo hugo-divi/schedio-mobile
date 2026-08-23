@@ -30,8 +30,10 @@ import { startOfWeek, addDays, isSameDay, isToday, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 import { tokens } from '../../theme/tokens';
+import { planReasonsFor } from '../../services/microplanService';
 import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
+import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
 import UploadModal from '../../components/UploadModal';
 import ResourceList from '../../components/ResourceList';
 import Card from '../../components/ui/Card';
@@ -484,6 +486,7 @@ export default function PlansScreen() {
   const subjects = useUserStore((state) => state.subjects);
   const planDiagnostics = useUserStore((state) => state.planDiagnostics);
   const uploadsHistory = useUserStore((state) => state.uploadsHistory);
+  const profile = useUserStore((state) => state.profile);
 
   const params = useLocalSearchParams();
   const highlightId = params.highlightId;
@@ -493,8 +496,36 @@ export default function PlansScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [uploadVisible, setUploadVisible] = useState(false);
+
+  // Reopens the upload sheet after a Prime purchase that the weekly upload
+  // limit triggered from the Mochila — the sheet has to close to show the
+  // paywall, and without this the student would have to find the button and
+  // pick the file again immediately after paying.
+  const primeReason = usePrimeIntentStore((state) => state.reason);
+  const primeOrigin = usePrimeIntentStore((state) => state.origin);
+  const primeFulfilled = usePrimeIntentStore((state) => state.fulfilled);
+  useEffect(() => {
+    if (
+      primeReason === PRIME_INTENTS.MOCHILA &&
+      primeOrigin === PRIME_ORIGINS.MOCHILA_TAB &&
+      primeFulfilled
+    ) {
+      usePrimeIntentStore.getState().clearIntent();
+      setUploadVisible(true);
+    }
+  }, [primeReason, primeOrigin, primeFulfilled]);
   const [uploadSubjectId, setUploadSubjectId] = useState(null);
   const [openFolder, setOpenFolder] = useState(null);
+  const [planInfoSheet, setPlanInfoSheet] = useState(false);
+
+  const planReasons = useMemo(
+    () =>
+      planReasonsFor({
+        organizationLevel: profile?.organizationLevel,
+        reviewFrequency: profile?.reviewFrequency,
+      }),
+    [profile?.organizationLevel, profile?.reviewFrequency]
+  );
 
   const days = useMemo(() => weekDays(weekOffset), [weekOffset]);
 
@@ -678,6 +709,9 @@ export default function PlansScreen() {
         {weekOffset === 0 && planDiagnostics?.unscheduled?.length > 0 ? (
           <Text style={styles.diagnosticsNote}>{shortfallNote(planDiagnostics.unscheduled)}</Text>
         ) : null}
+        <TouchableOpacity onPress={() => setPlanInfoSheet(true)} style={{ marginTop: 12 }}>
+          <Text style={styles.link}>¿Por qué mi plan es así?</Text>
+        </TouchableOpacity>
       </Card>
 
       {storeLoading ? (
@@ -865,9 +899,31 @@ export default function PlansScreen() {
         visible={uploadVisible}
         onClose={() => setUploadVisible(false)}
         onUploadSuccess={handleUploadSuccess}
+        intentOrigin={PRIME_ORIGINS.MOCHILA_TAB}
         subjects={subjects}
         initialSubjectId={uploadSubjectId}
       />
+
+      <BottomSheet
+        visible={planInfoSheet}
+        onClose={() => setPlanInfoSheet(false)}
+        title="Tu plan, explicado"
+        subtitle="Sale de dos respuestas que ya diste en el alta."
+      >
+        <Text style={styles.planInfoBody}>
+          Cada día tienes un presupuesto de{' '}
+          {planDiagnostics?.dailyCapacity ? `${planDiagnostics.dailyCapacity} min` : 'un tiempo'}, y
+          el repaso se reparte antes o después según cómo sueles llevarlo.
+        </Text>
+        <View style={styles.reasons}>
+          {planReasons.map((reason) => (
+            <View key={reason} style={styles.reasonRow}>
+              <View style={styles.reasonDot} />
+              <Text style={styles.reasonText}>{reason}</Text>
+            </View>
+          ))}
+        </View>
+      </BottomSheet>
     </View>
   );
 }
@@ -1016,6 +1072,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: tokens.colors.premiumText,
     marginTop: 10,
+  },
+  link: { fontFamily: font.semibold, fontSize: 13, color: tokens.colors.accent },
+  planInfoBody: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 21,
+    color: tokens.colors.textSecondary,
+    marginBottom: 16,
   },
 
   // Days
@@ -1177,6 +1241,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: tokens.colors.textSecondary,
+  },
+  reasons: { gap: 10 },
+  reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  reasonDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: tokens.colors.accent,
+    marginTop: 6,
   },
   fieldLabel: {
     fontFamily: font.medium,

@@ -115,6 +115,51 @@ export const gammaFor = (reviewFrequency) => GAMMA_BY_REVIEW_HABIT[reviewFrequen
  *  5 "muy organizado", from onboarding). Blended with observed history when
  *  there's enough of it. */
 export const CAPACITY_BY_ORGANIZATION = { 1: 45, 2: 60, 3: 75, 4: 95, 5: 120 };
+
+/**
+ * Plain-language reasons behind the numbers `estimateDailyCapacity` and
+ * `gammaFor` already compute — so Plan can explain itself using the same two
+ * onboarding answers that drive it, instead of that connection staying
+ * invisible once onboarding is over.
+ */
+export const planReasonsFor = ({ organizationLevel, reviewFrequency } = {}) => {
+  const level = clamp(Math.round(Number(organizationLevel) || 3), 1, 5);
+  const reasons = [];
+
+  if (level <= 2) {
+    reasons.push(
+      'Dijiste que hoy no tienes un sitio fijo para tus tareas, así que te damos más margen diario: es donde más se nota la diferencia.'
+    );
+  } else if (level >= 4) {
+    reasons.push(
+      'Ya tienes un sistema para organizarte, así que el presupuesto diario es más ajustado: Schedio solo lo mantiene.'
+    );
+  } else {
+    reasons.push(
+      'Tienes algo de sistema pero no siempre lo revisas, así que el margen diario es intermedio.'
+    );
+  }
+
+  if (reviewFrequency === 'never' || reviewFrequency === 'sometimes') {
+    reasons.push(
+      'Como repasas poco fuera de los exámenes, el plan adelanta el repaso en el calendario en vez de dejarlo para la víspera.'
+    );
+  } else if (reviewFrequency === 'regularly' || reviewFrequency === 'always') {
+    reasons.push(
+      'Ya repasas de forma constante, así que el plan reparte el repaso de forma más uniforme.'
+    );
+  } else {
+    reasons.push(
+      'Sin esa respuesta todavía, el plan reparte el repaso con un ritmo intermedio por defecto.'
+    );
+  }
+
+  reasons.push(
+    'En cuanto completes unas cuantas sesiones, el presupuesto diario deja de basarse solo en lo que dijiste y empieza a mirar lo que haces de verdad.'
+  );
+
+  return reasons;
+};
 export const CAPACITY_BOUNDS = [30, 180];
 /** Sessions needed before observed history outweighs the self-report. */
 export const MIN_SESSIONS_FOR_HISTORY = 3;

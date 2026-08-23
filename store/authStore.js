@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { onAuthChange, isSessionExpired, signOut } from '../services/auth';
 import { checkEntitlements, identifyUser, resetUser } from '../services/revenuecat';
 import { markAppOpened } from '../services/notificationService';
+import { markWelcomeSeen } from '../services/welcome';
 
 /**
  * Authentication store using Zustand
@@ -12,6 +13,16 @@ const useAuthStore = create((set) => ({
   isPrime: false,
   loading: true,
   error: null,
+
+  /**
+   * True only once Firebase's auth listener has actually reported. Distinct
+   * from `!loading`, which the startup watchdog in app/index.js can force
+   * without anything having resolved — so `!user && !authResolved` means "we
+   * gave up waiting", not "there is no account". Routing that can only be
+   * shown to a brand-new install (the welcome carousel) has to tell those
+   * two apart, or a slow cold start would show it to a signed-in student.
+   */
+  authResolved: false,
 
   // Set Prime state
   setIsPrime: (isPrime) => set({ isPrime }),
@@ -62,9 +73,16 @@ const useAuthStore = create((set) => ({
           return; // onAuthChange fires again with user=null; that pass sets state
         }
 
-        set({ user, loading: false });
+        set({ user, loading: false, authResolved: true });
 
         if (user) {
+          // Belt and braces for the pre-login carousel: anyone who has ever
+          // been signed in on this device has no business seeing an intro
+          // again if they later sign out. Covers the accounts that were
+          // already signed in when the carousel shipped, which never passed
+          // through /welcome and so never set the flag themselves.
+          markWelcomeSeen();
+
           // Identify before checking entitlements, or the check would still
           // be reading whatever anonymous identity RevenueCat had before.
           await identifyUser(user.uid);

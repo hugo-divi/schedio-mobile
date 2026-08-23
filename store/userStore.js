@@ -160,8 +160,15 @@ const useUserStore = create((set, get) => ({
           // Dropping either here would silently send the planner back to its
           // Bachillerato defaults for everyone.
           reviewFrequency: data.reviewFrequency || null,
+          // Editable from Perfil, so the screen needs it in the store rather
+          // than re-reading the document to show what's currently selected.
+          region: data.region || null,
           onboardingCompleted: data.onboardingCompleted || false,
           averageGrade: data.profile?.averageGrade || 0,
+          // The estimate shown at the end of onboarding, brought back so
+          // Profile can show it against how things actually turned out.
+          estimatedRange: data.estimatedRange || null,
+          estimationReason: data.estimationReason || null,
         };
         statsData = { ...initialState.stats, ...(data.stats || {}) };
         gameData = { ...initialState.gamification, ...(data.gamification || {}) };
@@ -713,6 +720,9 @@ const useUserStore = create((set, get) => ({
       subjectId: taskData.subjectId || null,
       subjectName: taskData.subjectName || 'General',
       subjectColor: taskData.subjectColor || '#A1A1AA',
+      // Flags the one manual task created at the end of onboarding, so the
+      // guided tour can point at it by name instead of speaking generically.
+      fromOnboarding: !!taskData.fromOnboarding,
     };
 
     // Kept in its own persisted list, not just in `microplans`: nothing

@@ -39,20 +39,21 @@ import {
   summarizeStudyLoad,
   localDateKey,
   HIGH_PRIORITY_SCORE,
+  MEDIUM_PRIORITY_SCORE,
 } from '../../services/priority';
 import { generateRecommendations } from '../../services/aiService';
 import { syncHomeScreenWidgets } from '../../services/widgetData';
-import usePreferencesStore from '../../store/preferencesStore';
+import usePreferencesStore, { whenPreferencesHydrated } from '../../store/preferencesStore';
 import { registerForPushNotifications } from '../../services/notificationService';
 import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import Skeleton from '../../components/Skeleton';
 import GradeModal from '../../components/GradeModal';
-import StreakModal from '../../components/StreakModal';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
 import GuidedTour from '../../components/GuidedTour';
+import PrimeStatusSheet from '../../components/PrimeStatusSheet';
 import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
 import Button from '../../components/ui/Button';
@@ -97,6 +98,7 @@ export default function Dashboard() {
   // actions are stable, so they're read through getState() at the call site.
   const subjects = useUserStore((state) => state.subjects);
   const sessionHistory = useUserStore((state) => state.sessionHistory);
+  const manualTasks = useUserStore((state) => state.manualTasks);
   // Already normalised by the store (raw doc keeps it under `profile.averageGrade`).
   const averageGrade = useUserStore((state) => state.profile?.averageGrade) ?? 0;
   const hasAverage = parseFloat(averageGrade) > 0;
@@ -110,9 +112,12 @@ export default function Dashboard() {
   const [aiRecommendation, setAiRecommendation] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const lastFetchRef = useRef(0);
+  // Held so a refetch can cancel the previous pending prompt, and so leaving
+  // the tab doesn't leave a timer behind that opens the modal on a screen the
+  // student has already navigated away from.
+  const gradePromptTimerRef = useRef(null);
 
   // Modals state
-  const [streakModalOpen, setStreakModalOpen] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [dayOptionsVisible, setDayOptionsVisible] = useState(false);
   const [gradeModalVisible, setGradeModalVisible] = useState(false);
@@ -123,6 +128,7 @@ export default function Dashboard() {
   const [eventsForSelectedDay, setEventsForSelectedDay] = useState([]);
   const [examsExpanded, setExamsExpanded] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
+  const [primeSheetOpen, setPrimeSheetOpen] = useState(false);
 
   const [easterEggVisible, setEasterEggVisible] = useState(false);
   // Timestamps of recent taps on the header logo, pruned to the trailing
@@ -187,7 +193,7 @@ export default function Dashboard() {
       setUserData({
         streak: streakData.currentStreak || 0,
         // Minutes studied today and the personal record, straight from
-        // checkDailyStreak. StreakModal shows both; they were being discarded.
+        // checkDailyStreak. The streak screen shows both; they were being discarded.
         dailyActivity: streakData.dailyActivity || 0,
         maxStreak: streakData.maxStreak || 0,
         restDays: streakData.restDays || [],
@@ -214,16 +220,20 @@ export default function Dashboard() {
 
       loadAIRecommendation(profileData, examsData, streakData);
 
-      // Auto-Prompt logic. The live preference is re-read here rather than
-      // trusting the `autoGradePrompt` closure above: on a cold start this
-      // effect fires before AsyncStorage's persisted value has rehydrated, so
-      // that closure is still the in-memory default (true) even when the
-      // student had turned the prompt off in Ajustes. By the time this
-      // timeout fires, rehydration has long since finished.
+      // Auto-Prompt logic. Reading the store live rather than through the
+      // `autoGradePrompt` closure above is necessary but wasn't sufficient:
+      // the preference is persisted in AsyncStorage and rehydrates
+      // asynchronously, so on a cold start `getState()` could still be the
+      // in-memory default (`true`) a second later and the modal opened for
+      // students who had switched it off. The delay was a guess; this waits
+      // for the store to say it has actually hydrated.
       if (pendingExamsData && pendingExamsData.length > 0) {
-        setTimeout(() => {
+        const exam = pendingExamsData[0];
+        clearTimeout(gradePromptTimerRef.current);
+        gradePromptTimerRef.current = setTimeout(async () => {
+          await whenPreferencesHydrated();
           if (!usePreferencesStore.getState().autoGradePrompt) return;
-          setExamToGrade(pendingExamsData[0]);
+          setExamToGrade(exam);
           setGradeModalVisible(true);
         }, 1000);
       }
@@ -298,12 +308,14 @@ export default function Dashboard() {
     }, [fetchData])
   );
 
-  // Session history feeds StreakModal's calendar. Kept out of fetchData so the
-  // data/notification flow there stays untouched.
+  // Session history feeds the streak screen's calendar. Kept out of fetchData
+  // so the data/notification flow there stays untouched.
   useEffect(() => {
     const user = auth.currentUser;
     if (user) useUserStore.getState().loadSessionHistory(user.uid);
   }, []);
+
+  useEffect(() => () => clearTimeout(gradePromptTimerRef.current), []);
 
   // Independent effect for the tour to prevent render loops
   useEffect(() => {
@@ -459,24 +471,46 @@ export default function Dashboard() {
   // That field held whatever the user picked in EventModal and never changed
   // afterwards, so the chip couldn't react to an exam getting closer, to a bad
   // grade landing, or to the subject going untouched for a fortnight.
-  const urgentExamIds = useMemo(() => {
+  //
+  // Keyed by exam id rather than a plain Set so the row can also show *why*
+  // (priorityDetail.reason, already computed by rankExams and previously
+  // thrown away here) and a graduated tone instead of only a binary flag.
+  const examPriorityById = useMemo(() => {
     const ctx = {
       studiedMinutesBySubject: summarizeStudyLoad(sessionHistory),
     };
-    return new Set(
-      rankExams(exams, subjects, ctx)
-        .filter((exam) => exam.priorityScore >= HIGH_PRIORITY_SCORE)
-        .map((exam) => exam.id)
-    );
+    const map = new Map();
+    rankExams(exams, subjects, ctx).forEach((exam) => {
+      const score = exam.priorityScore;
+      // Below MEDIUM_PRIORITY_SCORE stays untinted (undefined tone) rather
+      // than green: most exams sit there, and coloring all of them would make
+      // the thermometer decorative instead of a signal for what to look at.
+      const tone =
+        score >= HIGH_PRIORITY_SCORE
+          ? 'danger'
+          : score >= MEDIUM_PRIORITY_SCORE
+            ? 'warning'
+            : undefined;
+      map.set(exam.id, { tone, reason: exam.priorityDetail?.reason || '' });
+    });
+    return map;
   }, [exams, subjects, sessionHistory]);
-
-  const isUrgent = (exam) => urgentExamIds.has(exam.id);
 
   const formatShortDate = (date) =>
     new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 
   const firstName = (profile?.displayName || '').trim().split(' ')[0];
   const isFreshAccount = subjects.length === 0 && exams.length === 0;
+
+  // Whatever exam or session the student picked as their first goal at the
+  // very end of onboarding — surfaced by name so the guided tour can point at
+  // it directly instead of describing the hero card in the abstract.
+  const onboardingGoalName = useMemo(() => {
+    const examGoal = exams.find((exam) => exam.fromOnboarding);
+    if (examGoal) return examGoal.name;
+    const taskGoal = (manualTasks || []).find((task) => task.fromOnboarding);
+    return taskGoal?.text || null;
+  }, [exams, manualTasks]);
 
   // The AI line is the headline when we have one; otherwise fall back to the
   // empty-state copy for new accounts, or a neutral prompt.
@@ -537,7 +571,13 @@ export default function Dashboard() {
             <Text style={styles.brandName}>Schedio</Text>
           </TouchableOpacity>
 
-          <PrimeBadge active={isPrime} onPress={() => router.push('/plus')} />
+          {/* Same pill either way; where it leads is the difference. Sending a
+              paying student back to the paywall was the old behaviour's other
+              problem. */}
+          <PrimeBadge
+            active={isPrime}
+            onPress={() => (isPrime ? setPrimeSheetOpen(true) : router.push('/plus'))}
+          />
         </View>
       </View>
 
@@ -560,7 +600,7 @@ export default function Dashboard() {
             <StatsStrip>
               <TouchableOpacity
                 style={styles.statCell}
-                onPress={() => setStreakModalOpen(true)}
+                onPress={() => router.push('/dashboard/streak')}
                 activeOpacity={0.7}
               >
                 <Emoji name="fire" style={styles.statEmoji} />
@@ -694,7 +734,8 @@ export default function Dashboard() {
               ) : (
                 visibleExams.map((exam, index) => {
                   const subject = subjects.find((s) => s.id === exam.subjectId);
-                  const urgent = isUrgent(exam);
+                  const priorityInfo = examPriorityById.get(exam.id);
+                  const urgent = priorityInfo?.tone === 'danger';
                   // The "show all" row acts as the last divider when collapsed.
                   const isLast = index === visibleExams.length - 1 && exams.length <= 3;
 
@@ -732,9 +773,14 @@ export default function Dashboard() {
                           {formatShortDate(exam.date)} ·{' '}
                           {calculateDaysLeft(exam.date).toLowerCase()}
                         </Text>
+                        {priorityInfo?.reason ? (
+                          <Text style={styles.priorityReason} numberOfLines={1}>
+                            {priorityInfo.reason}
+                          </Text>
+                        ) : null}
                       </View>
 
-                      <Chip active={urgent}>
+                      <Chip tone={priorityInfo?.tone} active={urgent}>
                         {urgent
                           ? 'Prioridad alta'
                           : (MANUAL_PRIORITY_LABELS[exam.manualPriority ?? exam.priority] ??
@@ -813,21 +859,12 @@ export default function Dashboard() {
             calendarSectionRef,
           }}
           hasPendingExams={pendingExams.length > 0}
+          onboardingGoalName={onboardingGoalName}
         />
       )}
 
       {/* Modals */}
-      <StreakModal
-        visible={streakModalOpen}
-        onClose={() => setStreakModalOpen(false)}
-        currentStreak={userData.streak}
-        studyHistory={sessionHistory}
-        dailyActivity={userData.dailyActivity}
-        maxStreak={userData.maxStreak}
-        restDays={userData.restDays}
-        restRemaining={userData.restRemaining}
-        onStartSession={() => router.push('/dashboard/study')}
-      />
+      <PrimeStatusSheet visible={primeSheetOpen} onClose={() => setPrimeSheetOpen(false)} />
 
       <EventModal
         visible={eventModalVisible}
@@ -1081,6 +1118,12 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 13,
     color: tokens.colors.textSecondary,
+  },
+  priorityReason: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    marginTop: 2,
   },
   rowLast: {
     borderBottomWidth: 0,

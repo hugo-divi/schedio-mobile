@@ -16,7 +16,7 @@ import {
 import { tokens } from '../theme/tokens';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
-import BottomSheet from './ui/BottomSheet';
+import InlineSheet, { TAB_BAR_HEIGHT } from './ui/InlineSheet';
 import Button from './ui/Button';
 import { PremiumBadge } from './ui/Chip';
 
@@ -223,7 +223,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
   // ── Render ──
 
   return (
-    <BottomSheet visible={visible} onClose={close}>
+    <InlineSheet visible={visible} onClose={close} bottomOffset={TAB_BAR_HEIGHT}>
       {view === VIEW_MAIN ? (
         <>
           <SheetHeader title="Acciones rápidas" />
@@ -355,7 +355,6 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
       {view === VIEW_GRADE && selectedExam ? (
         <>
           <SheetHeader title={selectedExam.name} onBack={back} />
-          <Text style={styles.gradeLead}>Introduce la nota y cuánto pesa en la materia.</Text>
 
           <View style={styles.gradeRow}>
             <View style={[styles.gradeField, { flex: 2 }]}>
@@ -404,7 +403,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
           </View>
         </>
       ) : null}
-    </BottomSheet>
+    </InlineSheet>
   );
 }
 
@@ -501,13 +500,6 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
 
-  gradeLead: {
-    fontFamily: font.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    color: tokens.colors.textSecondary,
-    marginTop: 12,
-  },
   gradeRow: {
     flexDirection: 'row',
     gap: 12,

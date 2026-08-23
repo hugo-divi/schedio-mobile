@@ -1,16 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { TouchableOpacity, Text, View } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
   withTiming,
-  FadeIn,
-  FadeOut,
   Easing,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Check } from 'lucide-react-native';
+import { Crown } from 'lucide-react-native';
 import { tokens } from '../../theme/tokens';
 
 const BADGE_WIDTH = 74;
@@ -23,23 +21,23 @@ const SHEEN_WIDTH = BADGE_WIDTH * 0.4;
 // on the screen.
 const PRIME_GOLD = tokens.colors.premiumText;
 
-const OWNED_MESSAGES = [
-  'Ya eres Prime. Gracias por apoyar Schedio 💛',
-  'Prime activo — todo desbloqueado para ti.',
-  'Eres Prime. A por el curso sin límites.',
-];
-
 /**
- * "PRIME" pill. For students without Prime it's a highlight sweeping across
- * on a loop and taps go to the paywall (`/plus`). For students who already
- * bought it, `active` swaps it for a static accent-colored badge — the sweep
- * reads as a still-selling CTA once they own it — and taps show a quick
- * thank-you message instead of sending them back to the paywall.
+ * "PRIME" pill.
+ *
+ * The gold is the same one the paywall CTA and the `PremiumBadge` chip use,
+ * and it stays gold whether or not the student has paid — an earlier version
+ * turned it into the app's blue accent on purchase, which meant paying made
+ * the badge *less* distinctive than the app's ordinary buttons, and swapped a
+ * membership mark for the same tick used on finished tasks.
+ *
+ * What separates the two states is motion, not colour: without Prime a
+ * highlight sweeps across on a loop, which is a sales animation. Owning it
+ * stops the sweep and adds the crown. The stillness is the reward.
+ *
+ * Both states call `onPress`; the parent decides where each one goes.
  */
 export function PrimeBadge({ onPress, active = false }) {
   const progress = useSharedValue(0);
-  const [message, setMessage] = useState(null);
-  const hideTimer = useRef(null);
 
   useEffect(() => {
     if (active) return;
@@ -53,13 +51,6 @@ export function PrimeBadge({ onPress, active = false }) {
     );
   }, [active, progress]);
 
-  useEffect(
-    () => () => {
-      if (hideTimer.current) clearTimeout(hideTimer.current);
-    },
-    []
-  );
-
   const sheenStyle = useAnimatedStyle(() => ({
     transform: [
       {
@@ -68,20 +59,10 @@ export function PrimeBadge({ onPress, active = false }) {
     ],
   }));
 
-  const handlePress = () => {
-    if (!active) {
-      onPress?.();
-      return;
-    }
-    setMessage(OWNED_MESSAGES[Math.floor(Math.random() * OWNED_MESSAGES.length)]);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setMessage(null), 2800);
-  };
-
   return (
     <View>
       <TouchableOpacity
-        onPress={handlePress}
+        onPress={onPress}
         activeOpacity={0.8}
         accessibilityRole="button"
         accessibilityLabel={active ? 'Ya eres Schedio Prime' : 'Schedio Prime'}
@@ -94,16 +75,18 @@ export function PrimeBadge({ onPress, active = false }) {
           gap: 3,
           paddingVertical: 7,
           borderRadius: tokens.radius.pill,
-          backgroundColor: active ? tokens.colors.accent : PRIME_GOLD,
+          backgroundColor: PRIME_GOLD,
         }}
       >
-        {active ? <Check size={12} color="#FFFFFF" strokeWidth={3} /> : null}
+        {active ? (
+          <Crown size={13} color={tokens.colors.bgBase} fill={tokens.colors.bgBase} />
+        ) : null}
         <Text
           style={{
             fontFamily: tokens.typography.families.inter.bold,
             fontSize: 12,
             letterSpacing: 0.4,
-            color: active ? '#FFFFFF' : tokens.colors.bgBase,
+            color: tokens.colors.bgBase,
           }}
         >
           PRIME
@@ -124,38 +107,6 @@ export function PrimeBadge({ onPress, active = false }) {
           </Animated.View>
         )}
       </TouchableOpacity>
-
-      {message ? (
-        <Animated.View
-          entering={FadeIn.duration(180)}
-          exiting={FadeOut.duration(180)}
-          style={{
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 8,
-            maxWidth: 220,
-            paddingVertical: 8,
-            paddingHorizontal: 12,
-            borderRadius: tokens.radius.card,
-            backgroundColor: tokens.colors.surfaceCard,
-            borderWidth: 1,
-            borderColor: tokens.colors.accentSoftBorder,
-            zIndex: 20,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: tokens.typography.families.inter.medium,
-              fontSize: 12,
-              lineHeight: 16,
-              color: tokens.colors.textPrimary,
-            }}
-          >
-            {message}
-          </Text>
-        </Animated.View>
-      ) : null}
     </View>
   );
 }

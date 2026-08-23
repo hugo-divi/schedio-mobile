@@ -14,7 +14,7 @@ Cómo usar este documento:
 
 # Política de privacidad de Schedio
 
-**Última actualización:** 5 de agosto de 2026
+**Última actualización:** 23 de agosto de 2026
 
 Esta política explica qué datos personales recoge Schedio, para qué los usa, con quién los comparte y qué derechos tienes sobre ellos, conforme al Reglamento General de Protección de Datos (RGPD) y la Ley Orgánica 3/2018 (LOPD-GDD).
 
@@ -36,6 +36,8 @@ Schedio está pensado para estudiantes de Bachillerato, ESO y universidad, orien
 | Email, nombre y contraseña (cifrada)                                                                                  | Registro con email/contraseña                   | Crear y proteger tu cuenta                                                                                              |
 | Email, nombre y foto de perfil                                                                                        | Registro con Google                             | Crear y proteger tu cuenta, sin pedirte otra contraseña                                                                 |
 | Curso, rama de Bachillerato, nota media, asignaturas                                                                  | Onboarding inicial                              | Generar tu plan de estudio y las recomendaciones de la app                                                              |
+| Comunidad autónoma en la que estudias                                                                                 | La eliges en el onboarding inicial              | Ajustar el plan al temario y al calendario de tu comunidad. Es un dato que tú declaras, no se obtiene del dispositivo   |
+| Cómo conociste Schedio                                                                                                | Pregunta opcional en el alta                    | Saber qué canales funcionan para darnos a conocer. Puedes no contestarla                                                |
 | Exámenes (asignatura y fecha)                                                                                         | Calendario académico que creas dentro de la app | Organizar tu calendario y avisarte con antelación                                                                       |
 | Sesiones de estudio, rachas y rango                                                                                   | Uso normal de la app                            | Medir tu progreso y mostrártelo en Inicio/Perfil                                                                        |
 | Archivos que subes a la Mochila (apuntes, imágenes, documentos)                                                       | Subida manual desde la app                      | Guardarlos para que los tengas disponibles en la app                                                                    |

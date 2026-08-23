@@ -39,6 +39,9 @@ expo_logs.txt
 .env
 .env*.local
 
+# firebase CLI deploy cache
+.firebase/
+
 # service account / admin credentials
 serviceAccountKey.json
 *-firebase-adminsdk-*.json

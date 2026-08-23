@@ -10,6 +10,63 @@ export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
 
 export const BACHILLERATO_BRANCHES = ['Ciencias', 'Ciencias Sociales', 'Humanidades', 'Técnico'];
 
+/**
+ * Autonomous communities, keyed by their ISO 3166-2:ES code.
+ *
+ * The code is what gets stored, not the label: it survives a rename or a
+ * wording change, and it is the natural parent key for the school and
+ * university lists planned later (class groups hanging off an institution,
+ * institutions hanging off a region). Storing "Comunidad de Madrid" as a
+ * string would mean migrating every account the day that list arrives.
+ *
+ * Also the field EBAU support needs — syllabus is set per community — which
+ * is why it is worth asking now rather than chasing existing accounts later.
+ */
+export const REGIONS = [
+  { code: 'AN', label: 'Andalucía' },
+  { code: 'AR', label: 'Aragón' },
+  { code: 'AS', label: 'Asturias' },
+  { code: 'IB', label: 'Islas Baleares' },
+  { code: 'CN', label: 'Canarias' },
+  { code: 'CB', label: 'Cantabria' },
+  { code: 'CL', label: 'Castilla y León' },
+  { code: 'CM', label: 'Castilla-La Mancha' },
+  { code: 'CT', label: 'Cataluña' },
+  { code: 'VC', label: 'Comunidad Valenciana' },
+  { code: 'EX', label: 'Extremadura' },
+  { code: 'GA', label: 'Galicia' },
+  { code: 'MD', label: 'Madrid' },
+  { code: 'MC', label: 'Murcia' },
+  { code: 'NC', label: 'Navarra' },
+  { code: 'PV', label: 'País Vasco' },
+  { code: 'RI', label: 'La Rioja' },
+  { code: 'CE', label: 'Ceuta' },
+  { code: 'ML', label: 'Melilla' },
+];
+
+export const regionLabelFor = (code) => REGIONS.find((r) => r.code === code)?.label ?? null;
+
+/**
+ * Self-reported attribution. Asked once, optional, and never gates anything.
+ *
+ * It lives on step 5 for a reason: that is the only step whose `canAdvance`
+ * returns an unconditional `true` — the student is reading their estimate, not
+ * filling anything in — so this is the one place a question can be added
+ * without adding a step or a required field to a flow that already loses
+ * people partway (see `abandonedOnboarding` in functions/index.js).
+ *
+ * Stored as the stable `value`, never the label, so rewording an option later
+ * doesn't split the counts in two.
+ */
+export const ACQUISITION_SOURCES = [
+  { value: 'tiktok', label: 'TikTok' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'youtube', label: 'YouTube' },
+  { value: 'friend', label: 'Un amigo o compañero' },
+  { value: 'search', label: 'Buscando en internet' },
+  { value: 'other', label: 'Otro sitio' },
+];
+
 export const MIN_SUBJECTS = 3;
 // Nobody is Prime yet during onboarding, so the free cap always applies here.
 export const MAX_SUBJECTS = MAX_SUBJECTS_FREE;
@@ -163,9 +220,24 @@ export const estimatePotential = ({
   // bad habits on a 9,5 came out as a promised 10.
   const ceiling = grade + (10 - grade) * 0.6;
 
+  // Nudged up further on top of the already-conservative baseline above, per
+  // explicit product decision: the range read as too modest to sell the
+  // potential, so both ends are pushed 0,2 higher before the same clamps
+  // apply (still capped at the ceiling and at 10, so this never produces an
+  // impossible number, only a less timid one).
+  const BOOST = 0.2;
+
   const round = (n) => Math.round(Math.min(10, Math.min(ceiling, n)) * 10) / 10;
-  const low = round(grade + gain * 0.7);
-  const high = round(grade + gain * 1.3);
+  let low = round(grade + gain * 0.7 + BOOST);
+  let high = round(grade + gain * 1.3 + BOOST);
+
+  // For students already close to a 10, the ceiling clamp above can round
+  // both ends to the same number — "9,8–9,8" reads as a bug, not a range.
+  // Pull the low end back down to make room, but never below the grade
+  // they're starting from.
+  if (high <= low) {
+    low = Math.max(round(grade), round(high - 0.2));
+  }
 
   const reasons = [];
   if (taskManagement === 'memory' || taskManagement === 'scattered') {
@@ -253,9 +325,13 @@ export const completeOnboarding = async (uid, data) => {
     educationLevel,
     branch,
     currentGrade,
+    region,
     subjects = [],
     taskManagement,
     reviewFrequency,
+    estimatedRange,
+    estimationReason,
+    acquisitionSource,
   } = data;
 
   const created = await Promise.all(
@@ -276,12 +352,22 @@ export const completeOnboarding = async (uid, data) => {
     course: educationLevel,
     branch: branch || 'General',
     grade: currentGrade,
+    // Promoted to a top-level field so it can be queried directly — this is
+    // the one that answers "where are our students" without unpacking
+    // `onboardingData`, and the one a future institution list joins against.
+    region: region || null,
     organizationLevel: organizationLevelFor(taskManagement),
     // Promoted out of `onboardingData` because the planner reads it: it sets how
     // much of the work the plan leaves for the end (`gammaFor` in
     // microplanService). It was already being asked and only feeding the
     // potential-grade estimate, so this is a free signal, not a new question.
     reviewFrequency: reviewFrequency || null,
+    // Promoted so Profile can show the day-one estimate back to the student
+    // instead of it sitting unread inside `onboardingData` forever.
+    estimatedRange: estimatedRange || null,
+    estimationReason: estimationReason || null,
+    // Marketing only, and optional — null just means they skipped it.
+    acquisitionSource: acquisitionSource || null,
     onboardingCompleted: true,
     isNewAccount: true,
     'onboardingData.completedAt': new Date().toISOString(),

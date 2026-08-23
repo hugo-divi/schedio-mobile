@@ -10,6 +10,7 @@ import {
   Star,
   TrendingUp,
   BarChart2,
+  Sparkles,
 } from 'lucide-react-native';
 import { tokens } from '../../theme/tokens';
 import { GlassCard } from '../../components/GlassView';
@@ -18,6 +19,10 @@ import useAuthStore from '../../store/authStore';
 import { Svg, Rect, G } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
+
+// Sessions needed in a time-of-day band or subject before its average
+// focusScore is trusted enough to surface as an insight.
+const MIN_SAMPLES_FOR_INSIGHT = 3;
 
 export default function HistoryScreen() {
   const router = useRouter();
@@ -41,15 +46,19 @@ export default function HistoryScreen() {
     const last7Days = [...Array(7)].map((_, i) => {
       const d = new Date();
       d.setDate(now.getDate() - (6 - i));
-      return d.toDateString();
+      return d;
     });
 
     // 1. Time per day (Last 7 days)
-    const dailyData = last7Days.map((dateStr) => {
+    const dailyData = last7Days.map((d) => {
+      // toDateString() is locale-independent, fine as an equality key; the
+      // label shown to the student needs the real locale, or it reads "Mon,
+      // Tue..." in an otherwise all-Spanish app.
+      const dateStr = d.toDateString();
       const daySessions = sessionHistory.filter((s) => new Date(s.date).toDateString() === dateStr);
       const totalMins = daySessions.reduce((acc, s) => acc + (s.duration || 0), 0);
       return {
-        label: dateStr.split(' ')[0], // Mon, Tue...
+        label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
         value: totalMins / 60, // to hours
         mins: totalMins,
       };
@@ -86,6 +95,46 @@ export default function HistoryScreen() {
       .slice(0, 3);
 
     return { dailyData, goalRate, topSubjects };
+  }, [sessionHistory, subjects]);
+
+  // A single sentence built from data already collected (MoodPicker's
+  // focusScore, already shown per-session below as stars) and never
+  // aggregated anywhere. Needs a minimum sample per bucket so one late-night
+  // session doesn't get reported as "you focus best at night".
+  const focusInsight = useMemo(() => {
+    const scored = sessionHistory.filter((s) => Number.isFinite(s.focusScore));
+    if (scored.length < MIN_SAMPLES_FOR_INSIGHT) return null;
+
+    const average = (scores) => scores.reduce((sum, n) => sum + n, 0) / scores.length;
+
+    const bandOf = (hour) => (hour < 13 ? 'mañana' : hour < 20 ? 'tarde' : 'noche');
+    const byBand = { mañana: [], tarde: [], noche: [] };
+    scored.forEach((s) => byBand[bandOf(new Date(s.date).getHours())].push(s.focusScore));
+    const bestBand = Object.entries(byBand)
+      .filter(([, scores]) => scores.length >= MIN_SAMPLES_FOR_INSIGHT)
+      .map(([label, scores]) => ({ label, avg: average(scores) }))
+      .sort((a, b) => b.avg - a.avg)[0];
+
+    const bySubject = {};
+    scored.forEach((s) => {
+      if (!s.subjectId) return;
+      (bySubject[s.subjectId] ||= []).push(s.focusScore);
+    });
+    const bestSubject = Object.entries(bySubject)
+      .filter(([, scores]) => scores.length >= MIN_SAMPLES_FOR_INSIGHT)
+      .map(([id, scores]) => ({
+        subject: subjects.find((sub) => sub.id === id),
+        avg: average(scores),
+      }))
+      .filter((entry) => entry.subject)
+      .sort((a, b) => b.avg - a.avg)[0];
+
+    if (!bestBand && !bestSubject) return null;
+    if (bestBand && bestSubject) {
+      return `Rindes mejor por la ${bestBand.label}, sobre todo en ${bestSubject.subject.name}.`;
+    }
+    if (bestBand) return `Sueles concentrarte mejor por la ${bestBand.label}.`;
+    return `Tu concentración es más alta en ${bestSubject.subject.name}.`;
   }, [sessionHistory, subjects]);
 
   const formatDuration = (mins) => {
@@ -222,6 +271,25 @@ export default function HistoryScreen() {
                 </GlassCard>
               ))}
             </View>
+          </View>
+        )}
+
+        {focusInsight && (
+          <View className="mb-10">
+            <Text className="text-textTertiary text-[11px] font-black uppercase tracking-[2px] mb-6">
+              Tu patrón
+            </Text>
+            <GlassCard className="p-5 rounded-[28px]" intensity={10}>
+              <View className="flex-row items-center">
+                <View
+                  className="w-10 h-10 rounded-xl mr-3 items-center justify-center"
+                  style={{ backgroundColor: tokens.colors.primary + '20' }}
+                >
+                  <Sparkles size={18} color={tokens.colors.primary} />
+                </View>
+                <Text className="text-white font-bold text-sm flex-1">{focusInsight}</Text>
+              </View>
+            </GlassCard>
           </View>
         )}
 

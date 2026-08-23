@@ -26,7 +26,12 @@ const font = tokens.typography.families.inter;
  * tab and the profile's real analysis — none of which existed when this tour
  * was last written — each get their own step.
  */
-const GuidedTour = ({ onComplete, tourRefs = {}, hasPendingExams = false }) => {
+const GuidedTour = ({
+  onComplete,
+  tourRefs = {},
+  hasPendingExams = false,
+  onboardingGoalName = null,
+}) => {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -49,8 +54,12 @@ const GuidedTour = ({ onComplete, tourRefs = {}, hasPendingExams = false }) => {
     },
     {
       title: 'Tu día, resumido',
-      content:
-        'Una sugerencia pensada para hoy, y un botón para empezar a estudiar sin más vueltas.',
+      // Personalised for a fresh account when the student's own onboarding
+      // goal is known — falls back to the generic line otherwise, including
+      // for every account that onboarded before this existed.
+      content: onboardingGoalName
+        ? `¿Ves esto? Es lo que tú mismo acabas de crear: ${onboardingGoalName}. Tócalo cuando quieras para empezar.`
+        : 'Una sugerencia pensada para hoy, y un botón para empezar a estudiar sin más vueltas.',
       position: { top: height * 0.62 },
       refKey: 'heroCardRef',
     },

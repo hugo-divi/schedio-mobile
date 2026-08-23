@@ -24,6 +24,7 @@ import {
   X,
   User as UserIcon,
   BadgeCheck,
+  ChevronRight,
 } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Animated, {
@@ -40,16 +41,17 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import useAuthStore from '../../store/authStore';
 import useUserStore from '../../store/userStore';
-import { calculateXpForLevel, calculateXpForNextLevel } from '../../services/gamification';
+import usePrimeIntentStore, { PRIME_INTENTS } from '../../store/primeIntentStore';
 import {
-  calculateGoldenHour,
-  recommendTechnique,
-  getWeeklyStats,
-  detectStudyPatterns,
-  calculateSubjectHealth,
-  detectOverloadRisk,
-} from '../../services/productivityService';
+  calculateXpForLevel,
+  calculateXpForNextLevel,
+  BADGES,
+  getIcon,
+} from '../../services/gamification';
+import { softBg } from '../../utils/color';
+import { buildAnalysis } from '../../services/productivityService';
 import { getUpcomingExams } from '../../services/exams';
+import { EDUCATION_LEVELS, REGIONS, regionLabelFor } from '../../services/onboarding';
 import { getSubjectColors } from '../../services/permissions';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
@@ -66,14 +68,6 @@ const SWIPE_COMMIT = 56;
 
 const initialOf = (name) => (name || '?').charAt(0).toUpperCase();
 
-const formatMinutes = (minutes) => {
-  const safe = Math.max(0, Math.round(minutes || 0));
-  if (safe < 60) return `${safe} min`;
-  const h = Math.floor(safe / 60);
-  const m = safe % 60;
-  return m === 0 ? `${h} h` : `${h} h ${m} min`;
-};
-
 const formatNoteDate = (value) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
@@ -85,10 +79,14 @@ const formatNoteDate = (value) => {
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
-function StatTile({ value, label }) {
+function StatTile({ value, label, accent = false }) {
   return (
     <View style={styles.statTile}>
-      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
+      <Text
+        style={[styles.statValue, accent && { color: tokens.colors.accent }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+      >
         {value}
       </Text>
       <Text style={styles.statLabel}>{label}</Text>
@@ -177,35 +175,54 @@ function NoteRow({ note, last, onDelete, onEdit }) {
   );
 }
 
-/** One block inside the analysis sheet. */
-function AnalysisBlock({ title, children }) {
-  return (
-    <View style={styles.analysisBlock}>
-      <Text style={styles.analysisTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
+/**
+ * Earned badges, as a strip under the level card.
+ *
+ * Deliberately not folded into the level card itself — that one already holds
+ * the level number, the title, the XP, a progress bar and two labels, and this
+ * would be the seventh thing in it. It's also read-only on purpose: the detail
+ * (including what's still locked and how to get it) already exists in
+ * `ranks.js`, so this points there instead of becoming a second badge screen.
+ */
+function BadgeStrip({ unlockedIds, onPress }) {
+  const unlocked = BADGES.filter((badge) => unlockedIds.includes(badge.id));
 
-function WeekBars({ days }) {
-  const peak = Math.max(1, ...days.map((d) => d.minutes));
   return (
-    <View style={styles.weekBars}>
-      {days.map((day) => (
-        <View key={day.dateStr} style={styles.weekBarCell}>
-          <View style={styles.weekBarTrack}>
-            <View
-              style={[
-                styles.weekBarFill,
-                { height: `${Math.max(3, (day.minutes / peak) * 100)}%` },
-                day.minutes === 0 && { backgroundColor: tokens.colors.borderDefault },
-              ]}
-            />
-          </View>
-          <Text style={styles.weekBarLabel}>{day.dayName.slice(0, 1)}</Text>
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Insignias: ${unlocked.length} de ${BADGES.length}`}
+    >
+      <Card padding={16}>
+        <View style={styles.badgeStripHead}>
+          <Text style={styles.badgeStripTitle}>Insignias</Text>
+          <Text style={styles.badgeStripCount}>
+            {unlocked.length} de {BADGES.length}
+          </Text>
         </View>
-      ))}
-    </View>
+
+        {unlocked.length === 0 ? (
+          <Text style={styles.badgeStripEmpty}>
+            Aún no tienes ninguna. Estudia un rato y caerá la primera.
+          </Text>
+        ) : (
+          <View style={styles.badgeStripRow}>
+            {unlocked.map((badge) => {
+              const Icon = getIcon(badge.icon);
+              return (
+                <View
+                  key={badge.id}
+                  style={[styles.badgeStripIcon, { backgroundColor: softBg(badge.color) }]}
+                >
+                  <Icon size={18} color={badge.color} fill={badge.color} strokeWidth={1.75} />
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </Card>
+    </TouchableOpacity>
   );
 }
 
@@ -236,8 +253,13 @@ export default function ProfileScreen() {
   const [notes, setNotes] = useState([]);
   const [notesLoading, setNotesLoading] = useState(true);
 
-  const [analysisSheet, setAnalysisSheet] = useState(false);
   const [noteSheet, setNoteSheet] = useState(false);
+  const [academicSheet, setAcademicSheet] = useState(false);
+  // Two views in one sheet, the same shape QuickActionsModal uses: the region
+  // list is 19 rows and would bury the course pills if both were on screen.
+  const [academicView, setAcademicView] = useState('main');
+  const [draftCourse, setDraftCourse] = useState(null);
+  const [draftRegion, setDraftRegion] = useState(null);
   const [noteDraft, setNoteDraft] = useState('');
   const [editingNote, setEditingNote] = useState(null);
   const [savingNote, setSavingNote] = useState(false);
@@ -253,6 +275,23 @@ export default function ProfileScreen() {
   const [tempGrade, setTempGrade] = useState('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Reopens the subject form after a Prime purchase that was triggered by
+  // hitting the subject cap. The form's own state is untouched — this screen
+  // is a mounted tab — so whatever they had typed before the limit
+  // interrupted them is still in the fields.
+  //
+  // Keyed off the store rather than focus: the intent is only fulfilled as the
+  // paywall leaves (see app/plus.js), so this runs while it is dismissing —
+  // the sheet is in place by the time the student can see this screen again.
+  const primeReason = usePrimeIntentStore((state) => state.reason);
+  const primeFulfilled = usePrimeIntentStore((state) => state.fulfilled);
+  useEffect(() => {
+    if (primeReason === PRIME_INTENTS.SUBJECTS && primeFulfilled) {
+      usePrimeIntentStore.getState().clearIntent();
+      setSubjectSheet(true);
+    }
+  }, [primeReason, primeFulfilled]);
 
   // ── Derived ──
 
@@ -273,55 +312,12 @@ export default function ProfileScreen() {
    * no screen imported: the profile showed three hand-written sentences with
    * invented percentages in its place.
    */
-  const analysis = useMemo(() => {
-    const sessions = sessionHistory || [];
-    const week = getWeeklyStats(sessions);
-
-    const thisWeek = week.reduce((sum, d) => sum + d.minutes, 0);
-
-    // getWeeklyStats only covers seven days, so the comparison window is
-    // measured here rather than asking it for something it doesn't do.
-    const now = Date.now();
-    const day = 24 * 60 * 60 * 1000;
-    const previousWeek = sessions
-      .filter((s) => {
-        const age = now - new Date(s.date).getTime();
-        return age >= 7 * day && age < 14 * day;
-      })
-      .reduce((sum, s) => sum + (s.duration || 0), 0);
-
-    const delta =
-      previousWeek > 0 ? Math.round(((thisWeek - previousWeek) / previousWeek) * 100) : null;
-
-    let headline;
-    if (sessions.length === 0) {
-      headline = 'Todavía no hay sesiones que analizar. Completa una y esto se llenará solo.';
-    } else if (delta === null) {
-      headline = `Llevas ${formatMinutes(thisWeek)} de estudio esta semana. La semana que viene ya podré compararlo.`;
-    } else if (delta > 0) {
-      headline = `Has estudiado ${formatMinutes(thisWeek)} esta semana, un ${delta}% más que la anterior.`;
-    } else if (delta < 0) {
-      headline = `Has estudiado ${formatMinutes(thisWeek)} esta semana, un ${Math.abs(delta)}% menos que la anterior.`;
-    } else {
-      headline = `Has estudiado ${formatMinutes(thisWeek)}, el mismo tiempo que la semana pasada.`;
-    }
-
-    const health = calculateSubjectHealth(sessions, subjects, exams).filter((s) => s.health < 70);
-
-    return {
-      week,
-      thisWeek,
-      previousWeek,
-      delta,
-      headline,
-      hasSessions: sessions.length > 0,
-      patterns: detectStudyPatterns(sessions),
-      goldenHour: calculateGoldenHour(sessions),
-      technique: recommendTechnique(sessions),
-      overload: detectOverloadRisk(sessions, exams),
-      needsAttention: health.slice(0, 3),
-    };
-  }, [sessionHistory, subjects, exams]);
+  // Only `headline` is read here now — the rest is rendered by
+  // app/dashboard/analysis.js, off this same shared builder.
+  const analysis = useMemo(
+    () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams }),
+    [sessionHistory, subjects, exams]
+  );
 
   // ── Data loading ──
 
@@ -380,6 +376,25 @@ export default function ProfileScreen() {
     if (!newName.trim() || !user?.uid) return;
     await useUserStore.getState().updateProfile(user.uid, { displayName: newName.trim() });
     setIsEditingName(false);
+  };
+
+  const openAcademic = () => {
+    setDraftCourse(profile?.course || null);
+    setDraftRegion(profile?.region || null);
+    setAcademicView('main');
+    setAcademicSheet(true);
+  };
+
+  // Nota media a propósito fuera: se recalcula sola con las notas de los
+  // exámenes (`updateAverageGrade`), así que un campo editable aquí sería un
+  // valor que la app pisa en cuanto el alumno califica el siguiente examen.
+  const saveAcademic = async () => {
+    if (!user?.uid) return;
+    await useUserStore.getState().updateProfile(user.uid, {
+      course: draftCourse || null,
+      region: draftRegion || null,
+    });
+    setAcademicSheet(false);
   };
 
   const pickImage = async () => {
@@ -642,12 +657,77 @@ export default function ProfileScreen() {
             </Card>
           </TouchableOpacity>
 
+          <BadgeStrip
+            unlockedIds={gamification?.badges || []}
+            onPress={() => router.push('/dashboard/ranks')}
+          />
+
+          {/* Course and region were answered once in onboarding and then locked
+              away forever, even though both change (you pass a year, you move)
+              and both steer the planner. */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={openAcademic}
+            accessibilityRole="button"
+            accessibilityLabel="Editar tus datos académicos"
+          >
+            <Card padding={16}>
+              <View style={styles.academicHead}>
+                <Text style={styles.academicTitle}>Datos académicos</Text>
+                <Pencil size={15} color={tokens.colors.textSecondary} />
+              </View>
+              <Text style={styles.academicValue}>
+                {profile?.course || 'Sin curso'}
+                {' · '}
+                {regionLabelFor(profile?.region) || 'Sin comunidad'}
+              </Text>
+            </Card>
+          </TouchableOpacity>
+
           {/* Stats */}
           <View style={styles.statsRow}>
             <StatTile value={profile?.averageGrade || '—'} label="Promedio" />
             <StatTile value={String(level)} label="Nivel" />
             <StatTile value={String(xp)} label="XP Total" />
           </View>
+
+          {/* Potential — the estimate given at the end of onboarding, brought
+              back here instead of being shown once and forgotten. Only
+              accounts onboarded after this shipped have it. */}
+          {profile?.estimatedRange ? (
+            <View>
+              <SectionTitle>Tu potencial</SectionTitle>
+              <View style={styles.statsRow}>
+                <StatTile
+                  value={
+                    profile.grade != null ? Number(profile.grade).toFixed(1).replace('.', ',') : '—'
+                  }
+                  label="Nota de partida"
+                />
+                {profile.averageGrade > 0 ? (
+                  <StatTile value={profile.averageGrade} label="Ahora mismo" />
+                ) : null}
+                <StatTile
+                  value={`${profile.estimatedRange[0].toFixed(1).replace('.', ',')}–${profile.estimatedRange[1]
+                    .toFixed(1)
+                    .replace('.', ',')}`}
+                  label="Podrías llegar a"
+                  accent
+                />
+              </View>
+
+              {Array.isArray(profile.estimationReason) && profile.estimationReason.length > 0 ? (
+                <View style={styles.reasons}>
+                  {profile.estimationReason.map((reason) => (
+                    <View key={reason} style={styles.reasonRow}>
+                      <View style={styles.reasonDot} />
+                      <Text style={styles.reasonText}>{reason}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
 
           {/* Analysis */}
           <View>
@@ -661,7 +741,10 @@ export default function ProfileScreen() {
               </View>
               <Text style={styles.projectionBody}>{analysis.headline}</Text>
               <View style={styles.divider} />
-              <TouchableOpacity activeOpacity={0.7} onPress={() => setAnalysisSheet(true)}>
+              <TouchableOpacity
+                activeOpacity={0.7}
+                onPress={() => router.push('/dashboard/analysis')}
+              >
                 <Text style={styles.projectionLink}>Ver detalles completos →</Text>
               </TouchableOpacity>
             </Card>
@@ -742,72 +825,90 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
 
-      {/* ── Analysis detail ── */}
-      <BottomSheet visible={analysisSheet} onClose={() => setAnalysisSheet(false)} title="Análisis">
-        {!analysis.hasSessions ? (
-          <Text style={[styles.emptyText, { marginTop: 16 }]}>
-            Cuando termines tu primera sesión, aquí aparecerá tu ritmo, tus hábitos y las materias
-            que necesitan atención.
-          </Text>
+      {/* ── Academic data ── */}
+      <BottomSheet
+        visible={academicSheet}
+        onClose={() => setAcademicSheet(false)}
+        title={academicView === 'region' ? '¿En qué comunidad estudias?' : 'Datos académicos'}
+        subtitle={
+          academicView === 'region'
+            ? 'El temario cambia según la comunidad.'
+            : 'Tu plan se recalcula con lo que elijas aquí.'
+        }
+      >
+        {academicView === 'region' ? (
+          <View>
+            {REGIONS.map((item) => {
+              const selected = draftRegion === item.code;
+              return (
+                <TouchableOpacity
+                  key={item.code}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setDraftRegion(item.code);
+                    setAcademicView('main');
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  style={styles.regionRow}
+                >
+                  <Text style={[styles.regionLabel, selected && styles.regionLabelOn]}>
+                    {item.label}
+                  </Text>
+                  {selected ? (
+                    <Check size={18} color={tokens.colors.accent} strokeWidth={2.5} />
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         ) : (
-          <View style={{ marginTop: 16 }}>
-            <AnalysisBlock title="Ritmo semanal">
-              <Text style={styles.analysisBody}>
-                {formatMinutes(analysis.thisWeek)} esta semana
-                {analysis.previousWeek > 0
-                  ? ` · ${formatMinutes(analysis.previousWeek)} la anterior`
-                  : ''}
-              </Text>
-              <WeekBars days={analysis.week} />
-            </AnalysisBlock>
+          <View style={{ gap: 22 }}>
+            <View>
+              <Text style={styles.academicFieldLabel}>Curso</Text>
+              <View style={styles.pillWrap}>
+                {EDUCATION_LEVELS.map((level) => {
+                  const selected = draftCourse === level;
+                  return (
+                    <TouchableOpacity
+                      key={level}
+                      activeOpacity={0.8}
+                      onPress={() => setDraftCourse(level)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected }}
+                      style={[styles.pill, selected && styles.pillOn]}
+                    >
+                      <Text style={[styles.pillText, selected && styles.pillTextOn]}>{level}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
 
-            {analysis.patterns.hasEnoughData ? (
-              <AnalysisBlock title="Tus hábitos">
-                <Text style={styles.analysisBody}>
-                  Sueles estudiar por la {analysis.patterns.preferredTimeOfDay.toLowerCase()}
-                  {analysis.goldenHour
-                    ? `, sobre todo a las ${String(analysis.goldenHour.hour).padStart(2, '0')}:00`
-                    : ''}
-                  . Tus sesiones duran {analysis.patterns.averageDuration} min de media y tu
-                  constancia es {analysis.patterns.consistency.toLowerCase()} (
-                  {analysis.patterns.studyFrequency}{' '}
-                  {analysis.patterns.studyFrequency === 1 ? 'sesión' : 'sesiones'} en los últimos 7
-                  días).
+            <View>
+              <Text style={styles.academicFieldLabel}>Comunidad</Text>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => setAcademicView('region')}
+                accessibilityRole="button"
+                style={styles.select}
+              >
+                <Text style={draftRegion ? styles.selectValue : styles.selectPlaceholder}>
+                  {regionLabelFor(draftRegion) || 'Elígela en la lista'}
                 </Text>
-              </AnalysisBlock>
-            ) : null}
+                <ChevronRight size={18} color={tokens.colors.textSecondary} strokeWidth={1.75} />
+              </TouchableOpacity>
+            </View>
 
-            <AnalysisBlock title={`Técnica recomendada · ${analysis.technique.name}`}>
-              <Text style={styles.analysisBody}>{analysis.technique.description}</Text>
-            </AnalysisBlock>
+            {/* Nota media no está aquí a propósito: la calcula la app a partir
+                de las notas de los exámenes, así que un campo editable sería
+                un valor que se pisa solo. */}
+            <Text style={styles.academicNote}>
+              Tu nota media no se edita: se calcula sola con las notas que vas poniendo a tus
+              exámenes.
+            </Text>
 
-            {analysis.needsAttention.length > 0 ? (
-              <AnalysisBlock title="Materias que necesitan atención">
-                {analysis.needsAttention.map((subject) => (
-                  <View key={subject.id} style={styles.healthRow}>
-                    <View
-                      style={[
-                        styles.healthDot,
-                        { backgroundColor: subject.color || SUBJECT_FALLBACK_COLOR },
-                      ]}
-                    />
-                    <Text style={styles.healthName} numberOfLines={1}>
-                      {subject.name}
-                    </Text>
-                    <Text style={styles.healthStatus}>{subject.status}</Text>
-                  </View>
-                ))}
-              </AnalysisBlock>
-            ) : null}
-
-            <AnalysisBlock title={`Riesgo de sobrecarga · ${analysis.overload.riskLevel}`}>
-              <Text style={styles.analysisBody}>{analysis.overload.recommendation}</Text>
-              {analysis.overload.reasons.map((reason) => (
-                <Text key={reason} style={styles.analysisBullet}>
-                  · {reason}
-                </Text>
-              ))}
-            </AnalysisBlock>
+            <Button title="Guardar" fullWidth onPress={saveAcademic} />
           </View>
         )}
       </BottomSheet>
@@ -1023,6 +1124,9 @@ export default function ProfileScreen() {
         description="Con Schedio Prime puedes añadir todas las materias que necesites y organizar tu curso completo en un solo lugar."
         onUpgrade={() => {
           setSubjectLimitSheet(false);
+          // Remembers what they were doing, so the paywall can thank them for
+          // the right thing and the sheet below can reopen after paying.
+          usePrimeIntentStore.getState().startIntent(PRIME_INTENTS.SUBJECTS);
           router.push('/plus');
         }}
       />
@@ -1186,6 +1290,131 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 8,
   },
+  badgeStripHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  badgeStripTitle: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  badgeStripCount: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  badgeStripRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  badgeStripIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  academicHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  academicTitle: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  academicValue: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  academicNote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textDisabled,
+  },
+  academicFieldLabel: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    marginBottom: 10,
+  },
+  pillWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pill: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  pillOn: {
+    borderColor: tokens.colors.accentSoftBorder,
+    backgroundColor: tokens.colors.accentSoftBg,
+  },
+  pillText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: tokens.colors.textPrimary,
+  },
+  pillTextOn: {
+    color: tokens.colors.accentSoftText,
+  },
+  select: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: tokens.radius.card,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  selectValue: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: tokens.colors.textPrimary,
+  },
+  selectPlaceholder: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    color: tokens.colors.textDisabled,
+  },
+  regionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.borderDefault,
+  },
+  regionLabel: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  regionLabelOn: {
+    fontFamily: font.semibold,
+    color: tokens.colors.accent,
+  },
+  badgeStripEmpty: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+  },
   levelLabel: {
     fontFamily: tokens.typography.families.display,
     fontSize: 16,
@@ -1259,6 +1488,24 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: tokens.colors.borderDefault,
     marginVertical: 16,
+  },
+
+  // Potential
+  reasons: { gap: 10, marginTop: 12 },
+  reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  reasonDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: tokens.colors.accent,
+    marginTop: 7,
+  },
+  reasonText: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
   },
 
   // Subjects

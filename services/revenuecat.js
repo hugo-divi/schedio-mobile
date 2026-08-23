@@ -64,6 +64,36 @@ export const checkEntitlements = async () => {
   }
 };
 
+/**
+ * Everything the Prime status sheet shows, straight from RevenueCat rather
+ * than from anything we store ourselves — the subscription lives in Google
+ * Play, so Play (via RevenueCat) is the only source that can't drift.
+ *
+ * Returns nulls rather than throwing: the sheet degrades to "Prime activo"
+ * with no date, which is a fine thing to show and much better than an error
+ * on a screen whose whole job is to say thank you.
+ */
+export const getPrimeStatus = async () => {
+  try {
+    const customerInfo = await Purchases.getCustomerInfo();
+    const id = ENTITLEMENT_IDS.find((key) => customerInfo.entitlements.active[key] !== undefined);
+    const entitlement = id ? customerInfo.entitlements.active[id] : null;
+
+    return {
+      active: !!entitlement,
+      // `originalPurchaseDate`, not `latestPurchaseDate`: the first one is when
+      // they became Prime, the second resets every monthly renewal and would
+      // make a loyal subscriber look like they joined last week.
+      since: entitlement?.originalPurchaseDate || null,
+      willRenew: entitlement?.willRenew ?? null,
+      managementURL: customerInfo.managementURL || null,
+    };
+  } catch (e) {
+    console.error('[RevenueCat] Error reading Prime status:', e);
+    return { active: false, since: null, willRenew: null, managementURL: null };
+  }
+};
+
 export const getOfferings = async () => {
   try {
     const offerings = await Purchases.getOfferings();

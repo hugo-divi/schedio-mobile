@@ -2,7 +2,18 @@
    Defines Ranks, Badges, and XP Logic
 */
 
-import { Clock, Star, Zap, BookOpen, Crown, Moon, Flame, Trophy, Award } from 'lucide-react-native';
+import {
+  Clock,
+  Star,
+  Zap,
+  BookOpen,
+  Crown,
+  Moon,
+  Flame,
+  Trophy,
+  Award,
+  Sunrise,
+} from 'lucide-react-native';
 
 // --- RANKS ---
 export const RANKS = [
@@ -129,13 +140,45 @@ export const BADGES = [
     color: '#FF3B30',
     condition: (stats) => stats.streak >= 7,
   },
+  {
+    id: 'early_bird',
+    name: 'Madrugador',
+    description: 'Completa una sesión antes de las 8:00.',
+    icon: 'Sunrise',
+    color: '#FF9F0A',
+    condition: () => new Date().getHours() < 8,
+  },
+  {
+    id: 'double_marathon',
+    name: 'Doble Maratón',
+    description: 'Completa una sesión de más de 120 minutos.',
+    icon: 'Clock',
+    color: '#FF6B00',
+    condition: (stats, currentSession) => currentSession?.duration >= 120,
+  },
+  {
+    id: 'iron_streak',
+    name: 'Racha de Hierro',
+    description: 'Mantén una racha de 30 días.',
+    icon: 'Flame',
+    color: '#FF3B30',
+    condition: (stats) => stats.streak >= 30,
+  },
+  {
+    id: 'century_club',
+    name: 'Club de las 100 Horas',
+    description: 'Supera las 100 horas de estudio acumuladas.',
+    icon: 'Award',
+    color: '#D4A94C',
+    condition: (stats) => stats.totalTime >= 100 * 60,
+  },
 ];
 
 // Both RANKS and BADGES carry an `icon` string (lucide component name) rather
 // than the component itself, so screens resolve it through this single map
 // instead of each keeping its own — that's how a rank ended up rendering the
 // same Award glyph everywhere despite RANKS already defining a distinct icon.
-export const ICONS = { Clock, Star, Zap, BookOpen, Crown, Moon, Flame, Trophy };
+export const ICONS = { Clock, Star, Zap, BookOpen, Crown, Moon, Flame, Trophy, Sunrise, Award };
 export const getIcon = (name) => ICONS[name] || Award;
 
 export const checkNewBadges = (currentBadges, stats, context = {}) => {

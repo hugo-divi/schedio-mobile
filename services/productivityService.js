@@ -408,3 +408,68 @@ export const getNeglectedSubjects = (sessions, subjects, days = 7) => {
     })
     .sort((a, b) => b.daysSinceLastStudy - a.daysSinceLastStudy);
 };
+
+/**
+ * The whole performance analysis in one object.
+ *
+ * Pulled out of `app/dashboard/profile.js` when the detail moved to its own
+ * screen: Perfil shows only `headline`, `app/dashboard/analysis.js` shows the
+ * rest, and neither should be recomputing this from its own copy of the rules.
+ * Pure on purpose — it takes the three inputs and returns, so both callers can
+ * memoize it against whatever they already have loaded.
+ */
+const formatMinutes = (minutes) => {
+  const value = Math.round(minutes || 0);
+  if (value < 60) return `${value} min`;
+  const hours = Math.floor(value / 60);
+  const rest = value % 60;
+  return rest ? `${hours} h ${rest} min` : `${hours} h`;
+};
+
+export const buildAnalysis = ({ sessions = [], subjects = [], exams = [] } = {}) => {
+  const week = getWeeklyStats(sessions);
+  const thisWeek = week.reduce((sum, d) => sum + d.minutes, 0);
+
+  // getWeeklyStats only covers seven days, so the comparison window is
+  // measured here rather than asking it for something it doesn't do.
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  const previousWeek = sessions
+    .filter((s) => {
+      const age = now - new Date(s.date).getTime();
+      return age >= 7 * day && age < 14 * day;
+    })
+    .reduce((sum, s) => sum + (s.duration || 0), 0);
+
+  const delta =
+    previousWeek > 0 ? Math.round(((thisWeek - previousWeek) / previousWeek) * 100) : null;
+
+  let headline;
+  if (sessions.length === 0) {
+    headline = 'Todavía no hay sesiones que analizar. Completa una y esto se llenará solo.';
+  } else if (delta === null) {
+    headline = `Llevas ${formatMinutes(thisWeek)} de estudio esta semana. La semana que viene ya podré compararlo.`;
+  } else if (delta > 0) {
+    headline = `Has estudiado ${formatMinutes(thisWeek)} esta semana, un ${delta}% más que la anterior.`;
+  } else if (delta < 0) {
+    headline = `Has estudiado ${formatMinutes(thisWeek)} esta semana, un ${Math.abs(delta)}% menos que la anterior.`;
+  } else {
+    headline = `Has estudiado ${formatMinutes(thisWeek)}, el mismo tiempo que la semana pasada.`;
+  }
+
+  const health = calculateSubjectHealth(sessions, subjects, exams).filter((s) => s.health < 70);
+
+  return {
+    week,
+    thisWeek,
+    previousWeek,
+    delta,
+    headline,
+    hasSessions: sessions.length > 0,
+    patterns: detectStudyPatterns(sessions),
+    goldenHour: calculateGoldenHour(sessions),
+    technique: recommendTechnique(sessions),
+    overload: detectOverloadRisk(sessions, exams),
+    needsAttention: health.slice(0, 3),
+  };
+};

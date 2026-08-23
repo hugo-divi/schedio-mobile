@@ -20,6 +20,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.schedio.mobile",
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=com.schedio.mobile",
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "android.permission.READ_EXTERNAL_STORAGE",

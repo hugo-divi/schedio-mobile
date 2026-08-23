@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import { tokens } from '../theme/tokens';
 import { getOfferings, purchasePackage } from '../services/revenuecat';
 import useAuthStore from '../store/authStore';
+import usePrimeIntentStore, { PRIME_INTENTS } from '../store/primeIntentStore';
 import { Button } from '../components/ui/Button';
 import { PremiumBadge } from '../components/ui/Chip';
 
@@ -26,7 +27,7 @@ const font = tokens.typography.families.inter;
 // "Próximamente" note below, not as rows here, until they're real.
 const COMPARE_ROWS = [
   { label: 'Mochila ampliada', note: 'Free limita las subidas semanales a la Mochila' },
-  { label: 'Materias ilimitadas', note: 'Free permite hasta 8 asignaturas' },
+  { label: 'Más materias', note: 'Free hasta 8 · Prime hasta 20' },
   { label: 'Vista de Plan completa', note: 'Free muestra 1–2 semanas; Prime, el mes completo' },
   { label: 'Exportar datos', note: 'Notas y exámenes en PDF', freeIncluded: false },
 ];
@@ -37,18 +38,47 @@ const BULLETS = [
   'Exporta tus notas y exámenes en PDF',
 ];
 
-const TESTIMONIALS = [
-  {
-    quote:
-      'Desde que uso Prime llevo 3 semanas sin fallar ni un día de estudio. Las rachas me enganchan.',
-    author: 'Marta, 2º Bach',
+/**
+ * The thank-you screen speaks to whatever the student was blocked on when the
+ * paywall interrupted them (see store/primeIntentStore.js), so the first thing
+ * they read after paying is the thing they actually paid for — and the button
+ * takes them back into that exact action instead of dropping them anywhere.
+ */
+const THANKS_BY_REASON = {
+  [PRIME_INTENTS.SUBJECTS]: {
+    title: 'Ya puedes añadir todas tus materias',
+    bullets: ['Hasta 20 materias, cada una con su propio color', ...BULLETS.slice(1)],
+    cta: 'Añadir la materia',
   },
-  {
-    quote:
-      'Tenía 4 exámenes en una semana y Schedio me dijo exactamente qué estudiar cada día. Aprobé todo.',
-    author: 'Marcos, 1º Universidad',
+  [PRIME_INTENTS.MOCHILA]: {
+    title: 'Ya puedes guardar muchos más apuntes',
+    bullets: ['15 subidas por semana en tu Mochila', ...BULLETS.slice(1)],
+    cta: 'Subir el archivo',
   },
-  { quote: 'Ya no tengo límite de asignaturas en la Mochila.', author: 'Elena, 4º ESO' },
+};
+
+const THANKS_DEFAULT = {
+  title: '¡Bienvenido a Schedio Prime!',
+  bullets: BULLETS,
+  cta: 'Empezar',
+};
+
+/**
+ * Placeholder for the testimonial carousel that used to sit here. Those quotes
+ * were written by us and attributed to students who don't exist — on the one
+ * screen where money changes hands, which is where invented endorsements stop
+ * being copy and become a misleading commercial practice. Real quotes from
+ * real subscribers go back in this slot, in the old carousel, once there are
+ * any; until then this holds the same space with claims we can actually back.
+ *
+ * Note the middle line describes what the planner does, not a grade it
+ * promises: "mejora tus notas" would be the same unbackable claim in a
+ * different shape.
+ */
+const GUARANTEES = [
+  'Cancela cuando quieras, desde Google Play',
+  'Te dice qué estudiar cada día para llegar mejor a cada examen',
+  'Tus apuntes y tus datos siguen siendo tuyos',
 ];
 
 function CompareRow({ label, note, freeIncluded = true, index }) {
@@ -90,27 +120,15 @@ function PrimeButton({ title, onPress, loading, disabled }) {
   );
 }
 
-function Testimonials() {
-  const [index, setIndex] = useState(0);
-
-  useEffect(() => {
-    const interval = setInterval(() => setIndex((i) => (i + 1) % TESTIMONIALS.length), 4000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const current = TESTIMONIALS[index];
-
+function Guarantees() {
   return (
-    <View style={styles.testimonial}>
-      <Text style={styles.testimonialQuote}>"{current.quote}"</Text>
-      <Text style={styles.testimonialAuthor}>{current.author}</Text>
-      <View style={styles.dots}>
-        {TESTIMONIALS.map((_, i) => (
-          <TouchableOpacity key={i} onPress={() => setIndex(i)} hitSlop={8}>
-            <View style={[styles.dot, i === index && styles.dotActive]} />
-          </TouchableOpacity>
-        ))}
-      </View>
+    <View style={styles.guarantees}>
+      {GUARANTEES.map((line) => (
+        <View key={line} style={styles.guarantee}>
+          <Check size={15} color={tokens.colors.trendUp} />
+          <Text style={styles.guaranteeText}>{line}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -119,10 +137,30 @@ export default function SchedioPlusScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { setIsPrime } = useAuthStore();
+  const reason = usePrimeIntentStore((state) => state.reason);
+  const thanks = THANKS_BY_REASON[reason] ?? THANKS_DEFAULT;
   const [step, setStep] = useState('compare'); // 'compare' | 'plan' | 'success'
   const [offerings, setOfferings] = useState(null);
   const [offeringsLoading, setOfferingsLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+
+  // Flagged on the way out rather than at purchase time on purpose: the screen
+  // that was interrupted reopens its sheet as soon as the intent is fulfilled,
+  // and doing that at purchase time would stack it under a paywall the student
+  // is still reading. This fires when the route leaves navigation state — the
+  // start of the dismissal animation, not the end — so the sheet is already
+  // there as the paywall slides away, which is what we want. It covers both
+  // exits, the thank-you button and the swipe-down, so a student who swipes
+  // away after paying is resumed just the same.
+  // Leaving without buying drops the intent instead: otherwise an abandoned
+  // visit would leave one lying around, and the next purchase — made from
+  // Ajustes, say — would thank the student for the wrong thing and reopen a
+  // sheet they had walked away from.
+  const purchased = useRef(false);
+  useEffect(() => {
+    const { fulfilIntent, clearIntent } = usePrimeIntentStore.getState();
+    return () => (purchased.current ? fulfilIntent() : clearIntent());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +205,7 @@ export default function SchedioPlusScreen() {
       // mirrored into Firestore, since a client-writable flag would let anyone
       // grant themselves Prime.
       setIsPrime(true);
+      purchased.current = true;
       setStep('success');
     } else if (result === false) {
       // `null` means the student closed the purchase sheet themselves —
@@ -191,15 +230,16 @@ export default function SchedioPlusScreen() {
             <Check size={36} color={tokens.colors.premiumText} strokeWidth={2.5} />
           </Animated.View>
           <PremiumBadge>Prime</PremiumBadge>
-          <Text style={styles.successTitle}>¡Bienvenido a Schedio Prime!</Text>
+          <Text style={styles.successTitle}>{thanks.title}</Text>
           <Text style={styles.successSubtitle}>
-            Tu suscripción se ha activado. Ya tienes acceso a todo, sin límites.
+            Gracias por confiar en Schedio. Tu suscripción ya está activa — seguimos justo donde lo
+            dejaste.
           </Text>
 
           <View style={styles.successUnlocked}>
             <Text style={styles.successUnlockedTitle}>Qué has desbloqueado</Text>
             <View style={styles.bulletList}>
-              {BULLETS.map((bullet) => (
+              {thanks.bullets.map((bullet) => (
                 <View key={bullet} style={styles.bullet}>
                   <View style={styles.bulletIcon}>
                     <Star
@@ -216,7 +256,7 @@ export default function SchedioPlusScreen() {
         </ScrollView>
 
         <View style={[styles.planFooter, { paddingBottom: 16 + insets.bottom }]}>
-          <PrimeButton title="Empezar" onPress={() => router.back()} />
+          <PrimeButton title={thanks.cta} onPress={() => router.back()} />
         </View>
 
         <ConfettiCannon count={160} origin={{ x: -10, y: 0 }} fadeOut />
@@ -276,7 +316,7 @@ export default function SchedioPlusScreen() {
             </View>
           </View>
 
-          <Testimonials />
+          <Guarantees />
 
           <View style={styles.planCta}>
             <PrimeButton
@@ -491,7 +531,7 @@ const styles = StyleSheet.create({
   // The ScrollView itself takes the space between header and footer; its
   // contentContainerStyle grows to fill (and centers within) that space when
   // short, and scrolls instead of overlapping planFooter when it doesn't fit
-  // — small screens, a longer testimonial, or larger system font settings.
+  // — small screens, a longer guarantee line, or larger system font settings.
   planScroll: {
     flex: 1,
   },
@@ -574,38 +614,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: tokens.colors.textPrimary,
   },
-  testimonial: {
+  guarantees: {
     backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
-    borderColor: tokens.colors.premiumBorder,
+    borderColor: tokens.colors.borderDefault,
     borderRadius: tokens.radius.card,
     padding: 14,
-    gap: 8,
+    gap: 10,
   },
-  testimonialQuote: {
+  guarantee: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  guaranteeText: {
+    flex: 1,
     fontFamily: font.regular,
     fontSize: 13,
     lineHeight: 19,
     color: tokens.colors.textPrimary,
-  },
-  testimonialAuthor: {
-    fontFamily: font.medium,
-    fontSize: 12,
-    color: tokens.colors.textSecondary,
-  },
-  dots: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 2,
-  },
-  dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: tokens.colors.borderDefault,
-  },
-  dotActive: {
-    backgroundColor: tokens.colors.premiumText,
   },
   planCta: {
     alignItems: 'center',

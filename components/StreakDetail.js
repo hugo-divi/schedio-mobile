@@ -4,7 +4,6 @@ import { startOfWeek, addDays, isSameDay, isAfter, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { tokens } from '../theme/tokens';
 import { MAX_REST_PER_WEEK } from '../services/streaks';
-import BottomSheet from './ui/BottomSheet';
 import Button from './ui/Button';
 
 const font = tokens.typography.families.inter;
@@ -19,15 +18,17 @@ const getMotivation = (streak) => {
 };
 
 /**
- * Streak detail sheet.
+ * Streak detail.
+ *
+ * No longer a sheet: `app/dashboard/streak.js` renders this as a full screen.
+ * It stays a plain presentational component — it takes the numbers and draws
+ * them, so the screen owns the loading and this stays testable by eye.
  *
  * `studyHistory` accepts either dates or session objects — the store hands over
  * full session documents, and the previous version called `new Date()` straight
  * on those objects, which always produced an invalid date, so no day ever lit up.
  */
-export default function StreakModal({
-  visible,
-  onClose,
+export default function StreakDetail({
   currentStreak = 0,
   maxStreak = 0,
   studyHistory = [],
@@ -35,6 +36,7 @@ export default function StreakModal({
   restDays = [],
   restRemaining = MAX_REST_PER_WEEK,
   onStartSession,
+  onDone,
 }) {
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -60,7 +62,7 @@ export default function StreakModal({
   const alight = currentStreak > 0;
 
   return (
-    <BottomSheet visible={visible} onClose={onClose}>
+    <>
       <View style={styles.hero}>
         <View style={styles.flameWrap}>
           <Flame
@@ -157,25 +159,17 @@ export default function StreakModal({
       </View>
 
       {!metToday && onStartSession ? (
-        <Button
-          title="Estudiar ahora"
-          fullWidth
-          style={styles.cta}
-          onPress={() => {
-            onClose();
-            onStartSession();
-          }}
-        />
+        <Button title="Estudiar ahora" fullWidth style={styles.cta} onPress={onStartSession} />
       ) : (
         <Button
           title="Entendido"
           variant="secondary"
           fullWidth
           style={styles.cta}
-          onPress={onClose}
+          onPress={onDone}
         />
       )}
-    </BottomSheet>
+    </>
   );
 }
 

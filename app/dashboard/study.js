@@ -16,7 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
-import { Play, Pause, X, Check, Plus, Trash2, BellOff } from 'lucide-react-native';
+import { Play, Pause, X, Check, Plus, Trash2, BellOff, Flame } from 'lucide-react-native';
 import Svg, {
   Circle as SvgCircle,
   Path,
@@ -424,12 +424,26 @@ export default function StudySessionScreen() {
   const subjects = useUserStore((state) => state.subjects);
   const subjectsLoading = useUserStore((state) => state.loading);
   const stats = useUserStore((state) => state.stats);
+  const microplans = useUserStore((state) => state.microplans);
   const hideFocusReminder = usePreferencesStore((state) => state.hideFocusReminder);
   const setHideFocusReminder = usePreferencesStore((state) => state.setHideFocusReminder);
   const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
 
   const params = useLocalSearchParams();
   const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
+
+  // Panic mode (services/microplanService.js PANIC_DAYS) is already computed
+  // into the task's `isPanicMode` flag — plans.js just never threads it
+  // through as a route param, so it's read back here from the same
+  // `microplans` the plan screen itself uses. Deliberately doesn't touch the
+  // block's `duration`: that number already accounts for the exam's real
+  // remaining effort, and shortening it here would silently undercount study
+  // time the plan is still owed.
+  const activeTask = useMemo(
+    () => (taskId ? (microplans || []).find((t) => t.id === taskId) : null),
+    [microplans, taskId]
+  );
+  const isPanicTask = Boolean(activeTask?.isPanicMode);
 
   const [step, setStep] = useState('setup');
   const [selectedSubject, setSelectedSubject] = useState(null);
@@ -1033,7 +1047,6 @@ export default function StudySessionScreen() {
       >
         <Animated.View entering={FadeInDown.duration(320)}>
           <Text style={styles.screenTitle}>Estudiar</Text>
-          <Text style={styles.screenSubtitle}>Elige materia, tiempo y objetivos de hoy.</Text>
         </Animated.View>
 
         {/* Materia */}
@@ -1154,6 +1167,12 @@ export default function StudySessionScreen() {
           <View style={styles.timerHeader}>
             <Text style={styles.timerSubject}>{currentSubject?.name || 'Estudio'}</Text>
             <Text style={styles.timerReason}>{reason || 'Sesión enfocada'}</Text>
+            {isPanicTask && (
+              <View style={styles.panicModeBadge}>
+                <Flame size={12} color={tokens.colors.danger} strokeWidth={2} />
+                <Text style={styles.panicModeBadgeText}>Modo pánico · repaso urgente</Text>
+              </View>
+            )}
             {focusModeActive && (
               <View style={styles.focusModeBadge}>
                 <BellOff size={12} color={tokens.colors.accent} strokeWidth={2} />
@@ -1176,7 +1195,7 @@ export default function StudySessionScreen() {
                 cx={RING_SIZE / 2}
                 cy={RING_SIZE / 2}
                 r={RING_RADIUS}
-                stroke={tokens.colors.accent}
+                stroke={isPanicTask ? tokens.colors.danger : tokens.colors.accent}
                 strokeWidth={RING_STROKE}
                 strokeLinecap="round"
                 fill="none"
@@ -1188,7 +1207,9 @@ export default function StudySessionScreen() {
             </Svg>
             <View style={styles.ringCenter}>
               <Text style={styles.timeDisplay}>{formatTime(timeLeft)}</Text>
-              <Text style={styles.timeState}>{isPaused ? 'EN PAUSA' : 'ENFOQUE'}</Text>
+              <Text style={styles.timeState}>
+                {isPaused ? 'EN PAUSA' : isPanicTask ? 'PÁNICO' : 'ENFOQUE'}
+              </Text>
             </View>
           </View>
 
@@ -1458,11 +1479,6 @@ const styles = StyleSheet.create({
     color: tokens.colors.textPrimary,
     marginBottom: 4,
   },
-  screenSubtitle: {
-    fontFamily: font.regular,
-    fontSize: 15,
-    color: tokens.colors.textSecondary,
-  },
   section: {
     marginTop: tokens.spacing.sectionGapMin,
     marginBottom: 0,
@@ -1710,6 +1726,23 @@ const styles = StyleSheet.create({
     fontFamily: font.semibold,
     fontSize: 12,
     color: tokens.colors.accent,
+  },
+  panicModeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(216, 96, 74, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(216, 96, 74, 0.3)',
+    borderRadius: tokens.radius.pill,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginTop: 10,
+  },
+  panicModeBadgeText: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.danger,
   },
   ringWrap: {
     width: RING_SIZE,

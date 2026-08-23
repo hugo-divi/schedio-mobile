@@ -34,4 +34,25 @@ const usePreferencesStore = create(
   )
 );
 
+/**
+ * Resolves once the persisted preferences have actually been read back out of
+ * AsyncStorage.
+ *
+ * Rehydration is asynchronous, so during startup `getState()` can still be
+ * handing out the in-memory defaults — every one of which is the "on" value.
+ * Anything that acts on a preference while the app is starting has to wait for
+ * this first, or it acts on a default the student already turned off. Waiting a
+ * fixed number of milliseconds instead only makes the race less likely, not
+ * impossible: a cold start on a slow device loses it.
+ */
+export const whenPreferencesHydrated = () =>
+  usePreferencesStore.persist.hasHydrated()
+    ? Promise.resolve()
+    : new Promise((resolve) => {
+        const unsubscribe = usePreferencesStore.persist.onFinishHydration(() => {
+          unsubscribe();
+          resolve();
+        });
+      });
+
 export default usePreferencesStore;

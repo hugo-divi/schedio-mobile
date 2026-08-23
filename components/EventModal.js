@@ -1,13 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  Platform,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Calendar as CalendarIcon, Trash2 } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
 import BottomSheet, { FieldLabel, sheetStyles } from './ui/BottomSheet';
@@ -112,11 +104,6 @@ export default function EventModal({
       visible={visible}
       onClose={onClose}
       title={existingEvent ? `Editar ${typeNoun}` : 'Nuevo evento'}
-      subtitle={
-        existingEvent
-          ? 'Cambia los datos o elimínalo.'
-          : 'Añade un examen o una tarea a tu calendario.'
-      }
     >
       <View style={styles.body}>
         {/* Type */}

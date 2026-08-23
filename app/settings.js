@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import * as StoreReview from 'expo-store-review';
 import {
   ChevronLeft,
   ChevronRight,
@@ -31,6 +32,7 @@ import {
   Download,
   RotateCcw,
   BellOff,
+  Route,
 } from 'lucide-react-native';
 
 import { auth, db } from '../services/firebase';
@@ -48,12 +50,39 @@ import { tokens } from '../theme/tokens';
 import { openLegal } from '../constants/legal';
 import CustomAlert from '../components/CustomAlert';
 import { Toggle } from '../components/ui/Toggle';
+import BottomSheet from '../components/ui/BottomSheet';
 
 const font = tokens.typography.families.inter;
 
 const APP_VERSION = Constants.expoConfig?.version || '1.0.0';
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
+
+/**
+ * The three things the single "Notificaciones" switch actually turns on, kept
+ * in step with the scheduled functions in `functions/index.js`. The row's own
+ * subtitle can't describe them — it said "Recordatorios de exámenes y racha",
+ * which named one of the three and got one wrong (there is no streak
+ * notification). `abandonedOnboarding` is left out on purpose: only accounts
+ * that never finished setting up receive it, and anyone reading this screen
+ * has finished by definition.
+ *
+ * When these grow a switch each, this is the list they hang off.
+ */
+const NOTIFICATION_KINDS = [
+  {
+    title: 'Avisos de examen',
+    body: 'Tres días antes y la víspera, por la mañana. Si tienes varios exámenes el mismo día, llegan en un solo aviso.',
+  },
+  {
+    title: 'Vuelta al estudio',
+    body: 'Si pasas cuatro días sin abrir la app. Como mucho uno por semana, y sin echarte nada en cara.',
+  },
+  {
+    title: 'Resumen semanal',
+    body: 'Los domingos por la noche, con lo que has estudiado esa semana. Solo si has hecho alguna sesión.',
+  },
+];
 
 function Group({ title, children }) {
   const rows = (Array.isArray(children) ? children : [children]).filter(Boolean);
@@ -90,8 +119,10 @@ function Row({ icon: Icon, label, sub, control, danger, onPress }) {
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowLabel, { color: colour }]}>{label}</Text>
+        {/* Two lines, not one: the control on the right eats enough width that
+            a single line clipped most of these subtitles mid-word. */}
         {sub ? (
-          <Text style={styles.rowSub} numberOfLines={1}>
+          <Text style={styles.rowSub} numberOfLines={2}>
             {sub}
           </Text>
         ) : null}
@@ -176,6 +207,7 @@ export default function SettingsScreen() {
   const [deleteError, setDeleteError] = useState('');
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [notificationsSheet, setNotificationsSheet] = useState(false);
 
   const showAlert = (config) => setAlertConfig({ ...config, visible: true });
   const closeAlert = () => setAlertConfig((prev) => ({ ...prev, visible: false }));
@@ -308,6 +340,18 @@ export default function SettingsScreen() {
     });
   };
 
+  const handleRateApp = async () => {
+    try {
+      if (await StoreReview.hasAction()) {
+        await StoreReview.requestReview();
+      } else {
+        await Linking.openURL('https://play.google.com/store/apps/details?id=com.schedio.mobile');
+      }
+    } catch (error) {
+      console.error('Error requesting store review:', error);
+    }
+  };
+
   const openDelete = () => {
     setDeletePassword('');
     setDeleteError(
@@ -425,10 +469,13 @@ export default function SettingsScreen() {
         </Group>
 
         <Group title="Preferencias">
+          {/* Tapping the row opens the detail; the switch keeps its own touch,
+              so the gesture the student expects still just toggles. */}
           <Row
             icon={Bell}
             label="Notificaciones"
-            sub="Recordatorios de exámenes y racha"
+            sub="Avisos de examen, vuelta al estudio y resumen semanal"
+            onPress={() => setNotificationsSheet(true)}
             control={
               <Toggle value={notificationsEnabled} onValueChange={handleNotificationsToggle} />
             }
@@ -455,7 +502,19 @@ export default function SettingsScreen() {
         </Group>
 
         <Group title="Comunidad">
+          <Row
+            icon={Route}
+            label="Trayectoria de Schedio"
+            sub="Cómo nació y qué hemos ido añadiendo"
+            onPress={() => router.push('/trayectoria')}
+          />
           <Row icon={MessageSquare} label="Enviar feedback" onPress={() => openLegal('feedback')} />
+          <Row
+            icon={Star}
+            label="Valorar Schedio"
+            sub="Déjanos tu opinión en la Play Store"
+            onPress={handleRateApp}
+          />
         </Group>
 
         <Group>
@@ -521,6 +580,24 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      <BottomSheet
+        visible={notificationsSheet}
+        onClose={() => setNotificationsSheet(false)}
+        title="Notificaciones"
+        subtitle="Esto es todo lo que te podemos enviar. Nada más."
+      >
+        {NOTIFICATION_KINDS.map((kind) => (
+          <View key={kind.title} style={styles.kind}>
+            <Text style={styles.kindTitle}>{kind.title}</Text>
+            <Text style={styles.kindBody}>{kind.body}</Text>
+          </View>
+        ))}
+        <Text style={styles.kindFoot}>
+          El interruptor las activa o desactiva todas a la vez. Poder elegirlas por separado llegará
+          más adelante.
+        </Text>
+      </BottomSheet>
 
       <CustomAlert
         visible={alertConfig.visible}
@@ -659,6 +736,27 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 13,
     color: tokens.colors.textSecondary,
+  },
+  kind: {
+    marginBottom: 18,
+    gap: 4,
+  },
+  kindTitle: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    color: tokens.colors.textPrimary,
+  },
+  kindBody: {
+    fontFamily: font.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    color: tokens.colors.textSecondary,
+  },
+  kindFoot: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textDisabled,
   },
   version: {
     fontFamily: font.medium,
