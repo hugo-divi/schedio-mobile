@@ -41,6 +41,11 @@ export const computeWidgetModel = ({ exams, microplans, subjects, streak, isPrim
   const tasksToday = todaysPendingTasks(microplans);
 
   return {
+    // Marks this as real data rather than the placeholder the task handler
+    // falls back to. Without it the widget can't tell "you genuinely have no
+    // exams and a streak of 0" from "the app has never synced", and rendered
+    // the first as if it were true — a fresh widget showed a big 0.
+    synced: true,
     computedAt: new Date().toISOString(),
     streak: streak || 0,
     availableWidgetSizes: getAvailableWidgetSizes({ isPrime }),

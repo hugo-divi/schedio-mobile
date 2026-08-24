@@ -122,7 +122,14 @@ export default function VerifyEmail() {
           </Animated.View>
         ) : null}
 
-        <Animated.View entering={FadeInDown.duration(300).delay(260)} style={{ marginTop: 32 }}>
+        {/* `styles.content` centra a sus hijos, así que sin un ancho explícito
+            este envoltorio se encoge al tamaño de su texto y el `fullWidth` del
+            botón se resuelve contra ese ancho — por eso los dos botones salían
+            de anchos distintos. Mismo arreglo que ya tenía `messageBox`. */}
+        <Animated.View
+          entering={FadeInDown.duration(300).delay(260)}
+          style={{ marginTop: 32, width: '100%' }}
+        >
           <Button
             title="Ya lo he verificado"
             fullWidth
@@ -132,7 +139,10 @@ export default function VerifyEmail() {
           />
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.duration(300).delay(320)} style={{ marginTop: 12 }}>
+        <Animated.View
+          entering={FadeInDown.duration(300).delay(320)}
+          style={{ marginTop: 12, width: '100%' }}
+        >
           <Button
             title={Date.now() < cooldownUntil ? 'Correo reenviado' : 'Reenviar correo'}
             variant="secondary"

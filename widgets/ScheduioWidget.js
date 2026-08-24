@@ -6,8 +6,13 @@ import { daysBetween } from '../services/priority';
 
 const c = tokens.colors;
 
-const OPEN_APP = 'OPEN_APP';
 const openUri = (uri) => ({ clickAction: 'OPEN_URI', clickActionData: { uri } });
+
+/** Where each part of a widget takes you. Home owns the countdown and the
+ *  exams, so it's the default; the streak pill has had its own screen since
+ *  the racha moved out of a bottom sheet. */
+const URI_HOME = 'schedio://dashboard';
+const URI_STREAK = 'schedio://dashboard/streak';
 
 const daysLabel = (n) => {
   if (n <= 0) return 'hoy';
@@ -25,6 +30,7 @@ const formatExamDate = (iso) => {
 function StreakPill({ streak }) {
   return (
     <FlexWidget
+      {...openUri(URI_STREAK)}
       style={{
         flexDirection: 'row',
         alignItems: 'center',
@@ -108,13 +114,15 @@ function Countdown({ model }) {
     : formatExamDate(model.examDateIso);
   return (
     <FlexWidget style={{ flexDirection: 'row', alignItems: 'flex-end', marginBottom: 14 }}>
+      {/* A 46px "0" over the word "hoy" read as a broken counter. On the day
+          itself the word is the number. */}
       <TextWidget
-        text={String(Math.max(n, 0))}
-        style={{ fontSize: 46, fontWeight: 'bold', color: c.textPrimary }}
+        text={n <= 0 ? 'HOY' : String(n)}
+        style={{ fontSize: n <= 0 ? 34 : 46, fontWeight: 'bold', color: c.textPrimary }}
       />
       <FlexWidget style={{ flexDirection: 'column', marginLeft: 10, marginBottom: 4 }}>
         <TextWidget
-          text={daysLabel(n)}
+          text={n <= 0 ? 'es el examen' : daysLabel(n)}
           style={{ fontSize: 13, fontWeight: 'bold', color: c.textSecondary }}
         />
         <TextWidget text={subtitle} style={{ fontSize: 12, color: c.textSecondary }} />
@@ -171,6 +179,39 @@ function NoExamMessage({ streak }) {
   );
 }
 
+/**
+ * Before the first sync there is nothing true to show — no exams, no streak,
+ * no plan — so this says exactly that instead of reporting zeroes as facts.
+ */
+function NotReady({ compact }) {
+  return (
+    <FlexWidget
+      style={{
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 'match_parent',
+        width: 'match_parent',
+      }}
+    >
+      <IconWidget font="material" icon="school" size={compact ? 24 : 28} color={c.textSecondary} />
+      <TextWidget
+        text="Abre Schedio"
+        style={{
+          fontSize: compact ? 12 : 14,
+          fontWeight: 'bold',
+          color: c.textPrimary,
+          marginTop: 8,
+        }}
+      />
+      <TextWidget
+        text={compact ? 'para empezar' : 'y esto se rellena solo'}
+        style={{ fontSize: compact ? 10 : 12, color: c.textSecondary, marginTop: 2 }}
+      />
+    </FlexWidget>
+  );
+}
+
 function CardShell({ children, style }) {
   return (
     <FlexWidget
@@ -184,7 +225,7 @@ function CardShell({ children, style }) {
         padding: 16,
         ...style,
       }}
-      clickAction={OPEN_APP}
+      {...openUri(URI_HOME)}
     >
       {children}
     </FlexWidget>
@@ -192,15 +233,43 @@ function CardShell({ children, style }) {
 }
 
 export function SmallWidget({ model }) {
-  if (!model?.hasExam) {
+  if (!model?.synced) {
+    return (
+      <CardShell>
+        <NotReady compact />
+      </CardShell>
+    );
+  }
+
+  if (!model.hasExam) {
+    // A streak of zero is not a number worth showing at 34px — it's the one
+    // value where the hero figure is the least motivating thing on screen.
+    if (!model.streak) {
+      return (
+        <CardShell style={{ alignItems: 'center' }}>
+          <IconWidget font="material" icon="whatshot" size={26} color={c.textSecondary} />
+          <TextWidget
+            text="Empieza tu racha"
+            style={{ fontSize: 12, fontWeight: 'bold', color: c.textPrimary, marginTop: 6 }}
+          />
+          <TextWidget
+            text="con una sesión hoy"
+            style={{ fontSize: 10, color: c.textSecondary, marginTop: 2 }}
+          />
+        </CardShell>
+      );
+    }
     return (
       <CardShell style={{ alignItems: 'center' }}>
         <IconWidget font="material" icon="whatshot" size={28} color={c.premiumText} />
         <TextWidget
-          text={String(model?.streak ?? 0)}
+          text={String(model.streak)}
           style={{ fontSize: 34, fontWeight: 'bold', color: c.textPrimary, marginTop: 2 }}
         />
-        <TextWidget text="días de racha" style={{ fontSize: 10, color: c.textSecondary }} />
+        <TextWidget
+          text={model.streak === 1 ? 'día de racha' : 'días de racha'}
+          style={{ fontSize: 10, color: c.textSecondary }}
+        />
       </CardShell>
     );
   }
@@ -225,11 +294,11 @@ export function SmallWidget({ model }) {
 
       <FlexWidget style={{ flexDirection: 'column', alignItems: 'center' }}>
         <TextWidget
-          text={String(Math.max(n, 0))}
-          style={{ fontSize: 34, fontWeight: 'bold', color: c.textPrimary }}
+          text={n <= 0 ? 'HOY' : String(n)}
+          style={{ fontSize: n <= 0 ? 26 : 34, fontWeight: 'bold', color: c.textPrimary }}
         />
         <TextWidget
-          text={daysLabel(n)}
+          text={n <= 0 ? 'es el examen' : daysLabel(n)}
           style={{ fontSize: 10, color: c.textSecondary, marginTop: 2 }}
         />
       </FlexWidget>
@@ -247,7 +316,15 @@ export function SmallWidget({ model }) {
 }
 
 export function MediumWidget({ model }) {
-  if (!model?.hasExam) {
+  if (!model?.synced) {
+    return (
+      <CardShell>
+        <NotReady />
+      </CardShell>
+    );
+  }
+
+  if (!model.hasExam) {
     return (
       <CardShell>
         <NoExamMessage />
@@ -374,6 +451,14 @@ function PrimeUpsellBanner() {
 }
 
 export function LargeWidget({ model }) {
+  if (!model?.synced) {
+    return (
+      <CardShell>
+        <NotReady />
+      </CardShell>
+    );
+  }
+
   return (
     <CardShell>
       {model.hasExam ? (

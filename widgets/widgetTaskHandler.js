@@ -2,13 +2,17 @@ import { loadCachedWidgetModel } from '../services/widgetData';
 import { renderWidgetForName } from './ScheduioWidget';
 
 /**
- * Fallback shown before the app has ever synced real data to the widget
- * (freshly added, phone just restored, etc). Reuses the "no exam" empty
- * state — the copy ("sin exámenes próximos") reads slightly off for this
- * specific case (we don't actually know yet), but it's a rare, short-lived
- * state and doesn't warrant a fourth visual variant.
+ * Shown before the app has ever synced real data to the widget — freshly
+ * added, phone just restored, app never opened since install.
+ *
+ * `synced: false` is the whole point. This used to reuse the "no exam" empty
+ * state, which claimed things we had no way of knowing yet: a widget added
+ * before the first sync announced "Sin exámenes próximos" and a streak of 0
+ * to a student who might have neither. The widgets render their own
+ * "open the app" state off this flag instead.
  */
 const EMPTY_MODEL = {
+  synced: false,
   hasExam: false,
   streak: 0,
   availableWidgetSizes: ['small', 'medium'],

@@ -66,6 +66,14 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   // Set by the sheet's onLayout so the keyboard-avoidance effect below knows
   // how tall the actual (possibly short) sheet is, not just the screen.
   const sheetHeightRef = useRef(0);
+  // Where the inner ScrollView is. Written from its onScroll and read by the
+  // content drag below, which must not fight the scroll.
+  const scrollAtTop = useSharedValue(true);
+  // Decided once per gesture, in onBegin, rather than continuously: if it were
+  // re-evaluated mid-drag, scrolling up to the top and carrying on would make
+  // the sheet jump by however far the finger had already travelled.
+  const contentDragArmed = useSharedValue(false);
+  const scrollRef = useRef(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -73,7 +81,10 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
     translateY.value = SCREEN_HEIGHT;
     translateY.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
     keyboardShift.value = 0;
-  }, [visible, translateY, keyboardShift]);
+    // A sheet reopened after being scrolled down would otherwise start with
+    // the content drag disarmed until the first scroll event.
+    scrollAtTop.value = true;
+  }, [visible, translateY, keyboardShift, scrollAtTop]);
 
   // Shifts the sheet up by however much the keyboard actually overlaps it —
   // insets.bottom is padding the sheet already reserves, so only the part of
@@ -123,25 +134,55 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
     );
   }, [onClose, translateY]);
 
+  const settle = (event) => {
+    'worklet';
+    const shouldClose = event.translationY > DISMISS_DISTANCE || event.velocityY > DISMISS_VELOCITY;
+    if (shouldClose) {
+      translateY.value = withTiming(
+        SCREEN_HEIGHT,
+        { duration: 200, easing: Easing.in(Easing.cubic) },
+        (finished) => {
+          if (finished) runOnJS(onClose)();
+        }
+      );
+    } else {
+      translateY.value = withSpring(0, { damping: 22, stiffness: 240 });
+    }
+  };
+
+  // The handle and title: always draggable, whatever the content is doing.
   const pan = Gesture.Pan()
     .onUpdate((event) => {
       // Downward only — dragging up shouldn't lift the sheet off its edge.
       translateY.value = Math.max(0, event.translationY);
     })
+    .onEnd(settle);
+
+  /**
+   * The same drag, but from anywhere in the content — the handle alone was a
+   * thin strip at the very top of a sheet that can be most of the screen, so
+   * closing one meant reaching for it every time.
+   *
+   * It only arms when the content is already scrolled to the top, so a list
+   * still scrolls normally and only starts dragging the sheet once there's
+   * nothing left to scroll. Running simultaneously with the ScrollView (rather
+   * than blocking it) keeps that handover from feeling like a fight, and the
+   * horizontal fail-offset leaves the chip rows inside some sheets alone.
+   */
+  const contentPan = Gesture.Pan()
+    .activeOffsetY(14)
+    .failOffsetX([-16, 16])
+    .simultaneousWithExternalGesture(scrollRef)
+    .onBegin(() => {
+      contentDragArmed.value = scrollAtTop.value;
+    })
+    .onUpdate((event) => {
+      if (!contentDragArmed.value) return;
+      translateY.value = Math.max(0, event.translationY);
+    })
     .onEnd((event) => {
-      const shouldClose =
-        event.translationY > DISMISS_DISTANCE || event.velocityY > DISMISS_VELOCITY;
-      if (shouldClose) {
-        translateY.value = withTiming(
-          SCREEN_HEIGHT,
-          { duration: 200, easing: Easing.in(Easing.cubic) },
-          (finished) => {
-            if (finished) runOnJS(onClose)();
-          }
-        );
-      } else {
-        translateY.value = withSpring(0, { damping: 22, stiffness: 240 });
-      }
+      if (!contentDragArmed.value) return;
+      settle(event);
     });
 
   const sheetStyle = useAnimatedStyle(() => ({
@@ -167,15 +208,22 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
           </View>
         </GestureDetector>
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
-          showsVerticalScrollIndicator={false}
-          bounces={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          {children}
-        </ScrollView>
+        <GestureDetector gesture={contentPan}>
+          <ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={16}
+            onScroll={(event) => {
+              scrollAtTop.value = event.nativeEvent.contentOffset.y <= 0;
+            }}
+          >
+            {children}
+          </ScrollView>
+        </GestureDetector>
       </Animated.View>
     </Pressable>
   );
