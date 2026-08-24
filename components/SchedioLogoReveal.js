@@ -61,16 +61,8 @@ const SEGMENTS = LOGO_PATH.slice(1).map(([x, y], i) =>
 const PATH_LENGTH = SEGMENTS.reduce((a, b) => a + b, 0);
 const PATH_D = LOGO_PATH.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join('');
 
-/**
- * Phase timings, in ms from mount. Exported so the screen can match them.
- *
- * The draw used to run 2100 ms, which with the settle put roughly 3.2 seconds
- * between finishing a session and seeing what you earned. Wonderful once,
- * furniture by the twentieth time — and this plays after *every* session. The
- * stroke reads the same at 1500 with the pacing below; what it loses is the
- * stretch in the middle where nothing was happening except waiting.
- */
-export const DRAW_MS = 1500;
+/** Phase timings, in ms from mount. Exported so the screen can match them. */
+export const DRAW_MS = 2100;
 export const BURST_MS = 700;
 const SETTLE_DELAY = 420;
 const SETTLE_MS = 680;
@@ -88,70 +80,12 @@ const SPARKS = Array.from({ length: 12 }, (_, i) => ({
 }));
 
 /**
- * Where the corners fall, **on the timeline** rather than along the path.
- *
- * Those are two different scales: the stroke occupies only the first
- * DRAW_SHARE of the timeline, the arrowhead the rest, so a vertex at 93% of
- * the path arrives at 93% × DRAW_SHARE of the animation. Scaling here means
- * the worklets below can compare against `ease`'s output directly, without
- * walking the segment list on every frame.
+ * The design holds a near-linear pace for most of the stroke, then eases the
+ * last sliver so the arrowhead doesn't snap into place.
  */
-const CORNERS = SEGMENTS.reduce((acc, len) => {
-  acc.push((acc[acc.length - 1] ?? 0) + len / PATH_LENGTH);
-  return acc;
-}, [])
-  .slice(0, -1)
-  .map((fraction) => fraction * DRAW_SHARE);
-
-/**
- * Pace along the stroke.
- *
- * The old curve was linear for the first 82% and then eased the tail. Constant
- * speed through seven corners is what made it read as a progress bar being
- * filled rather than a mark being drawn: a pen accelerates down a straight and
- * slows as it turns. This keeps the same total duration but redistributes it —
- * a gentle brake at each vertex, paid back on the runs between them.
- *
- * The dash offset and the comet head both read this same function, so they
- * stay welded together however the pacing changes.
- */
-const CORNER_REACH = 0.055;
-const CORNER_BRAKE = 0.42;
-
 function ease(raw) {
   'worklet';
-  // The tail used to be `pow(x, 0.7)`, whose slope at x=0 is infinite: right
-  // where the stroke hands over to the arrowhead the pace jumped, then dragged.
-  // `x + x² - x³` reaches the same place and still eases to a stop, but leaves
-  // the previous section at exactly the speed it arrived — no lurch at the seam.
-  let eased = raw;
-  if (raw >= DRAW_SHARE) {
-    const x = (raw - DRAW_SHARE) / ARROW_SHARE;
-    eased = DRAW_SHARE + (x + x * x - x * x * x) * ARROW_SHARE;
-  }
-
-  // Slow down near each corner by pulling progress back towards it, then
-  // let go once past it.
-  let adjusted = eased;
-  for (let i = 0; i < CORNERS.length; i++) {
-    const d = eased - CORNERS[i];
-    if (d > -CORNER_REACH && d < CORNER_REACH) {
-      const near = 1 - Math.abs(d) / CORNER_REACH;
-      adjusted -= d * near * near * CORNER_BRAKE;
-    }
-  }
-  return Math.min(1, Math.max(0, adjusted));
-}
-
-/** How fast the tip is moving at `p`, 0-1ish. Drives the comet's brightness. */
-function speedAt(p) {
-  'worklet';
-  let nearest = 1;
-  for (let i = 0; i < CORNERS.length; i++) {
-    const d = Math.abs(p - CORNERS[i]);
-    if (d < nearest) nearest = d;
-  }
-  return Math.min(1, nearest / CORNER_REACH);
+  return raw < 0.82 ? raw : 0.82 + Math.pow((raw - 0.82) / 0.18, 0.7) * 0.18;
 }
 
 /** Where the brush tip is at `p`, in the logo's own coordinate space. */
@@ -242,11 +176,9 @@ export default function SchedioLogoReveal({ size = 140, drop = 290, onBurst, onS
     t.value = withTiming(1, { duration: DRAW_MS, easing: Easing.linear });
 
     // Pop on the last frame of the draw, then fall back into place.
-    // 1.9 was close to doubling the mark and then shrinking it by more than
-    // half to settle, which read as the logo falling away rather than landing.
     scale.value = withDelay(
       DRAW_MS,
-      withTiming(1.62, { duration: 180, easing: Easing.out(Easing.cubic) })
+      withTiming(1.9, { duration: 180, easing: Easing.out(Easing.cubic) })
     );
     burst.value = withDelay(DRAW_MS, withTiming(1, { duration: BURST_MS, easing: Easing.linear }));
 
@@ -283,18 +215,7 @@ export default function SchedioLogoReveal({ size = 140, drop = 290, onBurst, onS
   const cometProps = useAnimatedProps(() => {
     const p = ease(t.value);
     const [x, y] = tipAt(p, LOGO_PATH, SEGMENTS, PATH_LENGTH);
-    // Brighter and larger on the runs, dimmer into the corners — light behaves
-    // that way, and it's what sells the pacing above as deliberate rather than
-    // as the animation stuttering. Fades out over the last stretch instead of
-    // being cut on the final frame, which was a visible pop.
-    const speed = speedAt(p);
-    const tail = p > 0.94 ? 1 - (p - 0.94) / 0.06 : 1;
-    return {
-      cx: x,
-      cy: y,
-      r: 34 + speed * 16,
-      opacity: Math.max(0, tail) * (0.55 + speed * 0.45),
-    };
+    return { cx: x, cy: y, opacity: p >= 1 ? 0 : 1 };
   });
 
   const markStyle = useAnimatedStyle(() => ({
@@ -344,7 +265,7 @@ export default function SchedioLogoReveal({ size = 140, drop = 290, onBurst, onS
             height={LOGO_H}
             mask="url(#schedio-trace)"
           />
-          <AnimatedCircle fill="url(#schedio-comet)" animatedProps={cometProps} />
+          <AnimatedCircle r={46} fill="url(#schedio-comet)" animatedProps={cometProps} />
         </Svg>
       </Animated.View>
 
