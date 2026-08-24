@@ -281,11 +281,27 @@ function SwipeToDelete({ onDelete, children }) {
 
   const rowStyle = useAnimatedStyle(() => ({ transform: [{ translateX: dx.value }] }));
 
+  /**
+   * The red layer is only painted while the row is actually moving.
+   *
+   * It sits directly under the row, filling the same rounded rectangle. Android
+   * antialiases each rounded shape independently, so along the curves the top
+   * layer's edge pixels are partly transparent and the red underneath shows
+   * through them — a thin red arc on each corner, visible even at rest. Adding
+   * matching `borderRadius` to every layer (and `overflow: hidden` on the
+   * wrapper) doesn't help, because the two curves are still antialiased
+   * separately and never line up pixel for pixel.
+   *
+   * Fading it out at rest sidesteps the whole question: with nothing red drawn
+   * underneath, there is nothing left to bleed through.
+   */
+  const actionStyle = useAnimatedStyle(() => ({ opacity: dx.value < -1 ? 1 : 0 }));
+
   return (
     <View style={styles.swipeWrap}>
-      <View style={styles.swipeAction}>
+      <Animated.View style={[styles.swipeAction, actionStyle]}>
         <Trash2 size={16} color="#FFFFFF" />
-      </View>
+      </Animated.View>
       <GestureDetector gesture={pan}>
         <Animated.View style={[styles.swipeContent, rowStyle]}>{children}</Animated.View>
       </GestureDetector>
