@@ -62,6 +62,16 @@ import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
 import { Emoji } from '../../components/ui/Emoji';
 
+/**
+ * Rows that fade up as the list paints, instead of the whole block appearing
+ * at once. `entering` only runs on Reanimated components, so the touchable
+ * itself has to be one.
+ */
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
+/** Capped so a long list doesn't turn into a queue the student waits through. */
+const rowEnter = (index) => FadeInDown.duration(300).delay(Math.min(index, 6) * 45);
+
 // How long the dashboard data stays fresh before returning to the tab
 // triggers a refetch.
 const FOCUS_REFETCH_MS = 60_000;
@@ -740,8 +750,9 @@ export default function Dashboard() {
                   const isLast = index === visibleExams.length - 1 && exams.length <= 3;
 
                   return (
-                    <TouchableOpacity
+                    <AnimatedTouchable
                       key={exam.id}
+                      entering={rowEnter(index)}
                       style={[styles.examRow, isLast && styles.rowLast]}
                       activeOpacity={0.7}
                       onPress={() =>
@@ -786,7 +797,7 @@ export default function Dashboard() {
                           : (MANUAL_PRIORITY_LABELS[exam.manualPriority ?? exam.priority] ??
                             'Normal')}
                       </Chip>
-                    </TouchableOpacity>
+                    </AnimatedTouchable>
                   );
                 })
               )}
@@ -817,8 +828,9 @@ export default function Dashboard() {
               {pendingExams.map((exam, index) => {
                 const isLast = index === pendingExams.length - 1;
                 return (
-                  <TouchableOpacity
+                  <AnimatedTouchable
                     key={exam.id}
+                    entering={rowEnter(index)}
                     style={[styles.pendingRow, isLast && styles.rowLast]}
                     activeOpacity={0.9}
                     delayLongPress={500}
@@ -840,7 +852,7 @@ export default function Dashboard() {
                       onPress={() => handleOpenGradeModal(exam)}
                       style={styles.gradeButton}
                     />
-                  </TouchableOpacity>
+                  </AnimatedTouchable>
                 );
               })}
             </Card>

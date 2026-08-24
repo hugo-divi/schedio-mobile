@@ -32,8 +32,11 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSpring,
+  withDelay,
   runOnJS,
   LinearTransition,
+  FadeInDown,
+  Easing,
 } from 'react-native-reanimated';
 import PrimeLimitSheet from '../../components/PrimeLimitSheet';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -94,21 +97,29 @@ function StatTile({ value, label, accent = false }) {
   );
 }
 
-function SubjectTile({ subject, onPress }) {
+function SubjectTile({ subject, onPress, index = 0 }) {
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.subjectTile}>
-      <View
-        style={[styles.subjectAvatar, { backgroundColor: subject.color || SUBJECT_FALLBACK_COLOR }]}
-      >
-        <Text style={styles.subjectInitial}>{initialOf(subject.name)}</Text>
-      </View>
-      <View style={styles.subjectBody}>
-        <Text style={styles.subjectName} numberOfLines={1}>
-          {subject.name}
-        </Text>
-        <Text style={styles.subjectGrade}>{subject.average || '—'}</Text>
-      </View>
-    </TouchableOpacity>
+    // Staggered rather than all at once: the grid used to appear as a single
+    // block, which reads as a screenshot instead of a screen being built.
+    // Capped at 6 so a student with twenty subjects isn't waiting on a queue.
+    <Animated.View entering={FadeInDown.duration(320).delay(Math.min(index, 6) * 45)}>
+      <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.subjectTile}>
+        <View
+          style={[
+            styles.subjectAvatar,
+            { backgroundColor: subject.color || SUBJECT_FALLBACK_COLOR },
+          ]}
+        >
+          <Text style={styles.subjectInitial}>{initialOf(subject.name)}</Text>
+        </View>
+        <View style={styles.subjectBody}>
+          <Text style={styles.subjectName} numberOfLines={1}>
+            {subject.name}
+          </Text>
+          <Text style={styles.subjectGrade}>{subject.average || '—'}</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -189,6 +200,28 @@ function NoteRow({ note, last, onDelete, onEdit }) {
       </TouchableOpacity>
     </View>
   );
+}
+
+/**
+ * The XP bar, filling to its value instead of arriving at it.
+ *
+ * Same reasoning as the XP counter on the session summary: a bar that is
+ * simply *there* reads as a static fact, one that fills reads as progress the
+ * student made. Runs once on mount and then follows any later change.
+ */
+function LevelFill({ percent }) {
+  const width = useSharedValue(0);
+
+  useEffect(() => {
+    width.value = withDelay(
+      160,
+      withTiming(percent, { duration: 780, easing: Easing.out(Easing.cubic) })
+    );
+  }, [percent, width]);
+
+  const style = useAnimatedStyle(() => ({ width: `${width.value}%` }));
+
+  return <Animated.View style={[styles.levelFill, style]} />;
 }
 
 /**
@@ -660,7 +693,7 @@ export default function ProfileScreen() {
               </View>
 
               <View style={styles.levelTrack}>
-                <View style={[styles.levelFill, { width: `${levelPercent}%` }]} />
+                <LevelFill percent={levelPercent} />
               </View>
               <View style={styles.levelLabels}>
                 <Text style={styles.levelLabel}>
@@ -793,10 +826,11 @@ export default function ProfileScreen() {
               </Card>
             ) : (
               <View style={styles.subjectsGrid}>
-                {subjects.map((subject) => (
+                {subjects.map((subject, index) => (
                   <SubjectTile
                     key={subject.id}
                     subject={subject}
+                    index={index}
                     onPress={() => openSubject(subject)}
                   />
                 ))}

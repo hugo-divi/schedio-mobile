@@ -37,9 +37,13 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSpring,
+  withRepeat,
+  withSequence,
+  withDelay,
   runOnJS,
   interpolate,
   Easing,
+  ZoomIn,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
@@ -370,8 +374,10 @@ function MoodPicker({ value, onChange }) {
  * animated TextInput written from a worklet — far more machinery than a number
  * that ticks for half a second is worth.
  */
-function useCountUp(to, duration = 900) {
+function useCountUp(to, duration = 900, onDone) {
   const [shown, setShown] = useState(0);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
 
   useEffect(() => {
     if (!to) {
@@ -386,7 +392,11 @@ function useCountUp(to, duration = 900) {
       // final number at a constant rate.
       const eased = 1 - Math.pow(1 - progress, 3);
       setShown(Math.round(to * eased));
-      if (progress < 1) frame = requestAnimationFrame(tick);
+      if (progress < 1) {
+        frame = requestAnimationFrame(tick);
+      } else {
+        doneRef.current?.();
+      }
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
@@ -395,14 +405,44 @@ function useCountUp(to, duration = 900) {
   return shown;
 }
 
-function StatTile({ value, label, accent = false, countTo, prefix = '' }) {
+function StatTile({ value, label, accent = false, countTo, prefix = '', pulse = false }) {
   // The reward is the one number worth animating: landing at its final value
   // reads as a label, counting up reads as something earned.
-  const counted = useCountUp(countTo);
+  const counted = useCountUp(
+    countTo,
+    900,
+    useCallback(() => {
+      // The punctuation the count was missing: without it the number just
+      // stops, and the moment it was building towards passes unmarked.
+      if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }, [])
+  );
   const shown = countTo != null ? `${prefix}${counted}` : value;
 
+  /**
+   * Three beats, not a loop. A tile that pulses forever stops meaning
+   * anything; three says "this went up today" and then gets out of the way.
+   * Delayed so it fires after the tile has finished entering.
+   */
+  const beat = useSharedValue(1);
+  useEffect(() => {
+    if (!pulse) return;
+    beat.value = withDelay(
+      420,
+      withRepeat(
+        withSequence(
+          withTiming(1.07, { duration: 220, easing: Easing.out(Easing.quad) }),
+          withTiming(1, { duration: 260, easing: Easing.out(Easing.quad) })
+        ),
+        3,
+        false
+      )
+    );
+  }, [pulse, beat]);
+  const beatStyle = useAnimatedStyle(() => ({ transform: [{ scale: beat.value }] }));
+
   return (
-    <View style={styles.statTile}>
+    <Animated.View style={[styles.statTile, beatStyle]}>
       <Text
         style={[styles.statValue, accent && { color: tokens.colors.accent }]}
         numberOfLines={1}
@@ -411,7 +451,7 @@ function StatTile({ value, label, accent = false, countTo, prefix = '' }) {
         {shown}
       </Text>
       <Text style={styles.statLabel}>{label}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -731,6 +771,9 @@ export default function StudySessionScreen() {
         // student just reached from one they already held.
         const previousRank = useUserStore.getState().gamification.rank;
         const previousLevel = useUserStore.getState().gamification.level;
+        // Only a streak that actually moved earns the pulse on the summary —
+        // one that beats every time says nothing.
+        const previousStreak = useUserStore.getState().stats.streak;
 
         const sessionPromise = useUserStore.getState().addSession(user.uid, {
           subjectId: selectedSubject,
@@ -786,6 +829,10 @@ export default function StudySessionScreen() {
             // quiet line in the summary instead (see renderEnd).
             if (result.newLevel && result.newLevel !== previousLevel) {
               setSummary((prev) => (prev ? { ...prev, newLevel: result.newLevel } : prev));
+            }
+
+            if (useUserStore.getState().stats.streak > previousStreak) {
+              setSummary((prev) => (prev ? { ...prev, streakUp: true } : prev));
             }
           })
           .catch(() => {});
@@ -1449,10 +1496,27 @@ export default function StudySessionScreen() {
                 <MoodPicker value={mood} onChange={setMood} />
               </Animated.View>
 
-              <Animated.View entering={FadeInDown.duration(460).delay(90)} style={styles.statRow}>
-                <StatTile countTo={summary.xpEarned} prefix="+" label="XP ganado" accent />
-                <StatTile value={String(stats?.streak ?? 0)} label="Días de racha" />
-              </Animated.View>
+              {/* Split so the reward lands before the report. Both used to
+                  enter together on the same 90 ms step, which gave the XP no
+                  more weight than the line of text underneath it. */}
+              <View style={styles.statRow}>
+                <Animated.View
+                  entering={ZoomIn.duration(420).springify().damping(11)}
+                  style={styles.statCell}
+                >
+                  <StatTile countTo={summary.xpEarned} prefix="+" label="XP ganado" accent />
+                </Animated.View>
+                <Animated.View
+                  entering={FadeInDown.duration(460).delay(180)}
+                  style={styles.statCell}
+                >
+                  <StatTile
+                    value={String(stats?.streak ?? 0)}
+                    label="Días de racha"
+                    pulse={!!summary.streakUp}
+                  />
+                </Animated.View>
+              </View>
 
               <Animated.Text
                 entering={FadeInDown.duration(460).delay(180)}
@@ -1951,6 +2015,9 @@ const styles = StyleSheet.create({
     gap: 12,
     width: '100%',
     marginTop: 26,
+  },
+  statCell: {
+    flex: 1,
   },
   statTile: {
     flex: 1,
