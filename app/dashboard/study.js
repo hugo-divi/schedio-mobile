@@ -229,9 +229,30 @@ function SubjectChip({ subject, reason, selected, onPress }) {
   );
 }
 
+/** `entering`/animated styles only run on Reanimated components. */
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
 function Checkbox({ checked, onPress, size = 20 }) {
+  // A small overshoot on the way in and nothing on the way out. Ticking
+  // something off is the moment worth marking; unticking is a correction, and
+  // celebrating a correction is noise.
+  const pop = useSharedValue(1);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (!checked) return;
+    pop.value = withSequence(
+      withTiming(1.22, { duration: 110, easing: Easing.out(Easing.quad) }),
+      withSpring(1, { damping: 11, stiffness: 320 })
+    );
+  }, [checked, pop]);
+  const popStyle = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }] }));
+
   return (
-    <TouchableOpacity
+    <AnimatedTouchable
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole="checkbox"
@@ -241,23 +262,68 @@ function Checkbox({ checked, onPress, size = 20 }) {
         styles.checkbox,
         { width: size, height: size },
         checked ? styles.checkboxOn : styles.checkboxOff,
+        popStyle,
       ]}
     >
       {checked ? <Check size={size * 0.65} color="#FFFFFF" strokeWidth={3} /> : null}
-    </TouchableOpacity>
+    </AnimatedTouchable>
   );
 }
 
+/**
+ * The strike drawn across a finished objective, one line per line of text.
+ *
+ * `textDecorationLine` snaps: the label is unstruck one frame and struck the
+ * next, which is the same amount of feedback as no feedback at all. Measuring
+ * the laid-out lines with `onTextLayout` and drawing over them means the rule
+ * travels the way you'd cross something off on paper, and still handles a
+ * label that wraps onto a second line.
+ */
+function StrikeLines({ lines, active }) {
+  const progress = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withTiming(active ? 1 : 0, {
+      duration: active ? 260 : 140,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [active, progress]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ scaleX: progress.value }] }));
+
+  return lines.map((line, index) => (
+    <Animated.View
+      key={index}
+      pointerEvents="none"
+      style={[
+        styles.strike,
+        {
+          left: line.x,
+          top: line.y + line.height / 2,
+          width: line.width,
+        },
+        style,
+      ]}
+    />
+  ));
+}
+
 function CheckRow({ label, checked, onToggle, strike = true }) {
+  const [lines, setLines] = useState([]);
+
   return (
     <View style={styles.checkRow}>
       <Checkbox checked={checked} onPress={onToggle} />
-      <Text
-        style={[styles.checkRowLabel, checked && strike && styles.checkRowLabelDone]}
-        numberOfLines={2}
-      >
-        {label}
-      </Text>
+      <View style={styles.checkRowLabelWrap}>
+        <Text
+          style={[styles.checkRowLabel, checked && strike && styles.checkRowLabelDim]}
+          numberOfLines={2}
+          onTextLayout={(event) => setLines(event.nativeEvent.lines || [])}
+        >
+          {label}
+        </Text>
+        {strike ? <StrikeLines lines={lines} active={checked} /> : null}
+      </View>
     </View>
   );
 }
@@ -1763,15 +1829,24 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
   },
-  checkRowLabel: {
+  checkRowLabelWrap: {
     flex: 1,
+  },
+  checkRowLabel: {
     fontFamily: font.regular,
     fontSize: 15,
     color: tokens.colors.textPrimary,
   },
-  checkRowLabelDone: {
+  // The strike is drawn separately now, so this only dims.
+  checkRowLabelDim: {
     color: tokens.colors.textSecondary,
-    textDecorationLine: 'line-through',
+  },
+  strike: {
+    position: 'absolute',
+    height: 1.5,
+    borderRadius: 1,
+    backgroundColor: tokens.colors.textSecondary,
+    transformOrigin: 'left',
   },
   checkbox: {
     borderRadius: 5,
