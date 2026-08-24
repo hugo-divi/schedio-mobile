@@ -272,7 +272,10 @@ export const needsOnboarding = async (uid) => {
   if (!uid) return false;
   try {
     const snap = await getDoc(doc(db, 'users', uid));
-    return snap.exists() ? !snap.data()?.onboardingCompleted : false;
+    // No document means no profile at all, which is as un-onboarded as an
+    // account gets. This returned `false` — sending exactly the accounts that
+    // most need the flow straight past it.
+    return snap.exists() ? !snap.data()?.onboardingCompleted : true;
   } catch (error) {
     // A read failure shouldn't trap anyone in the onboarding.
     console.warn('Could not check onboarding state', error);

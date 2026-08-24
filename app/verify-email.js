@@ -8,6 +8,7 @@ import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 
 import useAuthStore from '../store/authStore';
 import { resendVerificationEmail, refreshEmailVerified } from '../services/auth';
+import { needsOnboarding } from '../services/onboarding';
 import { auth } from '../services/firebase';
 import { tokens } from '../theme/tokens';
 import Button from '../components/ui/Button';
@@ -44,7 +45,12 @@ export default function VerifyEmail() {
         return;
       }
       buzz(Haptics.NotificationFeedbackType.Success);
-      router.replace('/dashboard');
+      // Straight to /dashboard here skipped the onboarding entirely for every
+      // account that signed up with an email: register → verify → dashboard,
+      // with no subjects, no course and no plan. Every other entry point
+      // (login.js, app/index.js) already asked this question; this one didn't.
+      const uid = auth.currentUser?.uid;
+      router.replace((await needsOnboarding(uid)) ? '/onboarding' : '/dashboard');
     } catch {
       setMessage({ type: 'error', text: 'No se pudo comprobar el estado. Inténtalo de nuevo.' });
       buzz(Haptics.NotificationFeedbackType.Error);
