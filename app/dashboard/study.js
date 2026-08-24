@@ -11,6 +11,7 @@ import {
   Dimensions,
   AppState,
   KeyboardAvoidingView,
+  InteractionManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -361,7 +362,45 @@ function MoodPicker({ value, onChange }) {
   );
 }
 
-function StatTile({ value, label, accent = false }) {
+/**
+ * Counts from zero up to `to` once, when it mounts.
+ *
+ * Driven from JS rather than the UI thread on purpose: this runs on a summary
+ * screen with nothing else moving, and the Reanimated equivalent needs an
+ * animated TextInput written from a worklet — far more machinery than a number
+ * that ticks for half a second is worth.
+ */
+function useCountUp(to, duration = 900) {
+  const [shown, setShown] = useState(0);
+
+  useEffect(() => {
+    if (!to) {
+      setShown(0);
+      return;
+    }
+    let frame;
+    const start = Date.now();
+    const tick = () => {
+      const progress = Math.min(1, (Date.now() - start) / duration);
+      // Eased out, so it sprints and then settles rather than crawling to the
+      // final number at a constant rate.
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setShown(Math.round(to * eased));
+      if (progress < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [to, duration]);
+
+  return shown;
+}
+
+function StatTile({ value, label, accent = false, countTo, prefix = '' }) {
+  // The reward is the one number worth animating: landing at its final value
+  // reads as a label, counting up reads as something earned.
+  const counted = useCountUp(countTo);
+  const shown = countTo != null ? `${prefix}${counted}` : value;
+
   return (
     <View style={styles.statTile}>
       <Text
@@ -369,7 +408,7 @@ function StatTile({ value, label, accent = false }) {
         numberOfLines={1}
         adjustsFontSizeToFit
       >
-        {value}
+        {shown}
       </Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
@@ -773,13 +812,22 @@ export default function StudySessionScreen() {
         .catch((error) => console.error('Error saving session feedback:', error));
     }
 
-    savedSessionRef.current = null;
-    setStep('setup');
-    setSummary(null);
-    setMood(null);
-    setNotes('');
-    setGoals([]);
     router.replace('/dashboard');
+
+    // Resetting before navigating is what produced the flash of the empty
+    // "Estudiar" screen between the summary and Inicio: these setState calls
+    // commit immediately and re-render this screen as `setup`, while
+    // router.replace goes through the navigator's own dispatch and lands a
+    // frame or two later. Waiting until the transition has settled means the
+    // reset happens off-screen, where nobody sees it.
+    InteractionManager.runAfterInteractions(() => {
+      savedSessionRef.current = null;
+      setStep('setup');
+      setSummary(null);
+      setMood(null);
+      setNotes('');
+      setGoals([]);
+    });
   };
 
   // ── Goals ──
@@ -1402,7 +1450,7 @@ export default function StudySessionScreen() {
               </Animated.View>
 
               <Animated.View entering={FadeInDown.duration(460).delay(90)} style={styles.statRow}>
-                <StatTile value={`+${summary.xpEarned}`} label="XP ganado" accent />
+                <StatTile countTo={summary.xpEarned} prefix="+" label="XP ganado" accent />
                 <StatTile value={String(stats?.streak ?? 0)} label="Días de racha" />
               </Animated.View>
 
