@@ -45,6 +45,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
+import { syncHomeScreenWidgets } from '../../services/widgetData';
 import { hasDndPermission, enableStudyFocus, disableStudyFocus } from '../../services/focusMode';
 import {
   updateStudySessionNotification,
@@ -683,6 +684,23 @@ export default function StudySessionScreen() {
           focusScore: 5,
           notes: '',
         });
+
+        // The widget only ever refreshed from Inicio's fetch, so finishing a
+        // session and not going back to the home tab left it showing the old
+        // streak and today's task still pending. Runs after the session is
+        // stored, since that's what moves the streak.
+        sessionPromise
+          .then(async () => {
+            const exams = await getUpcomingExams(user.uid, 30).catch(() => []);
+            await syncHomeScreenWidgets({
+              exams,
+              microplans: useUserStore.getState().microplans,
+              subjects: useUserStore.getState().subjects,
+              streak: useUserStore.getState().stats.streak,
+              isPrime: useAuthStore.getState().isPrime,
+            });
+          })
+          .catch((error) => console.warn('Could not refresh the widget', error));
 
         savedSessionRef.current = sessionPromise
           .then((result) => result?.sessionId ?? null)

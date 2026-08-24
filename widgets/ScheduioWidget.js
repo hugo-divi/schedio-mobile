@@ -12,6 +12,10 @@ const openUri = (uri) => ({ clickAction: 'OPEN_URI', clickActionData: { uri } })
  *  exams, so it's the default; the streak pill has had its own screen since
  *  the racha moved out of a bottom sheet. */
 const URI_HOME = 'schedio://dashboard';
+/** The root runs the full session/onboarding decision, unlike a deep link
+ *  straight into a tab — the right destination when there may be no data
+ *  because there may be no session. */
+const URI_ROOT = 'schedio://';
 const URI_STREAK = 'schedio://dashboard/streak';
 
 const daysLabel = (n) => {
@@ -186,6 +190,7 @@ function NoExamMessage({ streak }) {
 function NotReady({ compact }) {
   return (
     <FlexWidget
+      {...openUri(URI_ROOT)}
       style={{
         flexDirection: 'column',
         alignItems: 'center',
@@ -195,17 +200,19 @@ function NotReady({ compact }) {
       }}
     >
       <IconWidget font="material" icon="school" size={compact ? 24 : 28} color={c.textSecondary} />
+      {/* "Abre Schedio" read as an instruction to go find the icon, when the
+          widget itself is the button. */}
       <TextWidget
-        text="Abre Schedio"
+        text="Toca para empezar"
         style={{
           fontSize: compact ? 12 : 14,
           fontWeight: 'bold',
-          color: c.textPrimary,
+          color: c.accent,
           marginTop: 8,
         }}
       />
       <TextWidget
-        text={compact ? 'para empezar' : 'y esto se rellena solo'}
+        text={compact ? 'y verás tus exámenes' : 'y esto se rellena solo'}
         style={{ fontSize: compact ? 10 : 12, color: c.textSecondary, marginTop: 2 }}
       />
     </FlexWidget>

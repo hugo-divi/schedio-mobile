@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
 import { Home, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native';
 import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import React, { useEffect, useState } from 'react';
@@ -10,6 +10,7 @@ import QuickActionsModal from '../../components/QuickActionsModal';
 import EventModal from '../../components/EventModal';
 import UploadModal from '../../components/UploadModal';
 import useUserStore from '../../store/userStore';
+import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
 import { auth } from '../../services/firebase';
 
@@ -18,6 +19,23 @@ export default function DashboardLayout() {
   // whole-store subscription re-rendered all of them (and the three modals
   // below) on any unrelated write.
   const subjects = useUserStore((state) => state.subjects);
+
+  /**
+   * Nothing guarded this route. Reaching it directly — a widget's deep link,
+   * a notification — with no session landed on an empty dashboard instead of
+   * the login screen. Sends them through `/`, which is the one screen that
+   * knows where an account should actually go.
+   *
+   * Waits for `authResolved` rather than just `!user`: on a cold start from a
+   * deep link the listener hasn't reported yet, and bouncing on that would
+   * throw out a perfectly good restored session.
+   */
+  const router = useRouter();
+  const authedUser = useAuthStore((state) => state.user);
+  const authResolved = useAuthStore((state) => state.authResolved);
+  useEffect(() => {
+    if (authResolved && !authedUser) router.replace('/');
+  }, [authResolved, authedUser, router]);
   const [quickActionsVisible, setQuickActionsVisible] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);
