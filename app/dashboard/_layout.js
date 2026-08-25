@@ -12,6 +12,7 @@ import UploadModal from '../../components/UploadModal';
 import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
+import useSessionStore from '../../store/sessionStore';
 import { auth } from '../../services/firebase';
 
 export default function DashboardLayout() {
@@ -128,6 +129,19 @@ export default function DashboardLayout() {
     setQuickActionsVisible((open) => !open);
   };
 
+  /**
+   * Estudiar hides the tab bar once the timer is running, but this button is
+   * not in the tab bar — it floats over everything from here — so it stayed
+   * put, offering a way out of the one screen built not to have one.
+   */
+  const sessionActive = useSessionStore((state) => state.sessionActive);
+
+  // A session can be started from the quick-actions sheet itself, which would
+  // otherwise be left open over the timer with no button left to close it.
+  useEffect(() => {
+    if (sessionActive) setQuickActionsVisible(false);
+  }, [sessionActive]);
+
   return (
     <View style={styles.root}>
       <Tabs screenOptions={screenOptions}>
@@ -202,16 +216,18 @@ export default function DashboardLayout() {
 
       {/* Last child on purpose: it has to paint over the sheet above, the way
           the "+" sits on the sheet's top edge rather than under it. */}
-      <Pressable
-        onPress={toggleQuickActions}
-        style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.92 }] }]}
-        accessibilityRole="button"
-        accessibilityLabel={quickActionsVisible ? 'Cerrar acciones rápidas' : 'Acciones rápidas'}
-      >
-        <Animated.View style={fabIconStyle}>
-          <Plus size={28} color="#FFFFFF" strokeWidth={3} />
-        </Animated.View>
-      </Pressable>
+      {sessionActive ? null : (
+        <Pressable
+          onPress={toggleQuickActions}
+          style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.92 }] }]}
+          accessibilityRole="button"
+          accessibilityLabel={quickActionsVisible ? 'Cerrar acciones rápidas' : 'Acciones rápidas'}
+        >
+          <Animated.View style={fabIconStyle}>
+            <Plus size={28} color="#FFFFFF" strokeWidth={3} />
+          </Animated.View>
+        </Pressable>
+      )}
 
       <EventModal
         visible={eventModalVisible}

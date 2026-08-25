@@ -16,7 +16,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
+import { useRouter, useNavigation, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Play, Pause, X, Check, Plus, Trash2, BellOff, Flame } from 'lucide-react-native';
 import Svg, {
   Circle as SvgCircle,
@@ -61,6 +61,7 @@ import {
 import useAuthStore from '../../store/authStore';
 import useUserStore from '../../store/userStore';
 import usePreferencesStore from '../../store/preferencesStore';
+import useSessionStore from '../../store/sessionStore';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
@@ -590,6 +591,7 @@ export default function StudySessionScreen() {
   const hideFocusReminder = usePreferencesStore((state) => state.hideFocusReminder);
   const setHideFocusReminder = usePreferencesStore((state) => state.setHideFocusReminder);
   const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
+  const setSessionActive = useSessionStore((state) => state.setSessionActive);
 
   const params = useLocalSearchParams();
   const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
@@ -618,7 +620,6 @@ export default function StudySessionScreen() {
   const [isPaused, setIsPaused] = useState(false);
 
   const [focusSheetVisible, setFocusSheetVisible] = useState(false);
-  const [dontShowReminder, setDontShowReminder] = useState(false);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
 
   const [summary, setSummary] = useState(null);
@@ -776,12 +777,10 @@ export default function StudySessionScreen() {
       startSession(duration);
       return;
     }
-    setDontShowReminder(false);
     setFocusSheetVisible(true);
   };
 
   const confirmFocusSheet = () => {
-    if (dontShowReminder) setHideFocusReminder(true);
     setFocusSheetVisible(false);
     startSession(duration);
   };
@@ -1048,6 +1047,23 @@ export default function StudySessionScreen() {
     if (goal) setGoals([{ id: Date.now(), text: String(goal), completed: false }]);
     startSession(minutes);
   }, [autoStart, subjectId, paramDuration, goal, taskId, subjects, startSession]);
+
+  /**
+   * The floating "+" is not part of the tab bar — it is absolutely positioned
+   * in `app/dashboard/_layout.js` — so the `setOptions` below never reached it
+   * and it kept hovering over a running session.
+   *
+   * Tied to focus as well as to `step` because the timer deliberately keeps
+   * running when the screen isn't showing (`freezeOnBlur: false`): the button
+   * should come back with the rest of the furniture the moment the student is
+   * looking at something else, and disappear again when they return.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      setSessionActive(step === 'timer');
+      return () => setSessionActive(false);
+    }, [step, setSessionActive])
+  );
 
   // Zen mode: the tab bar would be an exit ramp mid-session.
   useEffect(() => {
@@ -1643,12 +1659,17 @@ export default function StudySessionScreen() {
       {step === 'timer' && renderTimer()}
       {step === 'end' && renderEnd()}
 
+      {/* The tick writes the preference there and then rather than on
+          "Empezar sesión". It used to be staged in local state and only
+          committed by that button, so ticking the box and then dismissing the
+          sheet — a change of mind about starting, not about the reminder —
+          threw the choice away and the sheet came back next time. */}
       <FocusReminderSheet
         visible={focusSheetVisible}
         onClose={() => setFocusSheetVisible(false)}
         onStart={confirmFocusSheet}
-        dontShow={dontShowReminder}
-        onToggleDontShow={() => setDontShowReminder((v) => !v)}
+        dontShow={hideFocusReminder}
+        onToggleDontShow={() => setHideFocusReminder(!hideFocusReminder)}
       />
 
       <RecoverSessionSheet
