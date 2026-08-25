@@ -48,11 +48,15 @@ import Input from '../components/ui/Input';
 import Card from '../components/ui/Card';
 import BottomSheet from '../components/ui/BottomSheet';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
+import OnboardingCalc from '../components/OnboardingCalc';
+import OnboardingPaywall from '../components/OnboardingPaywall';
 
 const font = tokens.typography.families.inter;
 
 const TOTAL_STEPS = 7;
 const DURATIONS = [30, 45, 60];
+
+const formatGrade = (value) => value.toFixed(1).replace('.', ',');
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
 
@@ -99,6 +103,16 @@ export default function Onboarding() {
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(1);
+
+  /**
+   * The two interstitials — the estimate calculation (after step 4) and the
+   * Prime offer (after step 5). Neither is a step: they stay out of
+   * `TOTAL_STEPS`, out of "Paso X de 7" and out of the saved progress, because
+   * counting them would turn a seven-step flow into a nine-step one and make
+   * the paywall in particular read as something you have to get through.
+   */
+  const [calculating, setCalculating] = useState(false);
+  const [paywall, setPaywall] = useState(false);
 
   const [educationLevel, setEducationLevel] = useState(null);
   const [currentGrade, setCurrentGrade] = useState('');
@@ -249,8 +263,34 @@ export default function Onboarding() {
     } else {
       await saveOnboardingStep(uid, patchFor(next));
     }
+
+    /* The interstitials advance the flow themselves once they are done. The
+       step after each one is already saved above, so closing the app mid-way
+       resumes there instead of replaying either — which matters most for the
+       paywall: one that reappears after being walked away from is nagging. */
+    if (step === 4) {
+      setCalculating(true);
+      return;
+    }
+    if (step === 5) {
+      setPaywall(true);
+      return;
+    }
+
     setStep(next);
   };
+
+  const afterCalc = useCallback(() => {
+    setCalculating(false);
+    setStep(5);
+  }, []);
+
+  /** Same exit for both buttons: buying and declining differ in what they
+   * unlock, not in where the student ends up. */
+  const afterPaywall = useCallback(() => {
+    setPaywall(false);
+    setStep(6);
+  }, []);
 
   const goBack = async () => {
     if (step === 1) {
@@ -434,8 +474,16 @@ export default function Onboarding() {
         return (
           <>
             <Text style={styles.title}>Tus asignaturas</Text>
-            <Text style={styles.lead}>
+            <Text style={[styles.lead, { marginBottom: 6 }]}>
               Añade entre {MIN_SUBJECTS} y {MAX_SUBJECTS}. Toca una para cambiarle el color.
+            </Text>
+            {/* The cap and the minimum both read as demands, and a student who
+                can't remember their full timetable stalls here rather than
+                guessing. Naming where they can fix it later is what actually
+                unblocks them — a vague "no hay prisa" doesn't. */}
+            <Text style={[styles.hint, { marginTop: 0, marginBottom: 20 }]}>
+              No hace falta que sea la lista definitiva. Podrás añadir, quitar o cambiar asignaturas
+              cuando quieras desde tu perfil.
             </Text>
 
             {educationLevel === 'Bachillerato' ? (
@@ -940,6 +988,18 @@ export default function Onboarding() {
           Estos pesos son una primera versión, todavía sin calibrar contra resultados reales.
         </Text>
       </BottomSheet>
+
+      {/* Last in the tree so they paint over the header and the footer: neither
+          gets a progress bar, a back arrow or a "Siguiente". */}
+      {calculating ? <OnboardingCalc onDone={afterCalc} /> : null}
+
+      {paywall ? (
+        <OnboardingPaywall
+          target={formatGrade(estimate.range[1])}
+          onContinueFree={afterPaywall}
+          onPurchased={afterPaywall}
+        />
+      ) : null}
     </View>
   );
 }

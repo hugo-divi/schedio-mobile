@@ -2,8 +2,12 @@ import { doc, getDoc, setDoc, updateDoc, collection, addDoc } from 'firebase/fir
 import { db } from './firebase';
 import { MAX_SUBJECTS_FREE, SUBJECT_COLORS_FREE } from './permissions';
 
-// Nobody is Prime yet during onboarding (see MAX_SUBJECTS below), so this
-// always hands out the free eight — never the Prime-only extras.
+// Subjects are picked on step 2, and the Prime offer does not appear until
+// after step 5, so nobody choosing subjects can be Prime yet: this always
+// hands out the free eight, never the Prime-only extras. The one seam is a
+// student who buys Prime at the paywall and then walks all the way back to
+// step 2 — they keep the free cap here and get the rest from their profile,
+// which is a fair trade for not making this screen watch the entitlement.
 export const SUBJECT_COLORS = SUBJECT_COLORS_FREE;
 
 export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
@@ -68,7 +72,7 @@ export const ACQUISITION_SOURCES = [
 ];
 
 export const MIN_SUBJECTS = 3;
-// Nobody is Prime yet during onboarding, so the free cap always applies here.
+// Free cap, for the reason spelled out above SUBJECT_COLORS.
 export const MAX_SUBJECTS = MAX_SUBJECTS_FREE;
 export const MIN_SUBJECT_NAME = 2;
 
@@ -150,11 +154,17 @@ export const REVIEW_FREQUENCY = [
   { value: 'always', label: 'Siempre', desc: 'Repasas de forma constante, haya examen o no.' },
 ];
 
+/**
+ * Labels are written from the student's side — the obstacle they'd recognise in
+ * themselves — rather than as categories of system. The `value` and
+ * `organizationLevel` behind each one are unchanged, so nothing downstream
+ * moves: this is wording, not a remodelled question.
+ */
 export const TASK_MANAGEMENT = [
   {
     value: 'memory',
-    label: 'Solo memoria, voy sobre la marcha',
-    desc: 'No apuntas plazos en ningún sitio.',
+    label: 'Se me olvida todo, no apunto nada',
+    desc: 'Tiras de memoria y de lo que te recuerden en clase.',
     // Feeds `organizationLevel`, which is what estimateDailyCapacity in
     // microplanService budgets the daily plan against. Dropping this field
     // would leave the planner stuck on its default of 75 min a day.
@@ -162,20 +172,20 @@ export const TASK_MANAGEMENT = [
   },
   {
     value: 'scattered',
-    label: 'Notas dispersas, sin sistema claro',
-    desc: 'Apuntas cosas, pero cada una en un sitio distinto.',
+    label: 'Apunto cosas, pero pierdo el hilo',
+    desc: 'Cada cosa acaba en un sitio distinto: agenda, móvil, folios.',
     organizationLevel: 2,
   },
   {
     value: 'calendar',
-    label: 'Calendario o app de notas',
-    desc: 'Tienes un sitio fijo donde apuntar, aunque no lo revises siempre.',
+    label: 'Tengo un sitio fijo, pero no lo miro tanto como debería',
+    desc: 'Un calendario o una app de notas donde va todo.',
     organizationLevel: 4,
   },
   {
     value: 'organized',
-    label: 'Organizado: lista central, plazos claros',
-    desc: 'Sabes en todo momento qué tienes pendiente y para cuándo.',
+    label: 'Tengo todo controlado, sé qué me queda pendiente',
+    desc: 'Lista central y plazos claros, siempre al día.',
     organizationLevel: 5,
   },
 ];
