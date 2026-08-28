@@ -25,6 +25,15 @@ const palette = {
   accentSoftBg: 'rgba(41, 121, 255, 0.14)',
   accentSoftBorder: 'rgba(41, 121, 255, 0.28)',
   accentSoftText: '#2979FF',
+  /**
+   * Backgrounds for a study break — `accentSoftBg` already flattened onto
+   * `bgBase` and onto `surfaceHover`. Opaque rather than layered because the
+   * timer swaps the whole screen's colour, and because the pair has to stay
+   * legible as two steps of the same blue: tone says break, lightness says
+   * whether the clock is running.
+   */
+  breakBase: '#1B2639',
+  breakPaused: '#2B374A',
   premiumText: '#D4A94C',
   premiumBg: 'rgba(212, 169, 76, 0.12)',
   premiumBorder: 'rgba(212, 169, 76, 0.3)',

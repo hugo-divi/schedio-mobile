@@ -2,6 +2,15 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { RHYTHMS, DEFAULT_RHYTHM } from '../services/studyRhythm';
+
+/** Each preset keeps its own numbers, so switching away and back doesn't wipe
+ *  what the student set. This is what makes "my routine" work without a
+ *  routines feature: put 30/10 in once and it's there next time. */
+const initialRhythms = Object.fromEntries(
+  Object.entries(RHYTHMS).map(([key, { work, rest, blocks }]) => [key, { work, rest, blocks }])
+);
+
 const usePreferencesStore = create(
   persist(
     (set) => ({
@@ -26,6 +35,35 @@ const usePreferencesStore = create(
       // Off by default until they've actually granted it.
       focusModeEnabled: false,
       setFocusModeEnabled: (value) => set({ focusModeEnabled: value }),
+
+      // ── Study rhythm ──
+
+      /** Which preset Estudiar opens on. Persisted so it opens on whatever was
+       *  used last rather than always on Continuo — a student whose routine is
+       *  Pomodoro never has to open the picker at all. */
+      studyRhythmMode: DEFAULT_RHYTHM,
+      setStudyRhythmMode: (mode) => set({ studyRhythmMode: mode }),
+
+      studyRhythms: initialRhythms,
+      setStudyRhythm: (mode, patch) =>
+        set((state) => ({
+          studyRhythms: {
+            ...state.studyRhythms,
+            [mode]: { ...(state.studyRhythms?.[mode] || RHYTHMS[mode]), ...patch },
+          },
+        })),
+
+      /**
+       * False until the first session is started, and while it's false the
+       * picker renders open. It's how anyone finds out rhythms exist at all:
+       * collapsed, the card just says "Continuo" and there's nothing telling
+       * you it's worth tapping.
+       *
+       * Flipped by *starting* a session rather than by tapping the header, so
+       * having seen it once is enough even if you scrolled straight past.
+       */
+      hasSeenRhythmPicker: false,
+      markRhythmPickerSeen: () => set({ hasSeenRhythmPicker: true }),
     }),
     {
       name: 'schedio-preferences-storage',

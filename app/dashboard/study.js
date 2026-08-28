@@ -27,7 +27,6 @@ import Svg, {
   RadialGradient,
   Stop,
 } from 'react-native-svg';
-import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   FadeIn,
@@ -55,37 +54,48 @@ import { hasDndPermission, enableStudyFocus, disableStudyFocus } from '../../ser
 import {
   updateStudySessionNotification,
   stopStudySessionNotification,
+  scheduleBreakEndAlert,
+  cancelBreakEndAlert,
   addNotificationActionListener,
   ACTION,
 } from '../../services/studyNotification';
+import {
+  RHYTHMS,
+  DEFAULT_RHYTHM,
+  isCyclic,
+  normalizeRhythm,
+  phaseAt,
+  breakTipFor,
+  staleAfterMs,
+} from '../../services/studyRhythm';
 import useAuthStore from '../../store/authStore';
 import useUserStore from '../../store/userStore';
 import usePreferencesStore from '../../store/preferencesStore';
 import useSessionStore from '../../store/sessionStore';
+import RhythmPicker from '../../components/RhythmPicker';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import SchedioLogoReveal from '../../components/SchedioLogoReveal';
 import AchievementCelebration from '../../components/AchievementCelebration';
-import { Emoji } from '../../components/ui/Emoji';
 
 const font = tokens.typography.families.inter;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const MIN_MINUTES = 15;
-const MAX_MINUTES = 120;
-const MINUTE_STEP = 5;
+// The slider bounds moved to services/studyRhythm.js, where the rhythms that
+// use them live. Only the fallback for a plan task with no duration is still
+// needed here.
 const DEFAULT_MINUTES = 25;
 
 // Where an in-progress session is snapshotted so it survives the screen
 // locking, the app backgrounding, or Android killing the process outright —
 // none of which should cost the student their timer or their objectives.
 const SESSION_STORAGE_KEY = '@schedio/active_study_session';
-// Longer than the longest possible session (MAX_MINUTES) plus a grace window:
-// past this, a leftover snapshot is abandoned, not resumable, and shouldn't
-// prompt "continue?" for a session from days ago.
-const STALE_SESSION_MS = (MAX_MINUTES + 30) * 60 * 1000;
+// How long a snapshot stays resumable is now `staleAfterMs` in
+// services/studyRhythm.js, computed from the session's own rhythm: a single
+// ceiling can't cover both a 25-minute Continuo and eight blocks of Schedio
+// Study without being uselessly generous for the first.
 
 // Timer ring geometry, scaled from the 220px circle in the design.
 const RING_SIZE = Math.min(220, SCREEN_WIDTH - 96);
@@ -128,13 +138,6 @@ const formatTime = (seconds) => {
   const mins = Math.floor(safe / 60);
   const secs = safe % 60;
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-};
-
-const sessionPhrase = (mins) => {
-  if (mins < 30) return { emoji: 'relievedFace', label: 'Estudio de chill' };
-  if (mins < 45) return { emoji: 'bullseye', label: 'Alto foco' };
-  if (mins < 60) return { emoji: 'brain', label: 'Deep work' };
-  return { emoji: 'highVoltage', label: 'Modo Schedio activado' };
 };
 
 // The four faces map onto the 1–5 focusScore that history.js renders as stars.
@@ -593,6 +596,13 @@ export default function StudySessionScreen() {
   const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
   const setSessionActive = useSessionStore((state) => state.setSessionActive);
 
+  const rhythmMode = usePreferencesStore((state) => state.studyRhythmMode);
+  const storedRhythms = usePreferencesStore((state) => state.studyRhythms);
+  const setStudyRhythmMode = usePreferencesStore((state) => state.setStudyRhythmMode);
+  const setStudyRhythm = usePreferencesStore((state) => state.setStudyRhythm);
+  const hasSeenRhythmPicker = usePreferencesStore((state) => state.hasSeenRhythmPicker);
+  const markRhythmPickerSeen = usePreferencesStore((state) => state.markRhythmPickerSeen);
+
   const params = useLocalSearchParams();
   const { autoStart, subjectId, duration: paramDuration, goal, taskId } = params || {};
 
@@ -622,6 +632,14 @@ export default function StudySessionScreen() {
   const [focusSheetVisible, setFocusSheetVisible] = useState(false);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
 
+  /**
+   * Both derived from elapsed time, never counted — `phaseAt` is the only
+   * thing that decides them. They live in state purely so the screen can
+   * repaint; nothing reads them to work out where the session is.
+   */
+  const [phase, setPhase] = useState('work');
+  const [block, setBlock] = useState(1);
+
   const [summary, setSummary] = useState(null);
   // 'draw' while the mark is being traced, 'settled' once the summary can land.
   const [endPhase, setEndPhase] = useState('draw');
@@ -643,6 +661,19 @@ export default function StudySessionScreen() {
   const sessionStartRef = useRef(null);
   const pausedMsRef = useRef(0);
   const pauseStartedAtRef = useRef(null);
+  /**
+   * Breaks the student cut short. Added to the elapsed time rather than
+   * subtracted, so skipping fast-forwards the session past the rest of that
+   * break — the work total is untouched, only the wall clock shortens.
+   */
+  const skippedMsRef = useRef(0);
+  /** The rhythm this running session was started with. Held in a ref, not
+   *  state: changing the picker mid-session must not reshape a session that
+   *  is already under way. */
+  const activeRhythmRef = useRef(null);
+  /** Last phase `tick` saw, so a crossing can be spotted the moment it
+   *  happens rather than inferred from a re-render. */
+  const lastPhaseRef = useRef('work');
   // The write kicked off when the timer stopped. Held as a promise, not an id,
   // so a student who types fast and taps "Volver a Inicio" before Firestore
   // answers still gets their notes attached.
@@ -658,6 +689,14 @@ export default function StudySessionScreen() {
     [subjects, selectedSubject]
   );
 
+  /** The rhythm the picker is currently showing. Continuo is pinned to a
+   *  single block with no break whatever happens to be stored for it. */
+  const rhythm = useMemo(() => {
+    const stored = storedRhythms?.[rhythmMode] || RHYTHMS[rhythmMode] || RHYTHMS[DEFAULT_RHYTHM];
+    const base = normalizeRhythm(stored);
+    return isCyclic(rhythmMode) ? base : { ...base, rest: 0, blocks: 1 };
+  }, [storedRhythms, rhythmMode]);
+
   // Nearest upcoming exam per subject, for the reason line on the chip.
   const reasonBySubject = useMemo(() => {
     const map = {};
@@ -671,33 +710,82 @@ export default function StudySessionScreen() {
 
   // ── Session lifecycle ──
 
-  const startSession = useCallback((minutes) => {
-    const total = Math.round(minutes) * 60;
-    sessionStartRef.current = Date.now();
-    pausedMsRef.current = 0;
-    pauseStartedAtRef.current = null;
-    setTimeLeft(total);
-    setIsActive(true);
-    setIsPaused(false);
-    setStep('timer');
-    if (Platform.OS !== 'web') {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  }, []);
+  const startSession = useCallback(
+    (sessionRhythm) => {
+      const active = normalizeRhythm(sessionRhythm);
+      activeRhythmRef.current = active;
+      sessionStartRef.current = Date.now();
+      pausedMsRef.current = 0;
+      pauseStartedAtRef.current = null;
+      skippedMsRef.current = 0;
+      lastPhaseRef.current = 'work';
+
+      // `duration` stays what it always was — the session's total, in minutes
+      // of actual studying. Breaks are on top of it and never inside it, which
+      // is what keeps the number that reaches XP and the streak honest.
+      setDuration(active.work * active.blocks);
+      setTimeLeft(phaseAt(0, active).remaining);
+      setPhase('work');
+      setBlock(1);
+      setIsActive(true);
+      setIsPaused(false);
+      setStep('timer');
+      // Starting counts as having seen the picker, even for someone who
+      // scrolled straight past it.
+      markRhythmPickerSeen();
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    },
+    [markRhythmPickerSeen]
+  );
 
   /** Applies a snapshot (fresh from storage, either resumed by the student or
    * auto-applied because it had already finished) as the live session. */
   const applyRecoveredSession = useCallback((snapshot) => {
+    // A snapshot written before rhythms existed has no `rhythm` at all. Read
+    // as a single uninterrupted block it is exactly what it was — so someone
+    // who updates the app mid-session gets their session back rather than a
+    // crash.
+    const active = normalizeRhythm(
+      snapshot.rhythm || { work: snapshot.duration, rest: 0, blocks: 1 }
+    );
+    activeRhythmRef.current = active;
     sessionStartRef.current = snapshot.sessionStart;
     pausedMsRef.current = snapshot.pausedMs || 0;
+    skippedMsRef.current = snapshot.skippedMs || 0;
     pauseStartedAtRef.current = null;
+
+    const elapsed = Math.floor(
+      (Date.now() - snapshot.sessionStart - (snapshot.pausedMs || 0) + (snapshot.skippedMs || 0)) /
+        1000
+    );
+    const at = phaseAt(elapsed, active);
+    lastPhaseRef.current = at.phase;
+
     setSelectedSubject(snapshot.subjectId);
-    setDuration(snapshot.duration);
+    setDuration(active.work * active.blocks);
     setGoals(snapshot.goals || []);
+    setPhase(at.phase);
+    setBlock(at.block);
+    setTimeLeft(at.remaining);
     setIsPaused(false);
     setIsActive(true);
     setStep('timer');
     setRecoverableSession(null);
+
+    // Landing back inside a break means the alert booked when it started died
+    // with the old process. Without this it would be the one break of the
+    // session that never announces itself. No subject name here on purpose:
+    // the subject is only being set in this same pass, so the notification
+    // falls back to naming the block.
+    if (Platform.OS === 'android' && at.phase === 'break' && !at.finished) {
+      scheduleBreakEndAlert({
+        timestamp: Date.now() + at.remaining * 1000,
+        block: Math.min(active.blocks, at.block + 1),
+        totalBlocks: active.blocks,
+      });
+    }
   }, []);
 
   const discardRecoveredSession = useCallback(() => {
@@ -713,6 +801,9 @@ export default function StudySessionScreen() {
   const pauseTimer = useCallback(() => {
     pauseStartedAtRef.current = Date.now();
     setIsPaused(true);
+    // A booked break alert is now wrong — pausing moves the end of the break.
+    // It gets booked again on resume, for whatever the new end time is.
+    if (Platform.OS === 'android') cancelBreakEndAlert();
   }, []);
 
   const resumeTimer = useCallback(() => {
@@ -721,7 +812,21 @@ export default function StudySessionScreen() {
       pauseStartedAtRef.current = null;
     }
     setIsPaused(false);
-  }, []);
+
+    if (Platform.OS !== 'android' || !sessionStartRef.current || !activeRhythmRef.current) return;
+    const active = activeRhythmRef.current;
+    const elapsedMs =
+      Date.now() - sessionStartRef.current - pausedMsRef.current + skippedMsRef.current;
+    const at = phaseAt(Math.floor(elapsedMs / 1000), active);
+    if (at.phase === 'break' && !at.finished) {
+      scheduleBreakEndAlert({
+        timestamp: Date.now() + at.remaining * 1000,
+        subjectName: currentSubject?.name,
+        block: Math.min(active.blocks, at.block + 1),
+        totalBlocks: active.blocks,
+      });
+    }
+  }, [currentSubject]);
 
   const togglePause = useCallback(() => {
     if (isPaused) resumeTimer();
@@ -774,7 +879,7 @@ export default function StudySessionScreen() {
     // itself — if focus mode is on and actually granted, it's about to do
     // that for real, so asking the student to do it by hand is redundant.
     if (hideFocusReminder || (focusModeEnabled && hasDndPermission())) {
-      startSession(duration);
+      startSession(rhythm);
       return;
     }
     setFocusSheetVisible(true);
@@ -782,7 +887,7 @@ export default function StudySessionScreen() {
 
   const confirmFocusSheet = () => {
     setFocusSheetVisible(false);
-    startSession(duration);
+    startSession(rhythm);
   };
 
   /**
@@ -799,9 +904,23 @@ export default function StudySessionScreen() {
         console.error('[Study] Error clearing persisted session:', error)
       );
 
-      const totalSeconds = duration * 60;
-      const secondsSpent = Math.max(0, totalSeconds - timeLeft);
-      const minutesSpent = Math.floor(secondsSpent / 60);
+      /**
+       * Work only. This used to be `duration*60 − timeLeft`, i.e. everything
+       * the clock had run, which with cycles would have handed the student XP
+       * for their breaks. And it isn't only XP: the same number goes to
+       * `addSession` as `duration`, where it feeds the streak's daily total,
+       * `totalTime` in the stats, and the badge checks. One number, four
+       * places — so it gets computed once, from the work half of each cycle.
+       */
+      const active =
+        activeRhythmRef.current || normalizeRhythm({ work: duration, rest: 0, blocks: 1 });
+      const elapsedSeconds = sessionStartRef.current
+        ? Math.floor(
+            (Date.now() - sessionStartRef.current - pausedMsRef.current + skippedMsRef.current) /
+              1000
+          )
+        : 0;
+      const minutesSpent = Math.floor(phaseAt(elapsedSeconds, active).workDone / 60);
       const subject = subjects.find((s) => s.id === selectedSubject);
 
       // Same formula the store awards with, so the number on screen is the
@@ -903,7 +1022,9 @@ export default function StudySessionScreen() {
           .catch(() => {});
       }
     },
-    [duration, timeLeft, subjects, selectedSubject, goals, user?.uid, taskId]
+    // `timeLeft` is gone: the minutes are now worked out from the wall clock
+    // and the rhythm, so the once-a-second state no longer rebuilds this.
+    [duration, subjects, selectedSubject, goals, user?.uid, taskId]
   );
 
   const handleFinish = () => {
@@ -1043,10 +1164,27 @@ export default function StudySessionScreen() {
     const minutes = Number.isFinite(parsed) ? parsed : DEFAULT_MINUTES;
 
     setSelectedSubject(subject.id);
-    setDuration(minutes);
     if (goal) setGoals([{ id: Date.now(), text: String(goal), completed: false }]);
-    startSession(minutes);
-  }, [autoStart, subjectId, paramDuration, goal, taskId, subjects, startSession]);
+
+    // The plan hands over minutes of work; the rhythm decides how they're cut
+    // up. Enough blocks to cover what was assigned, so the task still finishes
+    // — the plan sets a budget, not a shape.
+    startSession(
+      isCyclic(rhythmMode)
+        ? { ...rhythm, blocks: Math.max(1, Math.ceil(minutes / rhythm.work)) }
+        : { work: minutes, rest: 0, blocks: 1 }
+    );
+  }, [
+    autoStart,
+    subjectId,
+    paramDuration,
+    goal,
+    taskId,
+    subjects,
+    startSession,
+    rhythm,
+    rhythmMode,
+  ]);
 
   /**
    * The floating "+" is not part of the tab bar — it is absolutely positioned
@@ -1091,12 +1229,69 @@ export default function StudySessionScreen() {
   // lands on the true remaining time instead of resuming from a stale count.
   const tick = useCallback(() => {
     if (!sessionStartRef.current) return null;
-    const elapsedMs = Date.now() - sessionStartRef.current - pausedMsRef.current;
-    const remaining = Math.max(0, duration * 60 - Math.floor(elapsedMs / 1000));
-    setTimeLeft(remaining);
-    if (remaining === 0) handleComplete(false);
-    return remaining;
-  }, [duration, handleComplete]);
+
+    const active =
+      activeRhythmRef.current || normalizeRhythm({ work: duration, rest: 0, blocks: 1 });
+    const elapsedMs =
+      Date.now() - sessionStartRef.current - pausedMsRef.current + skippedMsRef.current;
+    const at = phaseAt(Math.floor(elapsedMs / 1000), active);
+
+    setTimeLeft(at.remaining);
+    setPhase(at.phase);
+    setBlock(at.block);
+
+    // Crossing a boundary, caught here rather than in an effect on `phase`, so
+    // it happens at the moment itself and with the numbers already in hand.
+    if (!at.finished && at.phase !== lastPhaseRef.current) {
+      lastPhaseRef.current = at.phase;
+
+      if (at.phase === 'break') {
+        // Going into a break costs nothing to miss — you just keep working —
+        // so it gets a nudge, not an announcement. A haptic is not a
+        // notification, so the session's own Do Not Disturb never mutes it.
+        if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+        if (Platform.OS === 'android') {
+          scheduleBreakEndAlert({
+            timestamp: Date.now() + at.remaining * 1000,
+            subjectName: currentSubject?.name,
+            block: Math.min(active.blocks, at.block + 1),
+            totalBlocks: active.blocks,
+          });
+        }
+      } else {
+        // Back to work. Whatever was booked has either just fired or is no
+        // longer wanted.
+        if (Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        }
+        if (Platform.OS === 'android') cancelBreakEndAlert();
+      }
+    }
+
+    if (at.finished) handleComplete(false);
+    return at.remaining;
+  }, [duration, handleComplete, currentSubject]);
+
+  /**
+   * Gives back what's left of a break. Implemented by pushing the session
+   * forward rather than by moving any pointer: everything is derived from
+   * elapsed time, so adding the unused remainder to `skippedMs` lands the
+   * session exactly at the start of the next block. The work total doesn't
+   * move — only the clock does.
+   */
+  const skipBreak = useCallback(() => {
+    if (!sessionStartRef.current || !activeRhythmRef.current) return;
+    const active = activeRhythmRef.current;
+    const elapsedMs =
+      Date.now() - sessionStartRef.current - pausedMsRef.current + skippedMsRef.current;
+    const at = phaseAt(Math.floor(elapsedMs / 1000), active);
+    if (at.phase !== 'break' || at.finished) return;
+
+    skippedMsRef.current += at.remaining * 1000;
+    if (Platform.OS === 'android') cancelBreakEndAlert();
+    if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+    tick();
+  }, [tick]);
 
   useEffect(() => {
     if (!isActive || isPaused) return;
@@ -1126,11 +1321,19 @@ export default function StudySessionScreen() {
       goals,
       sessionStart: sessionStartRef.current,
       pausedMs: pausedMsRef.current,
+      // The rhythm is all the cycle state there is: which block and which
+      // phase are worked back out of the elapsed time on recovery, so there
+      // is nothing else to keep in step here.
+      rhythm: activeRhythmRef.current,
+      skippedMs: skippedMsRef.current,
     };
     AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot)).catch((error) =>
       console.error('[Study] Error persisting session:', error)
     );
-  }, [step, isPaused, goals, selectedSubject, duration]);
+    // `phase` is in the deps so a snapshot is written at every crossing too —
+    // a skipped break changes `skippedMs`, and losing that would put a
+    // recovered session back where the break had been.
+  }, [step, isPaused, phase, goals, selectedSubject, duration]);
 
   // Android only: the ongoing lock-screen notification, kept in lockstep with
   // the same state the persistence effect above watches. The chronometer
@@ -1144,9 +1347,17 @@ export default function StudySessionScreen() {
       return;
     }
 
-    const totalSeconds = duration * 60;
+    const active =
+      activeRhythmRef.current || normalizeRhythm({ work: duration, rest: 0, blocks: 1 });
+    // The progress bar still measures the whole session; only the chronometer
+    // switched to the current phase. One figure each, nothing duplicated.
+    const totalSeconds = active.work * active.blocks * 60 + active.rest * (active.blocks - 1) * 60;
 
     const publish = () => {
+      const elapsedMs =
+        Date.now() - sessionStartRef.current - pausedMsRef.current + skippedMsRef.current;
+      const at = phaseAt(Math.floor(elapsedMs / 1000), active);
+
       if (isPaused) {
         updateStudySessionNotification({
           subjectName: currentSubject?.name,
@@ -1154,16 +1365,24 @@ export default function StudySessionScreen() {
           paused: true,
           remainingSeconds: timeLeft,
           totalSeconds,
+          phase: at.phase,
+          block: at.block,
+          totalBlocks: active.blocks,
         });
       } else {
-        const elapsedMs = Date.now() - sessionStartRef.current - pausedMsRef.current;
         updateStudySessionNotification({
           subjectName: currentSubject?.name,
           goals,
           paused: false,
-          endTimestamp: sessionStartRef.current + totalSeconds * 1000 + pausedMsRef.current,
+          // End of the current phase, not of the session: the native
+          // chronometer and the ring on screen have to be counting the same
+          // thing or one of them is lying.
+          endTimestamp: Date.now() + at.remaining * 1000,
           elapsedSeconds: Math.floor(elapsedMs / 1000),
           totalSeconds,
+          phase: at.phase,
+          block: at.block,
+          totalBlocks: active.blocks,
         });
       }
     };
@@ -1180,7 +1399,7 @@ export default function StudySessionScreen() {
     // only needs to read whatever it was at the moment of pausing, not
     // re-fire (and re-notify) on every subsequent tick while running.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, isPaused, goals, currentSubject, duration]);
+  }, [step, isPaused, phase, goals, currentSubject, duration]);
 
   // Action buttons on the notification itself (Pausar/Reanudar, Terminar) —
   // same handlers the on-screen controls use, so behavior can't drift apart.
@@ -1190,10 +1409,11 @@ export default function StudySessionScreen() {
       if (step !== 'timer') return;
       if (action === ACTION.PAUSE) pauseTimer();
       else if (action === ACTION.RESUME) resumeTimer();
+      else if (action === ACTION.SKIP) skipBreak();
       else if (action === ACTION.STOP) handleComplete(true);
     });
     return unsubscribe;
-  }, [step, pauseTimer, resumeTimer, handleComplete]);
+  }, [step, pauseTimer, resumeTimer, skipBreak, handleComplete]);
 
   // Once, on launch: was a session left running when the app last closed?
   useEffect(() => {
@@ -1212,14 +1432,22 @@ export default function StudySessionScreen() {
         const snapshot = JSON.parse(raw);
         const elapsedSinceStart = Date.now() - snapshot.sessionStart;
 
-        if (elapsedSinceStart > STALE_SESSION_MS) {
+        // Worked out from this snapshot's own rhythm rather than from one
+        // global ceiling. The old constant was 150 minutes, and a four-block
+        // Schedio Study session runs 259 — a perfectly live session was being
+        // thrown away as stale.
+        const active = normalizeRhythm(
+          snapshot.rhythm || { work: snapshot.duration, rest: 0, blocks: 1 }
+        );
+        if (elapsedSinceStart > staleAfterMs(active)) {
           return;
         }
 
-        const totalSeconds = Math.round(snapshot.duration) * 60;
-        const elapsedSeconds = Math.floor((elapsedSinceStart - (snapshot.pausedMs || 0)) / 1000);
+        const elapsedSeconds = Math.floor(
+          (elapsedSinceStart - (snapshot.pausedMs || 0) + (snapshot.skippedMs || 0)) / 1000
+        );
 
-        if (totalSeconds - elapsedSeconds <= 0) {
+        if (phaseAt(elapsedSeconds, active).finished) {
           // It finished while the app was closed — land on the summary
           // instead of asking "continue?" a session that's already over.
           applyRecoveredSession(snapshot);
@@ -1296,31 +1524,18 @@ export default function StudySessionScreen() {
           )}
         </View>
 
-        {/* Tiempo */}
+        {/* Ritmo — "ritmo" and not "método", which to a student also means the
+            technique itself, nor "plan", which is a screen. */}
         <View style={styles.section}>
-          <SectionTitle>Tiempo de sesión</SectionTitle>
+          <SectionTitle>Ritmo de estudio</SectionTitle>
 
-          <Card padding={20}>
-            <View style={styles.durationRow}>
-              <Text style={styles.durationValue}>{duration}</Text>
-              <Text style={styles.durationUnit}>min</Text>
-            </View>
-            <Slider
-              style={styles.slider}
-              minimumValue={MIN_MINUTES}
-              maximumValue={MAX_MINUTES}
-              step={MINUTE_STEP}
-              value={duration}
-              onValueChange={(value) => setDuration(Math.round(value))}
-              minimumTrackTintColor={tokens.colors.accent}
-              maximumTrackTintColor={tokens.colors.borderDefault}
-              thumbTintColor={tokens.colors.accent}
-            />
-            <View style={styles.durationPhraseRow}>
-              <Emoji name={sessionPhrase(duration).emoji} size={15} />
-              <Text style={styles.durationPhrase}>{sessionPhrase(duration).label}</Text>
-            </View>
-          </Card>
+          <RhythmPicker
+            mode={rhythmMode}
+            rhythm={rhythm}
+            onModeChange={setStudyRhythmMode}
+            onRhythmChange={(patch) => setStudyRhythm(rhythmMode, patch)}
+            startOpen={!hasSeenRhythmPicker}
+          />
         </View>
 
         {/* Objetivos */}
@@ -1365,14 +1580,49 @@ export default function StudySessionScreen() {
   // ── Render: timer ──
 
   const renderTimer = () => {
-    const totalSeconds = duration * 60;
-    const remainingFraction = totalSeconds > 0 ? Math.max(0, timeLeft) / totalSeconds : 0;
+    const active =
+      activeRhythmRef.current || normalizeRhythm({ work: duration, rest: 0, blocks: 1 });
+    const onBreak = phase === 'break';
+    const blocks = active.blocks;
+
+    // The ring measures the block you're in, not the whole session — the same
+    // thing every timer of this kind shows, and better feedback besides. How
+    // far along the session is lives in the dots above it.
+    const phaseSeconds = (onBreak ? active.rest : active.work) * 60;
+    const remainingFraction = phaseSeconds > 0 ? Math.max(0, timeLeft) / phaseSeconds : 0;
     const dashOffset = RING_CIRCUMFERENCE * remainingFraction;
     const reason = reasonBySubject[selectedSubject];
 
+    /**
+     * Two axes, both carried by the background. Its *tone* says work or break;
+     * its *lightness* says whether the clock is running at all. With cycles
+     * "paused" and "on a break" are different things — one the student chose,
+     * one the rhythm did — and if they looked alike nobody could tell whether
+     * time was still passing.
+     */
+    const background = onBreak
+      ? isPaused
+        ? tokens.colors.breakPaused
+        : tokens.colors.breakBase
+      : isPaused
+        ? tokens.colors.surfaceHover
+        : tokens.colors.background;
+
+    const ringColor = onBreak
+      ? tokens.colors.textPrimary
+      : isPanicTask
+        ? tokens.colors.danger
+        : tokens.colors.accent;
+
     return (
       <GestureDetector gesture={dragToStop}>
-        <Animated.View style={[styles.timerContainer, { paddingTop: insets.top + 24 }, dragStyle]}>
+        <Animated.View
+          style={[
+            styles.timerContainer,
+            { paddingTop: insets.top + 24, backgroundColor: background },
+            dragStyle,
+          ]}
+        >
           <StatusBar hidden />
 
           <View style={styles.timerHeader}>
@@ -1392,6 +1642,21 @@ export default function StudySessionScreen() {
             )}
           </View>
 
+          {blocks > 1 ? (
+            <View style={styles.blockDots}>
+              {Array.from({ length: blocks }, (_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.blockDot,
+                    i + 1 < block && styles.blockDotDone,
+                    i + 1 === block && styles.blockDotNow,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
+
           <View style={styles.ringWrap}>
             <Svg width={RING_SIZE} height={RING_SIZE} style={styles.ringSvg}>
               <SvgCircle
@@ -1406,7 +1671,11 @@ export default function StudySessionScreen() {
                 cx={RING_SIZE / 2}
                 cy={RING_SIZE / 2}
                 r={RING_RADIUS}
-                stroke={isPanicTask ? tokens.colors.danger : tokens.colors.accent}
+                stroke={ringColor}
+                // Keeps its phase colour when paused but drops right back:
+                // it still says *what* is stopped without pretending anything
+                // is moving.
+                strokeOpacity={isPaused ? 0.35 : 1}
                 strokeWidth={RING_STROKE}
                 strokeLinecap="round"
                 fill="none"
@@ -1417,9 +1686,11 @@ export default function StudySessionScreen() {
               />
             </Svg>
             <View style={styles.ringCenter}>
-              <Text style={styles.timeDisplay}>{formatTime(timeLeft)}</Text>
+              <Text style={[styles.timeDisplay, isPaused && styles.timeDisplayPaused]}>
+                {formatTime(timeLeft)}
+              </Text>
               <Text style={styles.timeState}>
-                {isPaused ? 'EN PAUSA' : isPanicTask ? 'PÁNICO' : 'ENFOQUE'}
+                {isPaused ? 'EN PAUSA' : onBreak ? 'DESCANSO' : isPanicTask ? 'PÁNICO' : 'ENFOQUE'}
               </Text>
             </View>
           </View>
@@ -1461,7 +1732,22 @@ export default function StudySessionScreen() {
             </TouchableOpacity>
           </View>
 
-          {goals.length > 0 ? (
+          {/* Each phase keeps only what belongs to it. Objectives during a
+              break would be half-finished work asking for attention in the one
+              stretch that exists for not giving it any. */}
+          {onBreak ? (
+            <Animated.View entering={FadeIn.duration(220)} style={styles.breakBlock}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={skipBreak}
+                accessibilityRole="button"
+                style={styles.skipBreak}
+              >
+                <Text style={styles.skipBreakText}>Saltar descanso</Text>
+              </TouchableOpacity>
+              <Text style={styles.breakTip}>{breakTipFor(block)}</Text>
+            </Animated.View>
+          ) : goals.length > 0 ? (
             <View style={styles.timerGoals}>
               <OverlineLabel>Objetivos</OverlineLabel>
               <ScrollView style={styles.timerGoalsScroll} showsVerticalScrollIndicator={false}>
@@ -2004,6 +2290,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: tokens.colors.textPrimary,
   },
+  timeDisplayPaused: { color: tokens.colors.textSecondary },
   timeState: {
     fontFamily: font.semibold,
     fontSize: 12,
@@ -2032,6 +2319,49 @@ const styles = StyleSheet.create({
   },
   timerGoalsScroll: {
     marginTop: 4,
+  },
+
+  // Session progress, since the ring is busy measuring the current block.
+  blockDots: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 18,
+  },
+  blockDot: {
+    width: 7,
+    height: 7,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.borderDefault,
+  },
+  blockDotDone: { backgroundColor: tokens.colors.accent },
+  blockDotNow: { backgroundColor: tokens.colors.textPrimary },
+
+  breakBlock: {
+    width: '100%',
+    marginTop: 22,
+    flex: 1,
+    alignItems: 'center',
+  },
+  skipBreak: {
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  skipBreakText: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  breakTip: {
+    marginTop: 18,
+    maxWidth: 240,
+    textAlign: 'center',
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
   },
   stopOverlay: {
     ...StyleSheet.absoluteFillObject,
