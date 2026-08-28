@@ -14,7 +14,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
-import * as StoreReview from 'expo-store-review';
 import {
   ChevronLeft,
   ChevronRight,
@@ -51,6 +50,25 @@ import { openLegal } from '../constants/legal';
 import CustomAlert from '../components/CustomAlert';
 import { Toggle } from '../components/ui/Toggle';
 import BottomSheet from '../components/ui/BottomSheet';
+
+/**
+ * Guarded the same way services/focusMode.js guards its own native module,
+ * and for the same reason: a static import throws on a dev client built
+ * before expo-store-review shipped, and because it throws at module scope it
+ * takes the whole Settings route down with it. expo-router then reports the
+ * screen as "missing the required default export", which points nowhere near
+ * the real cause.
+ *
+ * Rating the app is the least important thing on this screen. Account
+ * deletion, the legal links and the focus-mode toggle all live here too, and
+ * none of them should vanish because an optional module is absent.
+ */
+let StoreReview = null;
+try {
+  StoreReview = require('expo-store-review');
+} catch {
+  StoreReview = null;
+}
 
 const font = tokens.typography.families.inter;
 
@@ -342,7 +360,10 @@ export default function SettingsScreen() {
 
   const handleRateApp = async () => {
     try {
-      if (await StoreReview.hasAction()) {
+      // Without the native module the in-app review sheet simply isn't
+      // available, and the store page below is the honest fallback — which is
+      // the same path a device that can't show the sheet already took.
+      if (StoreReview && (await StoreReview.hasAction())) {
         await StoreReview.requestReview();
       } else {
         await Linking.openURL('https://play.google.com/store/apps/details?id=com.schedio.mobile');
