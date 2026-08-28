@@ -430,23 +430,26 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
+  // Tightened so all six actions land on one screen. Every row loses a couple
+  // of pixels rather than any one of them losing a line: the descriptions are
+  // what make the actions choosable without opening them.
   list: {
-    gap: 8,
+    gap: 7,
     marginTop: 16,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 14,
+    gap: 12,
+    padding: 12,
     backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
     borderColor: tokens.colors.borderDefault,
     borderRadius: tokens.radius.card,
   },
   rowIcon: {
-    width: 38,
-    height: 38,
+    width: 34,
+    height: 34,
     borderRadius: tokens.radius.btn,
     backgroundColor: tokens.colors.surfaceHover,
     alignItems: 'center',

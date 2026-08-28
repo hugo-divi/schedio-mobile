@@ -1,4 +1,4 @@
-import { Tabs, useRouter } from 'expo-router';
+import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Home, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native';
 import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import React, { useEffect, useState } from 'react';
@@ -141,6 +141,18 @@ export default function DashboardLayout() {
   useEffect(() => {
     if (sessionActive) setQuickActionsVisible(false);
   }, [sessionActive]);
+
+  /**
+   * Changing tab closes the sheet. It is anchored to the tab bar and belongs
+   * to no tab in particular, so leaving it open across a switch left it
+   * hovering over a screen the student had deliberately moved to — and the
+   * "+" underneath it had already rotated back to a plus, so the way out
+   * wasn't obvious either.
+   */
+  const pathname = usePathname();
+  useEffect(() => {
+    setQuickActionsVisible(false);
+  }, [pathname]);
 
   return (
     <View style={styles.root}>

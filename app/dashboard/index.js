@@ -126,6 +126,8 @@ export default function Dashboard() {
   // the tab doesn't leave a timer behind that opens the modal on a screen the
   // student has already navigated away from.
   const gradePromptTimerRef = useRef(null);
+  /** Whether this app launch has already offered to record a grade. */
+  const gradePromptDoneRef = useRef(false);
 
   // Modals state
   const [eventModalVisible, setEventModalVisible] = useState(false);
@@ -237,7 +239,14 @@ export default function Dashboard() {
       // in-memory default (`true`) a second later and the modal opened for
       // students who had switched it off. The delay was a guess; this waits
       // for the store to say it has actually hydrated.
-      if (pendingExamsData && pendingExamsData.length > 0) {
+      //
+      // Once per launch, not once per visit. `fetchData` also runs on every
+      // return to this tab, so asking here unguarded meant the modal reappeared
+      // each time the student came back to Inicio — a prompt they had just
+      // dismissed, over and over. The ref lives as long as the process, so a
+      // genuine cold start asks again and nothing else does.
+      if (!gradePromptDoneRef.current && pendingExamsData && pendingExamsData.length > 0) {
+        gradePromptDoneRef.current = true;
         const exam = pendingExamsData[0];
         clearTimeout(gradePromptTimerRef.current);
         gradePromptTimerRef.current = setTimeout(async () => {
@@ -492,9 +501,9 @@ export default function Dashboard() {
     const map = new Map();
     rankExams(exams, subjects, ctx).forEach((exam) => {
       const score = exam.priorityScore;
-      // Below MEDIUM_PRIORITY_SCORE stays untinted (undefined tone) rather
-      // than green: most exams sit there, and coloring all of them would make
-      // the thermometer decorative instead of a signal for what to look at.
+      // No longer paints anything — the chips are all the same neutral grey
+      // now. What survives is the band itself, which is what decides whether a
+      // row is labelled "Prioridad alta" or falls back to its manual level.
       const tone =
         score >= HIGH_PRIORITY_SCORE
           ? 'danger'
@@ -791,7 +800,12 @@ export default function Dashboard() {
                         ) : null}
                       </View>
 
-                      <Chip tone={priorityInfo?.tone} active={urgent}>
+                      {/* Deliberately untinted. The priority still decides what
+                          this says, but not what colour it is: a list where
+                          every row carries a different shade reads as decoration
+                          rather than as a signal, and the wording already
+                          carries the meaning. */}
+                      <Chip>
                         {urgent
                           ? 'Prioridad alta'
                           : (MANUAL_PRIORITY_LABELS[exam.manualPriority ?? exam.priority] ??

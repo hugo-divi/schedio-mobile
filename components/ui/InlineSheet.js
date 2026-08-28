@@ -113,7 +113,13 @@ const styles = StyleSheet.create({
     // Capped so a tall view (the grade form with the keyboard up) can never
     // grow into a full-screen takeover — the point of this sheet is that the
     // app stays visible behind it.
-    maxHeight: SCREEN_HEIGHT * 0.6,
+    //
+    // Raised from 0.6: the six quick actions didn't fit, so the main view
+    // opened already scrollable. A sheet you have to scroll to see the last
+    // option hides it, and the scroll fights the swipe-down anyone expects
+    // from the grab handle. A quarter of the screen plus the tab bar is still
+    // plenty to keep the app present behind it.
+    maxHeight: SCREEN_HEIGHT * 0.75,
     backgroundColor: tokens.colors.background,
     borderTopWidth: 1,
     borderTopColor: tokens.colors.borderDefault,
@@ -132,7 +138,8 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: 20,
     // Clears the raised "+" that overlaps this sheet's bottom edge, so the
-    // last action is never sitting underneath it.
-    paddingBottom: 44,
+    // last action is never sitting underneath it. The button's top edge lands
+    // ~16px inside the sheet, so this has room to spare at 32.
+    paddingBottom: 32,
   },
 });
