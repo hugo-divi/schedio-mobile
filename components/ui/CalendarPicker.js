@@ -16,6 +16,7 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import * as Haptics from 'expo-haptics';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
 
 const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -80,7 +81,14 @@ export function CalendarPicker({ value, onChange }) {
           const todayCell = isToday(day);
 
           return (
-            <View key={i} style={styles.slot}>
+            // Keyed by date so the weeks re-enter when the month changes and
+            // stay put when anything else re-renders — same reasoning as
+            // MiniCalendar, written out in full there.
+            <Animated.View
+              key={day.toISOString()}
+              entering={FadeInDown.delay(Math.floor(i / 7) * 40).duration(240)}
+              style={styles.slot}
+            >
               <TouchableOpacity
                 style={[
                   styles.cell,
@@ -96,7 +104,7 @@ export function CalendarPicker({ value, onChange }) {
                   {format(day, 'd')}
                 </Text>
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           );
         })}
       </View>

@@ -3,7 +3,14 @@ import { Home, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native'
 import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import React, { useEffect, useState } from 'react';
 import * as Haptics from 'expo-haptics';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import Animated, {
+  FadeIn,
+  LinearTransition,
+  interpolateColor,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from 'react-native-reanimated';
 import { FAB_SIZE, FAB_BOTTOM } from '../../components/ui/InlineSheet';
 import { tokens } from '../../theme/tokens';
 import QuickActionsModal from '../../components/QuickActionsModal';
@@ -14,6 +21,73 @@ import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
 import useSessionStore from '../../store/sessionStore';
 import { auth } from '../../services/firebase';
+
+/**
+ * One tab. Only the selected one carries its name, inside a pill.
+ *
+ * The pill isn't a new visual language: `accentSoftBg` on `accentSoftBorder`
+ * is already how the app says "selected" everywhere else — subject chips, the
+ * rhythm options, the acquisition chips in onboarding. This applies that rule
+ * to the bar rather than inventing one for it.
+ *
+ * Labels on the other three are dropped because four of them competing at once
+ * is most of the noise down here, and one visible name is enough to stay
+ * oriented — a map icon does not read as "Plan" on anyone's first day.
+ */
+function PillTab({ icon: Icon, label, accessibilityState, onPress, onLongPress }) {
+  const focused = !!accessibilityState?.selected;
+  const progress = useSharedValue(focused ? 1 : 0);
+
+  useEffect(() => {
+    // The spring the central "+" already uses, so the bar moves like the rest
+    // of the app rather than in a dialect of its own.
+    progress.value = withSpring(focused ? 1 : 0, { damping: 18, stiffness: 260, mass: 0.6 });
+  }, [focused, progress]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      ['rgba(41, 121, 255, 0)', tokens.colors.accentSoftBg]
+    ),
+    borderColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      ['rgba(41, 121, 255, 0)', tokens.colors.accentSoftBorder]
+    ),
+  }));
+
+  return (
+    <Pressable
+      onPress={(event) => {
+        if (!focused && Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+        onPress?.(event);
+      }}
+      onLongPress={onLongPress}
+      style={styles.tabSlot}
+      accessibilityRole="button"
+      accessibilityState={{ selected: focused }}
+      // The name is always announced even when it isn't drawn, so dropping the
+      // labels costs sighted users some clutter and screen-reader users nothing.
+      accessibilityLabel={label}
+    >
+      {/* LinearTransition is what makes the pill grow into the label rather
+          than snap around it the frame the text mounts. */}
+      <Animated.View style={[styles.tabPill, pillStyle]} layout={LinearTransition.duration(220)}>
+        <Icon
+          size={22}
+          color={focused ? tokens.colors.accent : tokens.colors.textDisabled}
+          strokeWidth={focused ? 2.5 : 2}
+        />
+        {focused ? (
+          <Animated.Text entering={FadeIn.duration(160)} style={styles.tabLabel} numberOfLines={1}>
+            {label}
+          </Animated.Text>
+        ) : null}
+      </Animated.View>
+    </Pressable>
+  );
+}
 
 export default function DashboardLayout() {
   // Selector form on purpose: this component is the parent of every tab, so a
@@ -81,11 +155,9 @@ export default function DashboardLayout() {
       },
       tabBarActiveTintColor: tokens.colors.accent,
       tabBarInactiveTintColor: tokens.colors.textDisabled,
-      tabBarLabelStyle: {
-        fontFamily: tokens.typography.families.inter.medium,
-        fontSize: 11,
-        marginTop: 4,
-      },
+      // Every tab draws itself through PillTab now, icon and name together —
+      // the built-in label would sit underneath it as a second copy.
+      tabBarShowLabel: false,
       tabBarItemStyle: {
         justifyContent: 'center',
         alignItems: 'center',
@@ -161,9 +233,7 @@ export default function DashboardLayout() {
           name="index"
           options={{
             title: 'Inicio',
-            tabBarIcon: ({ color, focused }) => (
-              <Home size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
-            ),
+            tabBarButton: (props) => <PillTab {...props} icon={Home} label="Inicio" />,
           }}
         />
         <Tabs.Screen
@@ -173,9 +243,7 @@ export default function DashboardLayout() {
             // The one tab that must keep running while it isn't on screen: it
             // owns the session timer.
             freezeOnBlur: false,
-            tabBarIcon: ({ color, focused }) => (
-              <BookOpen size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
-            ),
+            tabBarButton: (props) => <PillTab {...props} icon={BookOpen} label="Estudiar" />,
           }}
         />
         {/* Center FAB Button */}
@@ -197,18 +265,14 @@ export default function DashboardLayout() {
           name="plans"
           options={{
             title: 'Plan',
-            tabBarIcon: ({ color, focused }) => (
-              <MapIcon size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
-            ),
+            tabBarButton: (props) => <PillTab {...props} icon={MapIcon} label="Plan" />,
           }}
         />
         <Tabs.Screen
           name="profile"
           options={{
             title: 'Perfil',
-            tabBarIcon: ({ color, focused }) => (
-              <User size={22} color={color} strokeWidth={focused ? 2.5 : 2} />
-            ),
+            tabBarButton: (props) => <PillTab {...props} icon={User} label="Perfil" />,
           }}
         />
         {/* Hidden screens */}
@@ -268,6 +332,26 @@ export default function DashboardLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  tabSlot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+  },
+  tabPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1,
+  },
+  tabLabel: {
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 12,
+    color: tokens.colors.textPrimary,
   },
   fab: {
     position: 'absolute',

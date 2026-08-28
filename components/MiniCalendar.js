@@ -1,5 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import React, { useState } from 'react';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react-native';
 import {
   format,
@@ -103,7 +104,28 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
           const isOutside = expanded && !isSameMonth(day, cursor);
 
           return (
-            <View key={i} style={styles.cellSlot}>
+            /*
+             * Keyed by the date, not by the index. That is what decides when
+             * this animates at all: the cells remount — and so replay — only
+             * when the dates on screen actually change, which is exactly the
+             * week/month toggle and the arrows. A parent re-render (exams
+             * finishing loading, say) keeps the same keys and stays still.
+             *
+             * With `key={i}` neither would have worked: navigating a week
+             * reuses all seven cells and nothing would animate, while
+             * expanding to the month would animate only cells 7–41 and leave
+             * the first row sitting there.
+             *
+             * Staggered by row rather than by day: 42 cells one after another
+             * would run for over a second, six rows at 40ms read as the month
+             * unfolding and are done in 240ms. In week view there is one row,
+             * so it simply arrives at once.
+             */
+            <Animated.View
+              key={day.toISOString()}
+              entering={FadeInDown.delay(Math.floor(i / 7) * 40).duration(240)}
+              style={styles.cellSlot}
+            >
               <TouchableOpacity
                 style={[styles.dayCell, isTodayDate && styles.dayCellToday]}
                 onPress={() => handleDayPress(day)}
@@ -140,7 +162,7 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
                   </View>
                 )}
               </TouchableOpacity>
-            </View>
+            </Animated.View>
           );
         })}
       </View>
