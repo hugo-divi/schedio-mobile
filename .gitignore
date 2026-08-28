@@ -54,6 +54,14 @@ functions/.runtimeconfig.json
 /ios
 /android
 
+# Gradle output from the local Expo modules. The rule above is anchored to the
+# project root, so it never reached the android/ folder that lives inside
+# modules/ — this is build output (merged manifests, compiled classes,
+# incremental caches keyed to one machine's paths) that would otherwise be
+# uploaded with every EAS build.
+modules/*/android/build/
+modules/*/android/.gradle/
+
 # internal dev notes (not for public repo)
 task.md
 CLAUDE.md
