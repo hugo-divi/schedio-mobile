@@ -21,6 +21,16 @@ const db = getFirestore();
 const messaging = getMessaging();
 
 const TIMEZONE = 'Europe/Madrid';
+
+/**
+ * Every scheduled job here walks a collection and sends pushes, and the v2
+ * default of 60 seconds is meant for functions that answer a single event.
+ * A batch that is cut off mid-way is worse than one that runs long: there is
+ * no retry, the users it never reached simply get nothing that day, and the
+ * ones it did reach already have `lastNotifiedDate` written, so a re-run
+ * skips them. 540s is the ceiling for scheduled functions.
+ */
+const BATCH_TIMEOUT_SECONDS = 540;
 // EventModal's own sentinel for "no subject chosen" — a literal string, not
 // null, so exams without a subject still need this exact check.
 const UNASSIGNED_SUBJECT = 'undefined';
@@ -136,37 +146,40 @@ const queryExamsForOffset = async (offsetDays) => {
     .filter((exam) => exam.date && madridDateKey(exam.date.toDate()) === targetKey);
 };
 
-exports.examAlerts = onSchedule({ schedule: '5 8 * * *', timeZone: TIMEZONE }, async () => {
-  for (const offsetDays of [3, 1]) {
-    const exams = await queryExamsForOffset(offsetDays);
-    if (exams.length === 0) continue;
+exports.examAlerts = onSchedule(
+  { schedule: '5 8 * * *', timeZone: TIMEZONE, timeoutSeconds: BATCH_TIMEOUT_SECONDS },
+  async () => {
+    for (const offsetDays of [3, 1]) {
+      const exams = await queryExamsForOffset(offsetDays);
+      if (exams.length === 0) continue;
 
-    const byUser = new Map();
-    for (const exam of exams) {
-      if (!byUser.has(exam.userId)) byUser.set(exam.userId, []);
-      byUser.get(exam.userId).push(exam);
-    }
+      const byUser = new Map();
+      for (const exam of exams) {
+        if (!byUser.has(exam.userId)) byUser.set(exam.userId, []);
+        byUser.get(exam.userId).push(exam);
+      }
 
-    for (const [uid, userExams] of byUser) {
-      const userSnap = await db.collection('users').doc(uid).get();
-      const fcmToken = userSnap.get('fcmToken');
-      if (!fcmToken) continue;
+      for (const [uid, userExams] of byUser) {
+        const userSnap = await db.collection('users').doc(uid).get();
+        const fcmToken = userSnap.get('fcmToken');
+        if (!fcmToken) continue;
 
-      const names = await Promise.all(userExams.map(subjectNameFor));
-      const body =
-        names.length === 1
-          ? EXAM_COPY[offsetDays](names[0])
-          : `Tienes ${names.length} exámenes próximos: ${joinSpanish(names)}.`;
+        const names = await Promise.all(userExams.map(subjectNameFor));
+        const body =
+          names.length === 1
+            ? EXAM_COPY[offsetDays](names[0])
+            : `Tienes ${names.length} exámenes próximos: ${joinSpanish(names)}.`;
 
-      const sent = await sendToUser(uid, fcmToken, { title: 'Schedio', body });
-      if (!sent) continue;
+        const sent = await sendToUser(uid, fcmToken, { title: 'Schedio', body });
+        if (!sent) continue;
 
-      const field = offsetDays === 3 ? 'notified3Days' : 'notified1Day';
-      await Promise.all(userExams.map((exam) => exam.ref.update({ [field]: true })));
-      await markNotifiedToday(uid);
+        const field = offsetDays === 3 ? 'notified3Days' : 'notified1Day';
+        await Promise.all(userExams.map((exam) => exam.ref.update({ [field]: true })));
+        await markNotifiedToday(uid);
+      }
     }
   }
-});
+);
 
 // ── Category 1b: abandoned onboarding ────────────────────────────────────
 
@@ -189,7 +202,7 @@ const ABANDONED_MIN_HOURS = 24;
 const ABANDONED_MAX_DAYS = 14;
 
 exports.abandonedOnboarding = onSchedule(
-  { schedule: '20 17 * * *', timeZone: TIMEZONE },
+  { schedule: '20 17 * * *', timeZone: TIMEZONE, timeoutSeconds: BATCH_TIMEOUT_SECONDS },
   async () => {
     const now = Date.now();
     const notBefore = now - ABANDONED_MIN_HOURS * 3600000;
@@ -246,66 +259,115 @@ const REENGAGEMENT_COOLDOWN_DAYS = 7;
 
 // 5 minutes after examAlerts, so today's lastNotifiedDate write (if any) has
 // already landed before this reads it.
-exports.reengagement = onSchedule({ schedule: '10 8 * * *', timeZone: TIMEZONE }, async () => {
-  const cutoff = new Date(Date.now() - INACTIVE_DAYS * 86400000);
+exports.reengagement = onSchedule(
+  { schedule: '10 8 * * *', timeZone: TIMEZONE, timeoutSeconds: BATCH_TIMEOUT_SECONDS },
+  async () => {
+    const cutoff = new Date(Date.now() - INACTIVE_DAYS * 86400000);
 
-  const usersSnap = await db.collection('users').where('lastOpenTimestamp', '<=', cutoff).get();
+    const usersSnap = await db.collection('users').where('lastOpenTimestamp', '<=', cutoff).get();
 
-  for (const doc of usersSnap.docs) {
-    const data = doc.data();
-    if (!data.fcmToken) continue;
-    if (alreadyNotifiedToday(data)) continue;
+    for (const doc of usersSnap.docs) {
+      const data = doc.data();
+      if (!data.fcmToken) continue;
+      if (alreadyNotifiedToday(data)) continue;
 
-    const lastSent = data.lastReengagementSentAt?.toDate?.();
-    const cooledDown =
-      !lastSent || Date.now() - lastSent.getTime() >= REENGAGEMENT_COOLDOWN_DAYS * 86400000;
-    if (!cooledDown) continue;
+      const lastSent = data.lastReengagementSentAt?.toDate?.();
+      const cooledDown =
+        !lastSent || Date.now() - lastSent.getTime() >= REENGAGEMENT_COOLDOWN_DAYS * 86400000;
+      if (!cooledDown) continue;
 
-    const sent = await sendToUser(doc.id, data.fcmToken, {
-      title: 'Schedio',
-      body: REENGAGEMENT_COPY,
-    });
-    if (!sent) continue;
+      const sent = await sendToUser(doc.id, data.fcmToken, {
+        title: 'Schedio',
+        body: REENGAGEMENT_COPY,
+      });
+      if (!sent) continue;
 
-    await doc.ref.update({
-      lastReengagementSentAt: FieldValue.serverTimestamp(),
-      lastNotifiedDate: madridDateKey(new Date()),
-    });
+      await doc.ref.update({
+        lastReengagementSentAt: FieldValue.serverTimestamp(),
+        lastNotifiedDate: madridDateKey(new Date()),
+      });
+    }
   }
-});
+);
 
 // ── Category 3: weekly summary ───────────────────────────────────────────
 
-exports.weeklySummary = onSchedule({ schedule: '0 20 * * 0', timeZone: TIMEZONE }, async () => {
-  const weekAgo = new Date(Date.now() - 7 * 86400000);
+/** Users fetched and pushed per round. Small enough that one slow FCM call
+ *  can't stall a large batch, big enough to matter against 25 sequential
+ *  round trips. */
+const SUMMARY_CHUNK = 25;
 
-  // A full collection scan is fine at this scale (private beta); revisit if
-  // the user base grows enough to make it worth an index-backed filter.
-  const usersSnap = await db.collection('users').get();
+exports.weeklySummary = onSchedule(
+  {
+    schedule: '0 20 * * 0',
+    timeZone: TIMEZONE,
+    timeoutSeconds: BATCH_TIMEOUT_SECONDS,
+    // Holds a week of session documents in memory at once; 256MiB is the
+    // default and leaves no room as the app grows.
+    memory: '512MiB',
+  },
+  async () => {
+    const weekAgo = new Date(Date.now() - 7 * 86400000);
 
-  for (const doc of usersSnap.docs) {
-    const data = doc.data();
-    if (!data.fcmToken) continue;
-    if (alreadyNotifiedToday(data)) continue;
+    /*
+     * Asked of the sessions, not of the users.
+     *
+     * This used to read every user document and then run one sessions query
+     * per user — work proportional to the entire user base, nearly all of it
+     * spent on people who studied nothing that week and were skipped anyway.
+     * Two problems came with that: it grew without bound, and it was
+     * sequential, so it was already past the (then default, 60s) timeout at a
+     * few hundred users, cut off silently with no retry.
+     *
+     * Turning the question round bounds the job by what actually happened
+     * that week, which is the shape examAlerts already had — bounded by the
+     * exams in its window rather than by who exists. It also drops the
+     * composite index the old per-user query needed: a single range filter on
+     * `date` rides the automatic single-field index.
+     */
+    const sessionsSnap = await db.collection('sessions').where('date', '>=', weekAgo).get();
 
-    const sessionsSnap = await db
-      .collection('sessions')
-      .where('userId', '==', doc.id)
-      .where('date', '>=', weekAgo)
-      .get();
+    const countByUser = new Map();
+    for (const doc of sessionsSnap.docs) {
+      const uid = doc.get('userId');
+      if (!uid) continue;
+      countByUser.set(uid, (countByUser.get(uid) || 0) + 1);
+    }
 
-    const count = sessionsSnap.size;
-    if (count === 0) continue; // no positive reinforcement to give — stay silent
+    if (countByUser.size === 0) return;
 
-    const sent = await sendToUser(doc.id, data.fcmToken, {
-      title: 'Schedio',
-      body: `Esta semana completaste ${count} sesiones de estudio. Buen ritmo.`,
-    });
-    if (!sent) continue;
+    const uids = [...countByUser.keys()];
 
-    await doc.ref.update({ lastNotifiedDate: madridDateKey(new Date()) });
+    for (let i = 0; i < uids.length; i += SUMMARY_CHUNK) {
+      const slice = uids.slice(i, i + SUMMARY_CHUNK);
+      // Only the students who are actually getting a message get read.
+      const snaps = await db.getAll(...slice.map((uid) => db.collection('users').doc(uid)));
+
+      await Promise.all(
+        snaps.map(async (snap) => {
+          if (!snap.exists) return;
+          const data = snap.data();
+          if (!data.fcmToken) return;
+          // Still the same one-push-a-day flag the other two categories read.
+          if (alreadyNotifiedToday(data)) return;
+
+          const count = countByUser.get(snap.id) || 0;
+          if (count === 0) return; // no positive reinforcement to give — stay silent
+
+          const sent = await sendToUser(snap.id, data.fcmToken, {
+            title: 'Schedio',
+            body: `Esta semana completaste ${count} ${
+              count === 1 ? 'sesión' : 'sesiones'
+            } de estudio. Buen ritmo.`,
+          });
+          if (!sent) return;
+
+          await snap.ref.update({ lastNotifiedDate: madridDateKey(new Date()) });
+        })
+      );
+    }
   }
-});
+);
 
 // ── AI proxy ──────────────────────────────────────────────────────────────
 // The client used to call Gemini directly with a key shipped in the app
