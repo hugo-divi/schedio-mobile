@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import Slider from '@react-native-community/slider';
 import Animated, {
   FadeIn,
+  FadeInDown,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -51,12 +52,23 @@ const clockAfter = (minutes) => {
   return `${end.getHours()}:${end.getMinutes().toString().padStart(2, '0')}`;
 };
 
-/** Fired into place one after another. The header stays put and the four
- *  options arrive behind it, which reads as the list coming out of the header
- *  rather than a panel appearing somewhere else. */
+/**
+ * Fired into place one after another, 45 ms apart. A spring rather than a
+ * fade, and deliberately the same one the central "+" uses in
+ * app/dashboard/_layout.js: it overshoots slightly and settles, which is what
+ * makes the options read as shot out of the header instead of merely
+ * appearing there.
+ */
 function Option({ label, selected, index, onPress }) {
   return (
-    <Animated.View style={styles.optionWrap} entering={FadeIn.delay(index * 45).duration(220)}>
+    <Animated.View
+      style={styles.optionWrap}
+      entering={FadeInDown.delay(index * 45)
+        .springify()
+        .damping(18)
+        .stiffness(260)
+        .mass(0.6)}
+    >
       <TouchableOpacity
         activeOpacity={0.8}
         onPress={onPress}

@@ -41,6 +41,7 @@ import Animated, {
   withDelay,
   runOnJS,
   interpolate,
+  interpolateColor,
   Easing,
   ZoomIn,
 } from 'react-native-reanimated';
@@ -681,6 +682,37 @@ export default function StudySessionScreen() {
 
   const dragY = useSharedValue(0);
   const flash = useSharedValue(0);
+
+  /**
+   * The timer's background, as two independent axes: tone says work or break,
+   * lightness says whether the clock is running. Eased rather than swapped —
+   * a screen that changes colour in one frame reads as a glitch, and this
+   * colour is carrying the only signal that says a break has begun.
+   */
+  const breakness = useSharedValue(0);
+  const pausedness = useSharedValue(0);
+
+  useEffect(() => {
+    breakness.value = withTiming(phase === 'break' ? 1 : 0, { duration: 260 });
+  }, [phase, breakness]);
+
+  useEffect(() => {
+    pausedness.value = withTiming(isPaused ? 1 : 0, { duration: 200 });
+  }, [isPaused, pausedness]);
+
+  const surfaceStyle = useAnimatedStyle(() => {
+    const running = interpolateColor(
+      breakness.value,
+      [0, 1],
+      [tokens.colors.background, tokens.colors.breakBase]
+    );
+    const halted = interpolateColor(
+      breakness.value,
+      [0, 1],
+      [tokens.colors.surfaceHover, tokens.colors.breakPaused]
+    );
+    return { backgroundColor: interpolateColor(pausedness.value, [0, 1], [running, halted]) };
+  });
 
   // ── Derived ──
 
@@ -1593,21 +1625,6 @@ export default function StudySessionScreen() {
     const dashOffset = RING_CIRCUMFERENCE * remainingFraction;
     const reason = reasonBySubject[selectedSubject];
 
-    /**
-     * Two axes, both carried by the background. Its *tone* says work or break;
-     * its *lightness* says whether the clock is running at all. With cycles
-     * "paused" and "on a break" are different things — one the student chose,
-     * one the rhythm did — and if they looked alike nobody could tell whether
-     * time was still passing.
-     */
-    const background = onBreak
-      ? isPaused
-        ? tokens.colors.breakPaused
-        : tokens.colors.breakBase
-      : isPaused
-        ? tokens.colors.surfaceHover
-        : tokens.colors.background;
-
     const ringColor = onBreak
       ? tokens.colors.textPrimary
       : isPanicTask
@@ -1617,11 +1634,7 @@ export default function StudySessionScreen() {
     return (
       <GestureDetector gesture={dragToStop}>
         <Animated.View
-          style={[
-            styles.timerContainer,
-            { paddingTop: insets.top + 24, backgroundColor: background },
-            dragStyle,
-          ]}
+          style={[styles.timerContainer, { paddingTop: insets.top + 24 }, surfaceStyle, dragStyle]}
         >
           <StatusBar hidden />
 
