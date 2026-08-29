@@ -171,7 +171,9 @@ export default function OnboardingPaywall({ target, onContinueFree, onPurchased 
           <Text style={styles.ghostText}>Continuar con la versión gratuita</Text>
         </TouchableOpacity>
 
-        <Text style={styles.footNote}>Cancela cuando quieras desde Google Play</Text>
+        <Text style={styles.footNote}>
+          Suscripción mensual con renovación automática. Cancela cuando quieras desde Google Play.
+        </Text>
       </View>
     </View>
   );

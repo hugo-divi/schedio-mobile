@@ -325,7 +325,13 @@ export default function SchedioPlusScreen() {
               loading={purchasing}
               disabled={offeringsLoading}
             />
-            <Text style={styles.cancelNote}>Cancela cuando quieras</Text>
+            {/* Play exige que el precio, la periodicidad y el carácter
+                recurrente estén dichos antes de pagar — no solo implicados
+                por el "/ mes" de arriba. */}
+            <Text style={styles.cancelNote}>
+              Suscripción mensual con renovación automática. Cancela cuando quieras desde Google
+              Play.
+            </Text>
           </View>
         </ScrollView>
 
@@ -640,8 +646,10 @@ const styles = StyleSheet.create({
   },
   cancelNote: {
     fontFamily: font.regular,
-    fontSize: 13,
+    fontSize: 12,
+    lineHeight: 17,
     color: tokens.colors.textSecondary,
+    textAlign: 'center',
   },
   planFooter: {
     alignItems: 'center',
