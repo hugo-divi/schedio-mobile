@@ -280,7 +280,6 @@ export default function DashboardLayout() {
         <Tabs.Screen name="analysis" options={{ href: null }} />
         <Tabs.Screen name="streak" options={{ href: null }} />
         <Tabs.Screen name="history" options={{ href: null }} />
-        <Tabs.Screen name="recommendations" options={{ href: null }} />
       </Tabs>
 
       <QuickActionsModal

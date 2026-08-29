@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
-  Lock,
   Plus,
   Clock,
   ChevronRight,
@@ -40,7 +39,6 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle from '../../components/ui/SectionTitle';
-import { PremiumBadge } from '../../components/ui/Chip';
 
 const font = tokens.typography.families.inter;
 
@@ -148,29 +146,6 @@ function Segmented({ value, onChange, options }) {
         );
       })}
     </View>
-  );
-}
-
-/**
- * The AI planner is deliberately inert. CLAUDE.md puts the coach outside the
- * initial launch, so this advertises it rather than running it — the store
- * still carries `generateAiPlans` for when it ships.
- */
-function AiTeaser() {
-  return (
-    <Card padding={16}>
-      <View style={styles.teaserHead}>
-        <Lock size={18} strokeWidth={1.75} color={tokens.colors.textDisabled} />
-        <Text style={styles.teaserTitle}>Planificar con IA</Text>
-        <View style={{ marginLeft: 'auto' }}>
-          <PremiumBadge>Prime</PremiumBadge>
-        </View>
-      </View>
-      <Text style={styles.teaserNote}>Próximamente</Text>
-      <View style={styles.teaserButton}>
-        <Text style={styles.teaserButtonText}>GENERAR</Text>
-      </View>
-    </Card>
   );
 }
 
@@ -685,8 +660,11 @@ export default function PlansScreen() {
 
   const renderPlanes = () => (
     <View style={styles.tabBody}>
-      <AiTeaser />
-
+      {/* AiTeaser retirado para la revisión de Play Store: era un control con
+          badge Prime y botón GENERAR sin `onPress` — una función de pago
+          anunciada dentro de la app que todavía no existe. Vuelve el 6 de
+          septiembre, con el coach ya funcionando detrás. El componente está
+          en el commit anterior a este. */}
       <View>
         <SectionTitle>Planes automáticos</SectionTitle>
         <Text style={styles.sectionNote}>
