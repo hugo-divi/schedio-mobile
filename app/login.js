@@ -16,7 +16,13 @@ import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 
 import useAuthStore from '../store/authStore';
-import { signIn, signInWithGoogle, getAuthErrorMessage } from '../services/auth';
+import {
+  signIn,
+  signInWithGoogle,
+  getAuthErrorMessage,
+  getGoogleSignInErrorMessage,
+  GOOGLE_SIGNIN_ENABLED,
+} from '../services/auth';
 import { auth } from '../services/firebase';
 import { needsOnboarding } from '../services/onboarding';
 import { tokens } from '../theme/tokens';
@@ -82,15 +88,9 @@ export default function Login() {
         router.replace((await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard');
       }
     } catch (err) {
-      // TEMPORARY, for diagnosing the current Google Sign-In failure: the
-      // generic getAuthErrorMessage() fallback was hiding the actual error
-      // code (nothing in Google Sign-In's own error codes is in
-      // AUTH_ERROR_MESSAGES, and it wasn't literally 'DEVELOPER_ERROR'
-      // either), so there was no way to tell what was actually failing
-      // without a device plugged into adb. Shows the raw code/message
-      // instead of guessing. Revert to getAuthErrorMessage(err) once this is
-      // diagnosed.
-      setError(`Error de Google Sign-In — code: ${err?.code}, message: ${err?.message}`);
+      // Native Google Sign-In errors carry Play Services status codes, not
+      // Firebase's `auth/...` codes — getAuthErrorMessage never matches them.
+      setError(Platform.OS === 'web' ? getAuthErrorMessage(err) : getGoogleSignInErrorMessage(err));
       buzz(Haptics.NotificationFeedbackType.Error);
     } finally {
       setLoading(false);
@@ -198,20 +198,24 @@ export default function Login() {
             />
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(540)}>
-            <OrDivider />
-          </Animated.View>
+          {GOOGLE_SIGNIN_ENABLED && (
+            <>
+              <Animated.View entering={FadeInDown.duration(300).delay(540)}>
+                <OrDivider />
+              </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(600)}>
-            <Button
-              title="Continuar con Google"
-              variant="secondary"
-              fullWidth
-              disabled={loading}
-              icon={<GoogleMark />}
-              onPress={handleGoogleLogin}
-            />
-          </Animated.View>
+              <Animated.View entering={FadeInDown.duration(300).delay(600)}>
+                <Button
+                  title="Continuar con Google"
+                  variant="secondary"
+                  fullWidth
+                  disabled={loading}
+                  icon={<GoogleMark />}
+                  onPress={handleGoogleLogin}
+                />
+              </Animated.View>
+            </>
+          )}
 
           <Animated.View entering={FadeInDown.duration(300).delay(670)} style={styles.footer}>
             <Text style={styles.footerText}>¿No tienes cuenta? </Text>

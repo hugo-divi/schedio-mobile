@@ -58,9 +58,42 @@ const AUTH_ERROR_MESSAGES = {
   'auth/popup-closed-by-user': 'Ventana cerrada antes de completar el inicio de sesión.',
 };
 
+/**
+ * TEMPORARY kill switch for the "Continuar con Google" button, flipped off
+ * for the 23 Aug 2026 Play Store production submission: real closed-testing
+ * builds still hit DEVELOPER_ERROR and the root cause wasn't confirmed in
+ * time, so login/register hide the button entirely rather than ship a visibly
+ * broken control in front of Google's reviewer or a real student. Email
+ * verification + account deletion — the actual Play Store data-policy
+ * requirements — don't depend on this. Flip back to true once diagnosed.
+ */
+export const GOOGLE_SIGNIN_ENABLED = false;
+
 /** Plain-Spanish message for a Firebase Auth error, for showing in the UI. */
 export const getAuthErrorMessage = (error) =>
   AUTH_ERROR_MESSAGES[error?.code] || 'Ha ocurrido un error. Inténtalo de nuevo.';
+
+/**
+ * Native Google Sign-In errors (Android/iOS) never reach Firebase — they come
+ * straight from `@react-native-google-signin/google-signin` as the raw
+ * status codes from Google Play Services' ApiException, stringified by the
+ * native module before crossing the bridge (so '10', not 10 or
+ * 'DEVELOPER_ERROR'). None of these are `auth/...` codes, so
+ * getAuthErrorMessage never matches them — this is the native-only sibling.
+ * https://developers.google.com/android/reference/com/google/android/gms/auth/api/signin/GoogleSignInStatusCodes
+ */
+const GOOGLE_SIGNIN_ERROR_MESSAGES = {
+  7: 'Error de red al conectar con Google. Revisa tu conexión.', // NETWORK_ERROR
+  10: 'Google Sign-In no está bien configurado en este build todavía.', // DEVELOPER_ERROR
+  12500: 'No se pudo completar el inicio de sesión con Google.', // SIGN_IN_FAILED
+  12501: 'Inicio de sesión cancelado.', // SIGN_IN_CANCELLED
+  12502: 'Ya hay un inicio de sesión de Google en curso.', // SIGN_IN_CURRENTLY_IN_PROGRESS
+};
+
+/** Plain-Spanish message for a native (Android/iOS) Google Sign-In error. */
+export const getGoogleSignInErrorMessage = (error) =>
+  GOOGLE_SIGNIN_ERROR_MESSAGES[String(error?.code)] ||
+  'No se pudo iniciar sesión con Google. Inténtalo de nuevo.';
 
 /** Creates the Firestore profile the first time this uid is seen. */
 const ensureUserDoc = async (user) => {
