@@ -90,31 +90,31 @@ const GuidedTour = ({
     refKey: null,
   });
 
-  baseSteps.push(
-    {
-      title: 'Estudiar con foco',
-      content: 'Elige materia y tiempo, y el cronómetro se encarga. Cada sesión suma XP.',
-      position: { top: height * 0.15 },
-      refKey: null,
-      route: '/dashboard/study',
-    },
-    {
-      title: 'Plan y Mochila',
-      content:
-        'Tu semana repartida por materia y prioridad. En la pestaña Mochila guardas apuntes y archivos, agrupados por materia.',
-      position: { top: height * 0.15 },
-      refKey: null,
-      route: '/dashboard/plans',
-    },
-    {
-      title: 'Tu perfil',
-      content:
-        'Nivel, materias con su color, apuntes rápidos y un análisis real de tus hábitos de estudio. El engranaje de arriba lleva a Ajustes.',
-      position: { top: height * 0.15 },
-      refKey: null,
-      route: '/dashboard/profile',
-    }
-  );
+  /*
+   * The tour stays on Inicio.
+   *
+   * Three further steps used to walk through Estudiar, Plan and Perfil by
+   * pushing their routes. They couldn't work: this component is rendered from
+   * app/dashboard/index.js, so its Modal belongs to the Inicio screen — the
+   * moment it navigated to another tab, Inicio stopped being the active screen
+   * and the card vanished. Coming back to Inicio brought it straight back,
+   * still on the same step, and it navigated away again. A loop with no exit.
+   *
+   * Fixing it properly means lifting the tour into app/dashboard/_layout.js,
+   * where QuickActionsModal already lives above the tabs — but the highlight
+   * mask measures refs that belong to Inicio, so those have to move with it.
+   * Too much surgery to do on the way to a store submission.
+   *
+   * Ending here costs little: the tab bar now names the tab you are on, which
+   * is most of what those three steps were explaining.
+   */
+  baseSteps.push({
+    title: 'Y eso es todo',
+    content:
+      'Abajo tienes Estudiar, Plan y tu Perfil. Échales un ojo cuando quieras — se explican solos.',
+    position: { top: height * 0.3 },
+    refKey: null,
+  });
 
   const steps = baseSteps;
   const isLastStep = step === steps.length - 1;

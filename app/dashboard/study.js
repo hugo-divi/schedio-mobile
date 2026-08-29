@@ -2338,7 +2338,11 @@ const styles = StyleSheet.create({
   blockDots: {
     flexDirection: 'row',
     gap: 6,
-    marginTop: 18,
+    // No top margin: `timerHeader` already contributes 36 below itself, and
+    // adding to it pushed the dots down onto the ring with nothing under them.
+    // The gap belongs on the other side.
+    marginTop: 0,
+    marginBottom: 26,
   },
   blockDot: {
     width: 7,

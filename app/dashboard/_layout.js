@@ -34,8 +34,16 @@ import { auth } from '../../services/firebase';
  * is most of the noise down here, and one visible name is enough to stay
  * oriented — a map icon does not read as "Plan" on anyone's first day.
  */
-function PillTab({ icon: Icon, label, accessibilityState, onPress, onLongPress }) {
-  const focused = !!accessibilityState?.selected;
+function PillTab({ icon: Icon, label, onPress, onLongPress, ...rest }) {
+  /*
+   * `aria-selected` first, `accessibilityState` after.
+   *
+   * React Navigation 7 hands a custom `tabBarButton` its focus as
+   * `'aria-selected'`; v6 used `accessibilityState.selected`. Reading only the
+   * old one meant `focused` was `undefined` on every tab forever — no pill, no
+   * accent, no label, on the tab you were actually standing on.
+   */
+  const focused = rest['aria-selected'] ?? rest.accessibilityState?.selected ?? false;
   const progress = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
