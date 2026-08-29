@@ -232,10 +232,16 @@ export const estimatePotential = ({
 
   // Nudged up further on top of the already-conservative baseline above, per
   // explicit product decision: the range read as too modest to sell the
-  // potential, so both ends are pushed 0,2 higher before the same clamps
-  // apply (still capped at the ceiling and at 10, so this never produces an
+  // potential, so both ends are pushed higher before the same clamps apply
+  // (still capped at the ceiling and at 10, so this never produces an
   // impossible number, only a less timid one).
-  const BOOST = 0.2;
+  //
+  // Raised from 0,2 to 0,45 on a second pass, which moves the top of the
+  // range 0,2–0,3 across the realistic band: a 5 goes from 6,7 to 7,0 and the
+  // 6,5 of the worked example from 7,8 to 8,0. The ceiling still binds where
+  // it should — a 9,4 doesn't move at all, because 60% of the gap it has left
+  // is all this is ever allowed to promise.
+  const BOOST = 0.45;
 
   const round = (n) => Math.round(Math.min(10, Math.min(ceiling, n)) * 10) / 10;
   let low = round(grade + gain * 0.7 + BOOST);

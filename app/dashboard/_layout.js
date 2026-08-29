@@ -35,15 +35,25 @@ import { auth } from '../../services/firebase';
  * oriented — a map icon does not read as "Plan" on anyone's first day.
  */
 function PillTab({ icon: Icon, label, onPress, onLongPress, ...rest }) {
+  const pathname = usePathname();
+
   /*
-   * `aria-selected` first, `accessibilityState` after.
+   * Focus, read three ways, because getting it wrong is silent.
    *
    * React Navigation 7 hands a custom `tabBarButton` its focus as
    * `'aria-selected'`; v6 used `accessibilityState.selected`. Reading only the
-   * old one meant `focused` was `undefined` on every tab forever — no pill, no
-   * accent, no label, on the tab you were actually standing on.
+   * old name left `focused` undefined on every tab forever — no pill, no
+   * accent, no label, not even on the tab you were standing on, and nothing
+   * anywhere said so.
+   *
+   * The `href` comparison is the net under that. It only runs when neither
+   * prop is there, which today means never; if a future version renames the
+   * flag again, the bar keeps lighting the right tab instead of quietly going
+   * dark. `href` is part of the documented props and is the tab's own route.
    */
-  const focused = rest['aria-selected'] ?? rest.accessibilityState?.selected ?? false;
+  const flagged = rest['aria-selected'] ?? rest.accessibilityState?.selected;
+  const focused = flagged ?? (rest.href ? pathname === rest.href : false);
+
   const progress = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
