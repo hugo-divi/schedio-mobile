@@ -64,5 +64,8 @@ modules/*/android/.gradle/
 
 # internal dev notes (not for public repo)
 task.md
+
+# firebase CLI debug output
+firebase-debug.log*
 CLAUDE.md
 AGENTS.md
