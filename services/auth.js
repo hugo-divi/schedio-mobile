@@ -19,10 +19,37 @@ import { auth, googleProvider, db } from './firebase';
 // whether one was already restored). Most consumer apps re-prompt after a
 // stretch of real time instead, so that's tracked here locally rather than
 // relying on any Firebase-side expiry.
-const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/**
+ * 45 days, and — since `touchSession` below — 45 days of *not opening the
+ * app*, not 45 days since the last time a password was typed.
+ *
+ * It used to be the latter, which meant a student who opened Schedio every
+ * single day was thrown out on exactly the same schedule as one who had not
+ * touched it in a month: the most engaged user punished identically to the
+ * dormant one, on an app whose whole argument is constancy.
+ *
+ * 45 and not 30 or 21 because of the school calendar. Christmas is about
+ * fifteen days off and Easter about ten; anything tighter meets a student
+ * returning in January — the moment they most need the app — with a login
+ * form. Summer escapes any reasonable number, and there the September
+ * re-login lands alongside setting up the new year anyway.
+ */
+const SESSION_MAX_AGE_MS = 45 * 24 * 60 * 60 * 1000; // 45 days
 const LAST_AUTH_AT_KEY = 'schedio:lastAuthAt';
 
 const markSessionStart = () => AsyncStorage.setItem(LAST_AUTH_AT_KEY, String(Date.now()));
+
+/**
+ * Pushes the clock forward for a session that is being used. Called from
+ * store/authStore.js on every launch that restores a valid session, which is
+ * what turns the window above from "since you logged in" into "since you last
+ * opened the app".
+ *
+ * Deliberately separate from `markSessionStart`, which the interactive
+ * sign-in paths call: same write, but the two mean different things and only
+ * one of them should ever move if the policy changes.
+ */
+export const touchSession = () => markSessionStart();
 
 /**
  * Whether the signed-in session is older than SESSION_MAX_AGE_MS. No record

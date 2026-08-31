@@ -1,6 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, Platform, AccessibilityInfo, StyleSheet } from 'react-native';
+import { Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { tokens } from '../theme/tokens';
 
@@ -17,9 +25,18 @@ const font = tokens.typography.families.inter;
  * claims to consult experts or compare thousands of cases, which on a product
  * aimed at teenagers would stop being flavour and start being a false claim.
  *
- * Deliberately not a step: no progress bar, no "Paso X de 7", no way back.
+ * The lines accumulate rather than replace one another, each keeping a tick
+ * once it is done. A single line that swaps every 1.2 s reads as one vague
+ * thing changing its mind; a list that fills in reads as four things getting
+ * done — which is what is actually happening, and what earns the number.
+ *
+ * Two of them name figures the student gave minutes ago. That is the whole
+ * difference between this and a fake loading bar: if a line would read
+ * identically for somebody else, it has no business being here.
+ *
+ * Deliberately not a step: no progress bar, no "Paso X de 8", no way back.
  * It is a transition between steps 4 and 5, and counting it would make the
- * flow read as eight steps instead of seven.
+ * flow read as nine steps instead of eight.
  */
 
 const DURATION = 3500;
@@ -30,9 +47,10 @@ const DURATION = 3500;
  * three real steps instead of one decorative slide.
  */
 const SEGMENTS = [
-  { at: 0, to: 34, lead: 'Cruzando tu ', strong: 'nivel de organización' },
-  { at: 1200, to: 71, lead: 'Calculando tu ', strong: 'frecuencia de repaso' },
-  { at: 2400, to: 100, lead: 'Estimando tu ', strong: 'margen de mejora' },
+  { at: 0, to: 26, lead: 'Leyendo tus ' },
+  { at: 875, to: 52, lead: 'Ajustando el temario a ' },
+  { at: 1750, to: 78, lead: 'Analizando tu ', strong: 'constancia al repasar' },
+  { at: 2625, to: 100, lead: 'Midiendo ', strong: 'cuánto dejas para el final' },
 ];
 
 /** Share of each segment spent moving; the remainder is the pause. */
@@ -74,9 +92,44 @@ const progressAt = (elapsed) => {
   return from + (SEGMENTS[i].to - from) * count(Math.min(1, Math.max(0, p) / MOVE));
 };
 
-export default function OnboardingCalc({ onDone }) {
+/** The dot on the line currently running. Breathing rather than spinning: a
+ *  spinner would claim network work is happening, and none is. */
+function ActiveDot() {
+  const breath = useSharedValue(0.4);
+
+  useEffect(() => {
+    breath.value = withRepeat(withTiming(1, { duration: 620 }), -1, true);
+  }, [breath]);
+
+  const style = useAnimatedStyle(() => ({ opacity: breath.value }));
+
+  return <Animated.View style={[styles.dot, style]} />;
+}
+
+export default function OnboardingCalc({ onDone, subjectCount, levelLabel }) {
   const [pct, setPct] = useState(0);
   const [line, setLine] = useState(0);
+
+  /** The two personalised lines. Both fall back to wording that is still true
+   *  when the figure is missing, rather than printing "undefined asignaturas"
+   *  at the one moment the student is being asked to trust the number. */
+  const lines = useMemo(
+    () =>
+      SEGMENTS.map((seg, i) => {
+        if (i === 0) {
+          return subjectCount
+            ? { ...seg, strong: `${subjectCount} asignaturas` }
+            : { at: seg.at, to: seg.to, lead: 'Leyendo ', strong: 'tus asignaturas' };
+        }
+        if (i === 1) {
+          return levelLabel
+            ? { ...seg, strong: levelLabel }
+            : { at: seg.at, to: seg.to, lead: 'Ajustando ', strong: 'el temario a tu curso' };
+        }
+        return seg;
+      }),
+    [subjectCount, levelLabel]
+  );
 
   useEffect(() => {
     let frame = null;
@@ -88,6 +141,9 @@ export default function OnboardingCalc({ onDone }) {
       if (Platform.OS !== 'web') {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
+      // Ticks the last line too — otherwise the one that closes the run is
+      // the only one that never gets its check.
+      setLine(SEGMENTS.length);
       timer = setTimeout(() => {
         if (!cancelled) onDone();
       }, SETTLE);
@@ -129,7 +185,6 @@ export default function OnboardingCalc({ onDone }) {
         if (cancelled) return;
         if (reduce) {
           setPct(100);
-          setLine(SEGMENTS.length - 1);
           handOver();
           return;
         }
@@ -146,8 +201,6 @@ export default function OnboardingCalc({ onDone }) {
     };
   }, [onDone]);
 
-  const current = SEGMENTS[line];
-
   return (
     <View
       style={styles.root}
@@ -163,10 +216,25 @@ export default function OnboardingCalc({ onDone }) {
         <View style={[styles.fill, { width: `${pct}%` }]} />
       </View>
 
-      <Text style={styles.caption}>
-        {current.lead}
-        <Text style={styles.captionStrong}>{current.strong}</Text>…
-      </Text>
+      <View style={styles.list}>
+        {lines.map((item, i) =>
+          i <= line ? (
+            <Animated.View key={item.lead} entering={FadeInDown.duration(240)} style={styles.row}>
+              <View style={[styles.mark, i < line && styles.markDone]}>
+                {i < line ? (
+                  <Check size={10} color={tokens.colors.accent} strokeWidth={3.4} />
+                ) : (
+                  <ActiveDot />
+                )}
+              </View>
+              <Text style={[styles.rowText, i < line && styles.rowTextDone]}>
+                {item.lead}
+                <Text style={styles.rowStrong}>{item.strong}</Text>
+              </Text>
+            </Animated.View>
+          ) : null
+        )}
+      </View>
     </View>
   );
 }
@@ -206,15 +274,36 @@ const styles = StyleSheet.create({
     borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.accent,
   },
-  caption: {
-    marginTop: 30,
-    minHeight: 40,
-    maxWidth: 240,
-    fontFamily: font.regular,
-    fontSize: 14,
-    lineHeight: 20,
-    color: tokens.colors.textSecondary,
-    textAlign: 'center',
+  // Fixed height for the four rows so the block above never shifts as they
+  // fill in — the percentage sliding upwards mid-count reads as a glitch.
+  list: { marginTop: 30, minHeight: 132, width: 260, gap: 13 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  mark: {
+    width: 17,
+    height: 17,
+    borderRadius: tokens.radius.pill,
+    borderWidth: 1.5,
+    borderColor: tokens.colors.borderDefault,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  captionStrong: { fontFamily: font.medium, color: tokens.colors.textPrimary },
+  markDone: {
+    borderColor: tokens.colors.accent,
+    backgroundColor: tokens.colors.accentSoftBg,
+  },
+  dot: {
+    width: 5,
+    height: 5,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.accent,
+  },
+  rowText: {
+    flex: 1,
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    color: tokens.colors.textSecondary,
+  },
+  rowTextDone: { color: tokens.colors.textPrimary },
+  rowStrong: { fontFamily: font.semibold, color: tokens.colors.textPrimary },
 });

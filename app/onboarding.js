@@ -8,13 +8,24 @@ import {
   Platform,
   KeyboardAvoidingView,
   ActivityIndicator,
+  AccessibilityInfo,
+  useWindowDimensions,
   StyleSheet,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft, ChevronDown, Check, X, Plus, Bell } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  ZoomIn,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { addDays, format, isBefore, startOfDay } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -49,12 +60,48 @@ import Card from '../components/ui/Card';
 import BottomSheet from '../components/ui/BottomSheet';
 import { CalendarPicker } from '../components/ui/CalendarPicker';
 import OnboardingCalc from '../components/OnboardingCalc';
+import OnboardingIntro from '../components/OnboardingIntro';
 import OnboardingPaywall from '../components/OnboardingPaywall';
 
 const font = tokens.typography.families.inter;
 
-const TOTAL_STEPS = 7;
-const DURATIONS = [30, 45, 60];
+/** Was 7. The eighth is the acquisition question, which used to sit below the
+ *  fold of step 5 — competing with the estimated grade, the only screen in the
+ *  flow whose whole job is to talk about the student. See `case 8`. */
+const TOTAL_STEPS = 8;
+
+/** The system's standard curve (tokens.js) as a Reanimated easing. */
+const EASE = Easing.bezier(0.2, 0.8, 0.2, 1);
+
+/** Step-change motion. Out is quicker than in: the leaving step only has to
+ *  clear the way, while the arriving one is what the student reads. */
+const OUT_MS = 150;
+const IN_MS = 280;
+
+/** The grade counter. Long on purpose — the rise is the point, so it has to
+ *  be watchable rather than merely noticed. */
+const RANGE_MS = 2500;
+
+/** How far the low figure trails the high one. */
+const RANGE_LAG_MS = 260;
+
+/**
+ * Quadratic S, not the cubic one and not an ease-out. An ease-out puts ~88% of
+ * the climb in the first half and leaves the rest crawling; a cubic S keeps the
+ * first ~600 ms almost still. This moves legibly the whole way and still lands
+ * softly.
+ */
+const easeInOutQuad = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+/**
+ * Same three the student sees in EventModal, stored the same way. Anything
+ * else here would mean the first exam of their life is the one exam whose
+ * importance is set on a scale the rest of the app does not use.
+ */
+const EXAM_PRIORITIES = [
+  { key: 3, label: 'Baja' },
+  { key: 5, label: 'Normal' },
+  { key: 9, label: 'Alta' },
+];
 
 const formatGrade = (value) => value.toFixed(1).replace('.', ',');
 
@@ -80,6 +127,85 @@ function Choice({ label, desc, selected, onPress }) {
   );
 }
 
+const oneDecimal = (n) => n.toFixed(1).replace('.', ',');
+
+/**
+ * The projected range, counting up from the grade the student actually has.
+ *
+ * Seeing the number climb is the whole argument of step 5 — a range that is
+ * simply printed is a fact, one that rises is a promise about their course.
+ *
+ * Driven from JS rather than through `useAnimatedProps`: animating text in
+ * Reanimated means an AnimatedTextInput and undoing its native padding and
+ * baseline, and this screen is otherwise idle, so a plain rAF loop costs
+ * nothing and stays readable.
+ */
+function AnimatedRange({ from, lo, hi }) {
+  const [shown, setShown] = useState([from, from]);
+
+  useEffect(() => {
+    let frame = null;
+    let snap = null;
+    let cancelled = false;
+
+    const land = () => {
+      if (!cancelled) setShown([lo, hi]);
+    };
+
+    const run = () => {
+      let start = null;
+      const step = (now) => {
+        if (cancelled) return;
+        if (start === null) start = now;
+        const e = now - start;
+        // The high figure leads and the low one follows. The other way round
+        // the low one overtook mid-climb and the range read backwards
+        // ("6,4 - 6,2") for half a second.
+        const tHi = Math.min(1, Math.max(0, e / RANGE_MS));
+        const tLo = Math.min(1, Math.max(0, (e - RANGE_LAG_MS) / RANGE_MS));
+        setShown([
+          from + (lo - from) * easeInOutQuad(tLo),
+          from + (hi - from) * easeInOutQuad(tHi),
+        ]);
+        if (e < RANGE_MS + RANGE_LAG_MS) frame = requestAnimationFrame(step);
+        else land();
+      };
+      frame = requestAnimationFrame(step);
+
+      // rAF stops being delivered when the app goes to the background, and
+      // resumes with a fresh clock. Without this the number would sit frozen
+      // half-way up for as long as the screen stayed open, which is worse
+      // than never animating it.
+      snap = setTimeout(land, RANGE_MS + RANGE_LAG_MS + 120);
+    };
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduce) => {
+        if (cancelled) return;
+        if (reduce) land();
+        else run();
+      })
+      .catch(() => {
+        if (!cancelled) run();
+      });
+
+    return () => {
+      cancelled = true;
+      if (frame) cancelAnimationFrame(frame);
+      if (snap) clearTimeout(snap);
+    };
+  }, [from, lo, hi]);
+
+  return (
+    <Text
+      style={styles.estimateRange}
+      accessibilityLabel={`Entre ${oneDecimal(lo)} y ${oneDecimal(hi)}`}
+    >
+      {oneDecimal(shown[0])} – {oneDecimal(shown[1])}
+    </Text>
+  );
+}
+
 function Pill({ label, selected, onPress }) {
   return (
     <TouchableOpacity
@@ -100,9 +226,30 @@ export default function Onboarding() {
   const clearUser = useAuthStore((state) => state.clearUser);
   const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
 
+  const { width } = useWindowDimensions();
+
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState(1);
+
+  /** Set when step 7's "Saltar" is used. The skip has to reach `finish` from
+   *  step 8 now that the acquisition question sits between the two, so it can
+   *  no longer be a plain argument passed at the moment of the tap. */
+  const [goalSkipped, setGoalSkipped] = useState(false);
+
+  // Step motion. One view is animated in place rather than two crossing over:
+  // Reanimated's `exiting` keeps the leaving step mounted, and inside this
+  // ScrollView that stacks it above the arriving one and doubles the content
+  // height for the length of the animation.
+  const slideX = useSharedValue(0);
+  const slideOpacity = useSharedValue(1);
+  const slideStyle = useAnimatedStyle(() => ({
+    opacity: slideOpacity.value,
+    transform: [{ translateX: slideX.value }],
+  }));
+
+  const progress = useSharedValue(1 / TOTAL_STEPS);
+  const progressStyle = useAnimatedStyle(() => ({ width: `${progress.value * 100}%` }));
 
   /**
    * The two interstitials — the estimate calculation (after step 4) and the
@@ -113,6 +260,11 @@ export default function Onboarding() {
    */
   const [calculating, setCalculating] = useState(false);
   const [paywall, setPaywall] = useState(false);
+
+  /** The brand beat before the first question. Only ever true on a genuine
+   *  first entry — resolved from storage below, so someone resuming a
+   *  half-finished flow gets their next question instead of a title card. */
+  const [intro, setIntro] = useState(false);
 
   const [educationLevel, setEducationLevel] = useState(null);
   const [currentGrade, setCurrentGrade] = useState('');
@@ -128,18 +280,19 @@ export default function Onboarding() {
   const [taskManagement, setTaskManagement] = useState(null);
   const [howSheet, setHowSheet] = useState(false);
   const [notificationsConsent, setNotificationsConsent] = useState(null);
-  const [goal, setGoal] = useState(null);
   const [examName, setExamName] = useState('');
   const [examDate, setExamDate] = useState(addDays(new Date(), 7));
+  const [examPriority, setExamPriority] = useState(5);
   const [goalSubject, setGoalSubject] = useState(null);
-  const [duration, setDuration] = useState(45);
-  const [when, setWhen] = useState('today');
 
   // ── Resume where they left off ──
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) {
+      // No account to have saved anything against, so this is a first entry
+      // by definition.
+      setIntro(true);
       setReady(true);
       return;
     }
@@ -156,6 +309,9 @@ export default function Onboarding() {
         if (saved.notificationsConsent != null) setNotificationsConsent(saved.notificationsConsent);
         if (saved.step) setStep(Math.min(TOTAL_STEPS, saved.step));
       }
+      // Decided here rather than from `step`, because `setStep` above has not
+      // been applied yet by the time this runs.
+      setIntro(!saved?.step || saved.step <= 1);
       setReady(true);
     });
   }, []);
@@ -189,14 +345,19 @@ export default function Onboarding() {
         return true;
       case 6:
         return notificationsConsent !== null;
+      // One thing to do here, so all of it has to be filled in. The way past
+      // it for someone with no dates yet is the opt-out under the form, not a
+      // half-empty exam.
       case 7:
-        if (goalSubject === null) return false;
-        if (goal === 'exam') {
-          return (
-            examName.trim().length >= 2 && !isBefore(startOfDay(examDate), startOfDay(new Date()))
-          );
-        }
-        return goal === 'session';
+        return (
+          goalSubject !== null &&
+          examName.trim().length >= 2 &&
+          !isBefore(startOfDay(examDate), startOfDay(new Date()))
+        );
+      // The acquisition question is ours, not theirs — it must never be able
+      // to trap someone at the last screen of the flow.
+      case 8:
+        return true;
       default:
         return false;
     }
@@ -211,6 +372,40 @@ export default function Onboarding() {
         taskManagement,
       }),
     [gradeValue, educationLevel, reviewFrequency, taskManagement]
+  );
+
+  useEffect(() => {
+    // Spring rather than a hard width swap: the small overshoot pulls the eye
+    // to the end of the bar exactly when the step changes, which is the one
+    // moment the student cares how much is left. Settles after the slide
+    // below on purpose — the bar is what closes the movement.
+    progress.value = withSpring(step / TOTAL_STEPS, { damping: 15, stiffness: 120 });
+  }, [step, progress]);
+
+  const enterStep = useCallback(
+    (next, direction) => {
+      setStep(next);
+      slideX.value = direction * width * 0.3;
+      slideX.value = withTiming(0, { duration: IN_MS, easing: EASE });
+      slideOpacity.value = withTiming(1, { duration: IN_MS - 60, easing: EASE });
+    },
+    [slideOpacity, slideX, width]
+  );
+
+  /** `direction` is 1 going forward and -1 going back, so the step leaves on
+   *  the side the student is heading away from. */
+  const transitionTo = useCallback(
+    (next, direction) => {
+      slideOpacity.value = withTiming(0, { duration: OUT_MS - 20, easing: EASE });
+      slideX.value = withTiming(
+        -direction * width * 0.3,
+        { duration: OUT_MS, easing: EASE },
+        (finished) => {
+          if (finished) runOnJS(enterStep)(next, direction);
+        }
+      );
+    },
+    [enterStep, slideOpacity, slideX, width]
   );
 
   const patchFor = useCallback(
@@ -277,7 +472,7 @@ export default function Onboarding() {
       return;
     }
 
-    setStep(next);
+    transitionTo(next, 1);
   };
 
   const afterCalc = useCallback(() => {
@@ -302,10 +497,11 @@ export default function Onboarding() {
       return;
     }
     await saveOnboardingStep(auth.currentUser?.uid, patchFor(step - 1));
-    setStep(step - 1);
+    transitionTo(step - 1, -1);
   };
 
-  const finish = async (skipGoal = false) => {
+  const finish = async () => {
+    const skipGoal = goalSkipped;
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     setSaving(true);
@@ -327,7 +523,7 @@ export default function Onboarding() {
 
       const chosen = skipGoal ? null : created[goalSubject];
 
-      if (goal === 'exam' && chosen) {
+      if (chosen) {
         await createExam({
           userId: uid,
           name: examName.trim(),
@@ -335,22 +531,14 @@ export default function Onboarding() {
           subject: chosen.name,
           date: examDate,
           type: 'exam',
-          priority: 5,
+          // `manualPriority` is the field services/priority.js actually reads
+          // (`manualPriority ?? priority`) and the one EventModal writes. This
+          // used to store a flat `priority: 5`, which worked only because of
+          // that fallback and meant the pick had nowhere to go.
+          manualPriority: examPriority,
           completed: false,
           // Lets the guided tour recognise and call out this exact item as
           // "what you just created" instead of speaking generically.
-          fromOnboarding: true,
-        });
-      } else if (goal === 'session' && chosen) {
-        // There is no "planned session" in the model; a manual plan task is
-        // the closest thing, and tapping it starts the session for real.
-        await useUserStore.getState().addManualTask(uid, {
-          text: `Estudiar ${chosen.name}`,
-          date: (when === 'today' ? new Date() : addDays(new Date(), 1)).toISOString(),
-          duration,
-          subjectId: chosen.id,
-          subjectName: chosen.name,
-          subjectColor: chosen.color,
           fromOnboarding: true,
         });
       }
@@ -525,7 +713,13 @@ export default function Onboarding() {
             {subjects.length > 0 ? (
               <View style={styles.chipWrap}>
                 {subjects.map((subject, index) => (
-                  <View key={`${subject.name}-${index}`}>
+                  // The haptic already fires on add; this is the view finally
+                  // answering back. It is the control tapped most often in the
+                  // whole flow, so the acknowledgement earns its keep here.
+                  <Animated.View
+                    key={`${subject.name}-${index}`}
+                    entering={ZoomIn.springify().damping(14).mass(0.6)}
+                  >
                     <TouchableOpacity
                       activeOpacity={0.8}
                       onPress={() => setPaletteFor(paletteFor === index ? null : index)}
@@ -557,7 +751,7 @@ export default function Onboarding() {
                         ))}
                       </Animated.View>
                     ) : null}
-                  </View>
+                  </Animated.View>
                 ))}
               </View>
             ) : null}
@@ -643,10 +837,13 @@ export default function Onboarding() {
               </Text>
               <View style={styles.divider} />
               <Text style={styles.estimateLabel}>Podrías llegar a</Text>
-              <Text style={styles.estimateRange}>
-                {estimate.range[0].toFixed(1).replace('.', ',')} –{' '}
-                {estimate.range[1].toFixed(1).replace('.', ',')}
-              </Text>
+              {/* Counts up from the grade they actually gave, so the rise is
+                  theirs rather than an abstract pair of numbers. */}
+              <AnimatedRange
+                from={Number.isNaN(gradeValue) ? estimate.range[0] : gradeValue}
+                lo={estimate.range[0]}
+                hi={estimate.range[1]}
+              />
             </Card>
 
             <View style={styles.reasons}>
@@ -661,41 +858,6 @@ export default function Onboarding() {
             <TouchableOpacity onPress={() => setHowSheet(true)} style={{ marginTop: 20 }}>
               <Text style={styles.link}>¿Cómo se calcula esto?</Text>
             </TouchableOpacity>
-
-            {/* Attribution. Deliberately here and nowhere else: step 5 is the
-                only one that asks nothing of the student, so this costs no
-                extra step and blocks nothing — `canAdvance` still returns an
-                unconditional true, and leaving it untouched saves null.
-                Below the fold on purpose, under a divider, so it reads as an
-                aside rather than as one more thing to fill in. */}
-            <View style={styles.sourceBlock}>
-              <Text style={styles.sourceTitle}>¿Cómo llegaste a Schedio?</Text>
-              <Text style={styles.sourceLead}>Opcional. Nos ayuda a saber dónde encontrarte.</Text>
-              <View style={styles.sourceWrap}>
-                {ACQUISITION_SOURCES.map((option) => {
-                  const selected = acquisitionSource === option.value;
-                  return (
-                    <TouchableOpacity
-                      key={option.value}
-                      activeOpacity={0.8}
-                      // Tapping the chosen one again clears it — the only way
-                      // back out of a question that never had to be answered.
-                      onPress={() => {
-                        setAcquisitionSource(selected ? null : option.value);
-                        if (Platform.OS !== 'web') Haptics.selectionAsync();
-                      }}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected }}
-                      style={[styles.sourceChip, selected && styles.sourceChipOn]}
-                    >
-                      <Text style={[styles.sourceChipText, selected && styles.sourceChipTextOn]}>
-                        {option.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
           </>
         );
 
@@ -777,108 +939,141 @@ export default function Onboarding() {
           </>
         );
 
+      /**
+       * One job: the first exam. The screen used to offer a choice between an
+       * exam and a "planned session", and the session half never really
+       * existed — there is no planned-session in the model, so it wrote a
+       * manual task named "Estudiar <asignatura>". Two options where one was
+       * real, on the last screen anybody has patience for. Now the form is the
+       * screen, with the same fields EventModal collects, and the way out for
+       * someone with no dates yet is the opt-out underneath.
+       */
       case 7:
         return (
           <>
-            <View style={styles.stepHeadRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.title}>Empieza con algo concreto</Text>
-                <Text style={styles.lead}>Elige una de las dos. Podrás añadir más luego.</Text>
-              </View>
-              {/* For a student who already knows their way around an app like
-                  this — a second Schedio account, a sibling's referral — the
-                  activation nudge is friction, not help. */}
-              <TouchableOpacity onPress={() => finish(true)} disabled={saving}>
-                <Text style={styles.skipLink}>Saltar</Text>
-              </TouchableOpacity>
+            <Text style={styles.title}>Añade tu primer examen</Text>
+            <Text style={styles.lead}>
+              Con una fecha real Schedio ya puede repartirte las sesiones. Podrás añadir más cuando
+              quieras.
+            </Text>
+
+            <View style={{ marginTop: 22 }}>
+              <Input
+                label="¿De qué es el examen?"
+                value={examName}
+                onChangeText={setExamName}
+                placeholder="Ej. Tema 4 y 5"
+                autoCapitalize="sentences"
+              />
             </View>
 
+            <Text style={styles.fieldLabel}>Asignatura</Text>
+            <View style={styles.chipWrap}>
+              {subjects.map((subject, index) => (
+                <TouchableOpacity
+                  key={`${subject.name}-${index}`}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setGoalSubject(index);
+                    if (Platform.OS !== 'web') Haptics.selectionAsync();
+                  }}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: goalSubject === index }}
+                  style={[
+                    styles.chip,
+                    {
+                      borderColor:
+                        goalSubject === index ? subject.color : tokens.colors.borderDefault,
+                    },
+                    goalSubject === index && { backgroundColor: tokens.colors.accentSoftBg },
+                  ]}
+                >
+                  <View style={[styles.chipDot, { backgroundColor: subject.color }]} />
+                  <Text style={styles.chipText}>{subject.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>¿Cuándo es?</Text>
+            <CalendarPicker value={examDate} onChange={setExamDate} />
+            {isBefore(startOfDay(examDate), startOfDay(new Date())) ? (
+              <Text style={styles.error}>La fecha no puede estar en el pasado.</Text>
+            ) : (
+              <Text style={styles.hint}>
+                {format(examDate, "EEEE d 'de' MMMM", { locale: es })}
+              </Text>
+            )}
+
+            <Text style={styles.fieldLabel}>Importancia</Text>
             <View style={styles.pillWrap}>
-              <Pill
-                label="Crear mi primer examen"
-                selected={goal === 'exam'}
-                onPress={() => setGoal('exam')}
-              />
-              <Pill
-                label="Planificar una sesión"
-                selected={goal === 'session'}
-                onPress={() => setGoal('session')}
-              />
+              {EXAM_PRIORITIES.map((option) => (
+                <Pill
+                  key={option.key}
+                  label={option.label}
+                  selected={examPriority === option.key}
+                  onPress={() => {
+                    setExamPriority(option.key);
+                    if (Platform.OS !== 'web') Haptics.selectionAsync();
+                  }}
+                />
+              ))}
             </View>
+            <Text style={styles.hint}>
+              Cuenta para decidir a qué le damos prioridad cuando dos exámenes caen juntos.
+            </Text>
 
-            {goal ? (
-              <>
-                <Text style={styles.fieldLabel}>Asignatura</Text>
-                <View style={styles.chipWrap}>
-                  {subjects.map((subject, index) => (
-                    <TouchableOpacity
-                      key={`${subject.name}-${index}`}
-                      activeOpacity={0.8}
-                      onPress={() => setGoalSubject(index)}
-                      style={[
-                        styles.chip,
-                        {
-                          borderColor:
-                            goalSubject === index ? subject.color : tokens.colors.borderDefault,
-                        },
-                        goalSubject === index && { backgroundColor: tokens.colors.accentSoftBg },
-                      ]}
-                    >
-                      <View style={[styles.chipDot, { backgroundColor: subject.color }]} />
-                      <Text style={styles.chipText}>{subject.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            ) : null}
+            {/* Under the form, not in the header. Someone with no dates yet
+                has to be able to leave, but the opt-out should read as the
+                second option after trying the first — not as an equally
+                weighted choice offered before they have seen what is asked. */}
+            <TouchableOpacity
+              onPress={() => {
+                setGoalSkipped(true);
+                transitionTo(8, 1);
+              }}
+              disabled={saving}
+              style={styles.optOut}
+              accessibilityRole="button"
+            >
+              <Text style={styles.optOutText}>Todavía no tengo exámenes</Text>
+            </TouchableOpacity>
+          </>
+        );
 
-            {goal === 'exam' ? (
-              <>
-                <View style={{ marginTop: 20 }}>
-                  <Input
-                    label="¿De qué es el examen?"
-                    value={examName}
-                    onChangeText={setExamName}
-                    placeholder="Ej. Tema 4 y 5"
-                    autoCapitalize="sentences"
-                  />
-                </View>
-                <Text style={styles.fieldLabel}>¿Cuándo es?</Text>
-                <CalendarPicker value={examDate} onChange={setExamDate} />
-                {isBefore(startOfDay(examDate), startOfDay(new Date())) ? (
-                  <Text style={styles.error}>La fecha no puede estar en el pasado.</Text>
-                ) : (
-                  <Text style={styles.hint}>
-                    {format(examDate, "EEEE d 'de' MMMM", { locale: es })}
-                  </Text>
-                )}
-              </>
-            ) : null}
+      case 8:
+        return (
+          <>
+            <Text style={styles.title}>Una última cosa</Text>
+            <Text style={styles.lead}>
+              Opcional, y no cambia nada de tu plan. Solo nos ayuda a saber dónde encontrar a más
+              estudiantes como tú.
+            </Text>
 
-            {goal === 'session' ? (
-              <>
-                <Text style={styles.fieldLabel}>Duración</Text>
-                <View style={styles.pillWrap}>
-                  {DURATIONS.map((value) => (
-                    <Pill
-                      key={value}
-                      label={`${value} min`}
-                      selected={duration === value}
-                      onPress={() => setDuration(value)}
-                    />
-                  ))}
-                </View>
-                <Text style={styles.fieldLabel}>¿Cuándo?</Text>
-                <View style={styles.pillWrap}>
-                  <Pill label="Hoy" selected={when === 'today'} onPress={() => setWhen('today')} />
-                  <Pill
-                    label="Mañana"
-                    selected={when === 'tomorrow'}
-                    onPress={() => setWhen('tomorrow')}
-                  />
-                </View>
-              </>
-            ) : null}
+            <Text style={[styles.fieldLabel, { marginTop: 26 }]}>¿Cómo llegaste a Schedio?</Text>
+            <View style={styles.sourceWrap}>
+              {ACQUISITION_SOURCES.map((option) => {
+                const selected = acquisitionSource === option.value;
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    activeOpacity={0.8}
+                    // Tapping the chosen one again clears it — the only way
+                    // back out of a question that never had to be answered.
+                    onPress={() => {
+                      setAcquisitionSource(selected ? null : option.value);
+                      if (Platform.OS !== 'web') Haptics.selectionAsync();
+                    }}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={[styles.sourceChip, selected && styles.sourceChipOn]}
+                  >
+                    <Text style={[styles.sourceChipText, selected && styles.sourceChipTextOn]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </>
         );
 
@@ -904,7 +1099,7 @@ export default function Onboarding() {
         </TouchableOpacity>
         <View style={styles.progress}>
           <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${(step / TOTAL_STEPS) * 100}%` }]} />
+            <Animated.View style={[styles.progressFill, progressStyle]} />
           </View>
           <Text style={styles.progressText}>
             Paso {step} de {TOTAL_STEPS}
@@ -921,9 +1116,11 @@ export default function Onboarding() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <Animated.View key={step} entering={FadeInDown.duration(280)}>
-            {renderStep()}
-          </Animated.View>
+          {/* No `key={step}`: remounting would hand the job to Reanimated's
+              layout animations, and an `exiting` step stays mounted inside
+              this ScrollView long enough to stack under the arriving one. A
+              single view moved by `slideStyle` cannot do that. */}
+          <Animated.View style={slideStyle}>{renderStep()}</Animated.View>
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
@@ -991,11 +1188,28 @@ export default function Onboarding() {
 
       {/* Last in the tree so they paint over the header and the footer: neither
           gets a progress bar, a back arrow or a "Siguiente". */}
-      {calculating ? <OnboardingCalc onDone={afterCalc} /> : null}
+      {/* Above the step content, not instead of it: the questions mount
+          underneath while this plays, so the first frame after it leaves is
+          already laid out rather than still measuring. */}
+      {intro ? <OnboardingIntro onDone={() => setIntro(false)} /> : null}
+
+      {calculating ? (
+        <OnboardingCalc
+          onDone={afterCalc}
+          subjectCount={subjects.length}
+          // "Bachillerato · Ciencias" rather than either half alone: the branch
+          // is what makes the line specific to them.
+          levelLabel={branch ? `${educationLevel} · ${branch}` : educationLevel}
+        />
+      ) : null}
 
       {paywall ? (
         <OnboardingPaywall
           target={formatGrade(estimate.range[1])}
+          // The strip at the top of the paywall continues the card they were
+          // just reading, so it needs the same three numbers.
+          current={Number.isNaN(gradeValue) ? null : formatGrade(gradeValue)}
+          range={[formatGrade(estimate.range[0]), formatGrade(estimate.range[1])]}
           onContinueFree={afterPaywall}
           onPurchased={afterPaywall}
         />
@@ -1120,13 +1334,6 @@ const styles = StyleSheet.create({
   },
   ok: { fontFamily: font.regular, fontSize: 13, color: tokens.colors.trendUp, marginTop: 16 },
   link: { fontFamily: font.semibold, fontSize: 15, color: tokens.colors.accent },
-  stepHeadRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  skipLink: {
-    fontFamily: font.medium,
-    fontSize: 14,
-    color: tokens.colors.textSecondary,
-    paddingTop: 2,
-  },
 
   // Nineteen communities are too many for pills, so the field opens a sheet.
   select: {
@@ -1163,6 +1370,20 @@ const styles = StyleSheet.create({
   regionLabelOn: { fontFamily: font.semibold, color: tokens.colors.accent },
 
   pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // The opt-out. Deliberately not a Button and not accent-coloured: it is a
+  // way out, not an alternative action, and giving it the same weight as
+  // "Siguiente" would turn one clear task into two competing ones.
+  optOut: {
+    marginTop: 28,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  optOutText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: tokens.colors.textSecondary,
+    textDecorationLine: 'underline',
+  },
   pill: {
     paddingHorizontal: 16,
     paddingVertical: 10,

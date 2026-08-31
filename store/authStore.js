@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { onAuthChange, isSessionExpired, signOut } from '../services/auth';
+import { onAuthChange, isSessionExpired, signOut, touchSession } from '../services/auth';
 import { checkEntitlements, identifyUser, resetUser } from '../services/revenuecat';
 import { markAppOpened } from '../services/notificationService';
-import { markWelcomeSeen } from '../services/welcome';
+import { markDeviceHadAccount } from '../services/welcome';
 
 /**
  * Authentication store using Zustand
@@ -63,12 +63,12 @@ const useAuthStore = create((set) => ({
         isRestoringSession = false;
 
         // Firebase's refresh token doesn't expire on its own, so a restored
-        // session is otherwise good forever. Force a fresh login once a
-        // month, same as most apps, instead of trusting it indefinitely.
+        // session is otherwise good forever. Force a fresh login after a
+        // stretch of not opening the app instead of trusting it indefinitely.
         // Only checked when restoring a session from before this app run —
         // see the comment above `isRestoringSession`.
         if (user && checkingRestoredSession && (await isSessionExpired())) {
-          console.log('[AuthStore] Session older than 30 days, signing out.');
+          console.log('[AuthStore] Session unused for too long, signing out.');
           await signOut();
           return; // onAuthChange fires again with user=null; that pass sets state
         }
@@ -76,12 +76,19 @@ const useAuthStore = create((set) => ({
         set({ user, loading: false, authResolved: true });
 
         if (user) {
-          // Belt and braces for the pre-login carousel: anyone who has ever
-          // been signed in on this device has no business seeing an intro
-          // again if they later sign out. Covers the accounts that were
-          // already signed in when the carousel shipped, which never passed
-          // through /welcome and so never set the flag themselves.
-          markWelcomeSeen();
+          // Survived the check above, so this counts as using the app: push
+          // the clock forward. Without this the window would measure time
+          // since the last password was typed, and a student who opens
+          // Schedio daily would be signed out on the same schedule as one who
+          // had not opened it at all.
+          touchSession();
+
+          // The pre-login carousel is over for this device: anyone who has
+          // ever been signed in here has no business seeing an intro again if
+          // they later sign out. Covers the accounts that were already signed
+          // in when the carousel shipped, which never passed through /welcome
+          // and so never recorded anything themselves.
+          markDeviceHadAccount();
 
           // Identify before checking entitlements, or the check would still
           // be reading whatever anonymous identity RevenueCat had before.

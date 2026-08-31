@@ -42,6 +42,7 @@ import { registerForPushNotifications } from '../services/notificationService';
 import { exportGradesAndExamsPdf } from '../services/export';
 import { restorePurchases } from '../services/revenuecat';
 import { hasDndPermission, openDndPermissionSettings } from '../services/focusMode';
+import { resetWelcomeState } from '../services/welcome';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -239,6 +240,26 @@ export default function SettingsScreen() {
       return;
     }
     router.push('/plus');
+  };
+
+  const handleResetWelcome = async () => {
+    try {
+      await resetWelcomeState();
+      showAlert({
+        title: 'Presentación reiniciada',
+        message:
+          'Este dispositivo vuelve a contar como una instalación nueva. Cierra sesión y reinicia la app para ver el carrusel completo.',
+        singleButton: true,
+        onConfirm: closeAlert,
+      });
+    } catch (error) {
+      showAlert({
+        title: 'No se pudo reiniciar',
+        message: error?.message || 'Inténtalo de nuevo.',
+        singleButton: true,
+        onConfirm: closeAlert,
+      });
+    }
   };
 
   const handleRestore = async () => {
@@ -542,6 +563,22 @@ export default function SettingsScreen() {
           <Row icon={Trash2} label="Eliminar cuenta" danger onPress={openDelete} />
           <Row icon={LogOut} label="Cerrar sesión" danger onPress={handleLogout} />
         </Group>
+
+        {/* Development only — stripped from release builds by the __DEV__
+            guard. The welcome carousel's four states (first launch, two
+            reduced ones, then nothing) are otherwise only reachable by wiping
+            the app's data once per state: `expo start --clear` empties the
+            bundler cache, not AsyncStorage. */}
+        {__DEV__ ? (
+          <Group title="Desarrollo">
+            <Row
+              icon={RotateCcw}
+              label="Reiniciar la presentación"
+              sub="Vuelve al estado de instalación limpia. Cierra sesión para verla."
+              onPress={handleResetWelcome}
+            />
+          </Group>
+        ) : null}
 
         <Text style={styles.version}>Versión {APP_VERSION} (MVP)</Text>
       </ScrollView>

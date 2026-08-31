@@ -223,6 +223,21 @@ export default function Login() {
               <Text style={styles.footerLink}>Regístrate</Text>
             </TouchableOpacity>
           </Animated.View>
+
+          {/* The carousel stops offering itself after a few guest launches
+              (services/welcome.js), and anyone who skipped it landed straight
+              here. Without this there is no route back to the one screen that
+              explains what the app is for. Pushed, not replaced, so "Cerrar"
+              returns to this form with whatever was typed still in it. */}
+          <Animated.View entering={FadeInDown.duration(300).delay(740)} style={styles.pitchRow}>
+            <TouchableOpacity
+              onPress={() => router.push('/welcome?from=login')}
+              disabled={loading}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.pitchLink}>¿Qué es Schedio?</Text>
+            </TouchableOpacity>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -318,5 +333,16 @@ const styles = StyleSheet.create({
     fontFamily: font.semibold,
     fontSize: 13,
     color: tokens.colors.accent,
+  },
+  pitchRow: {
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  // Secondary rather than accent: this sits directly under "Regístrate", and
+  // two accent links stacked would compete for the same tap.
+  pitchLink: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
   },
 });

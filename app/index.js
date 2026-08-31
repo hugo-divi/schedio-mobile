@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import useAuthStore from '../store/authStore';
 import { needsOnboarding } from '../services/onboarding';
-import { hasSeenWelcome } from '../services/welcome';
+import { resolveGuestEntry } from '../services/welcome';
 
 // The auth listener resolves on its own in practice (see
 // store/authStore.js), but startup must never be able to hang behind the
@@ -45,11 +45,11 @@ export default function Home() {
         // `loading` is not that proof: the watchdog above clears it on a
         // timeout, and initAuth's catch clears it when Firebase fails to
         // start, both with `user` still null. Only `authResolved` means the
-        // listener actually reported. When it hasn't, fall back to /login:
+        // listener actually reported. When it hasn't, go straight to /login:
         // a signed-in student gets a login screen instead of an intro that
         // was never meant for them, and a genuinely new one still sees the
-        // carousel on the next launch, since nothing marked it seen.
-        const target = (await hasSeenWelcome()) || !authResolved ? '/login' : '/welcome';
+        // carousel on the next launch, since this run was never counted.
+        const target = authResolved ? await resolveGuestEntry() : '/login';
         if (!cancelled) router.replace(target);
       } else if (!user.emailVerified) {
         // Same gate login.js enforces — a restored session for a

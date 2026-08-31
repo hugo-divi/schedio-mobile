@@ -53,11 +53,18 @@ export const regionLabelFor = (code) => REGIONS.find((r) => r.code === code)?.la
 /**
  * Self-reported attribution. Asked once, optional, and never gates anything.
  *
- * It lives on step 5 for a reason: that is the only step whose `canAdvance`
- * returns an unconditional `true` — the student is reading their estimate, not
- * filling anything in — so this is the one place a question can be added
- * without adding a step or a required field to a flow that already loses
- * people partway (see `abandonedOnboarding` in functions/index.js).
+ * It used to sit below the fold of step 5, on the grounds that it was the
+ * only step whose `canAdvance` returns an unconditional `true`. That saved a
+ * screen and cost the thing the screen was for: step 5 is where the student
+ * reads their own projected grade, and a question about marketing channels
+ * sharing that screen competes with the one moment in the flow that is purely
+ * about them. It now has step 8 to itself, after everything is decided and
+ * before the dashboard — where nothing it competes with is left, and where it
+ * still gates nothing (`canAdvance` returns `true` for step 8 too).
+ *
+ * The flow already loses people partway (see `abandonedOnboarding` in
+ * functions/index.js), so this stays last: anyone who drops before it has
+ * dropped after giving us everything that actually matters.
  *
  * Stored as the stable `value`, never the label, so rewording an option later
  * doesn't split the counts in two.
