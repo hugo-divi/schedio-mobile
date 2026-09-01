@@ -21,6 +21,19 @@
  * v1 infers format and never asks. `test` exists in the table but nothing infers
  * it — no subject name implies a multiple-choice exam. It's the slot for the
  * one-tap override, when that gets built.
+ *
+ * ─── What these sentences are, and are not ───
+ * They are templates picked by two variables, not a judgement about this
+ * student's material. The planner distributes time and assigns a phase; this
+ * file gives that phase a sentence. Nothing here knows what is on the exam.
+ *
+ * So every line must be answerable by a student who has told us nothing beyond
+ * the subject name and a date. "10 ejercicios seguidos, sin mirar apuntes" is
+ * fine. "10 ejercicios del tema que peor lleves" was not, and used to be here:
+ * it reads as guidance while quietly handing the decision back, and it promises
+ * a kind of knowledge the app does not have. References to earlier work
+ * ("los que fallaste", "tus esquemas") are allowed only because a previous phase
+ * in the same arc asked for exactly that.
  */
 
 export const EXAM_FORMATS = ['problemas', 'desarrollo', 'test', 'idioma'];
@@ -170,7 +183,7 @@ const COPY = {
   },
   PRÁCTICA: {
     problemas: [
-      '10 ejercicios de {A} del tema que peor lleves, sin mirar apuntes',
+      '10 ejercicios seguidos de {A}, sin mirar apuntes',
       'Busca un examen antiguo de {A} y hazlo con tiempo',
       'Repite los ejercicios de {A} que fallaste, sin ver la solución',
     ],

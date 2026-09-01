@@ -47,14 +47,18 @@ const font = tokens.typography.families.inter;
 // same config object instead of rebuilding it on each render.
 const LIST_TRANSITION = LinearTransition.duration(250);
 
-// The generator plans forward from today (HORIZON_DAYS = 30) and reconcilePlan
-// rebuilds from it daily, so there is no past to navigate back into. Free stays
-// at this week + next (the "2 semanas" sold in plus.js); Prime can reach into
-// week 4 — still safely inside the 30-day horizon the generator already fills,
-// so no change to plan generation itself. A true trimester view needs that
-// horizon extended and is a separate, bigger piece of work.
+// The generator plans forward from today and reconcilePlan rebuilds from it
+// daily, so there is no past to navigate back into. Free stays at this week +
+// next (the "2 semanas" sold in plus.js).
+//
+// These are *calendar week* offsets, not rolling days, so how far ahead an
+// offset reaches depends on today's weekday: on a Monday, offset 3 ends 27 days
+// out; on a Sunday it ends at 21. Offset 4 is what guarantees a full four weeks
+// ahead in every case, and HORIZON_DAYS was raised to 35 to back it — at offset
+// 3 against a 30-day horizon the generator was filling days no screen could
+// reach. A true trimester view is a separate, bigger piece of work.
 const MAX_WEEK_OFFSET_FREE = 1;
-const MAX_WEEK_OFFSET_PRIME = 3;
+const MAX_WEEK_OFFSET_PRIME = 4;
 
 const DURATION_OPTIONS = [15, 30, 45, 60];
 

@@ -37,8 +37,14 @@ import { inferExamFormat, pickTaskText, taskHandInText } from './taskCopy';
  *  fiction, and every generated task costs space in the user document. */
 export const MAX_LEAD_DAYS = 21;
 
-/** Hard cap on how far the plan extends, across all exams. */
-export const HORIZON_DAYS = 30;
+/**
+ * Hard cap on how far the plan extends, across all exams.
+ *
+ * Kept in step with what Planes can actually show: Prime reaches week offset 4,
+ * which on a Monday ends 34 days out. At 30 the generator was producing days no
+ * screen could navigate to.
+ */
+export const HORIZON_DAYS = 35;
 
 /** Blocks shorter than this aren't worth a row in the UI; longer than this and a
  *  16-22 year old stops mid-way. */
@@ -161,6 +167,36 @@ export const planReasonsFor = ({ organizationLevel, reviewFrequency } = {}) => {
   return reasons;
 };
 export const CAPACITY_BOUNDS = [30, 180];
+
+/**
+ * Absolute ceiling for a single day, in minutes. Nothing crosses it — not even
+ * panic mode.
+ *
+ * A student has other classes, homework, a commute and a life; five hours is
+ * already the outer edge of what a real day holds, and a plan that asks for more
+ * is not ambitious, it's ignored. Panic used to bypass the daily budget entirely,
+ * so five exams at once produced 3.3 h/day and eight subjects would have produced
+ * 6.7 h — the cap was per-exam, never per-day.
+ */
+export const HARD_DAILY_CAP_MINUTES = 300;
+
+/**
+ * Fatigue. Studying six days straight does not yield six days of studying.
+ *
+ * Capacity decays once a run of consecutive study days passes ONSET, and resets
+ * the moment a day goes empty. Nothing about this is shown to the student: it
+ * just means the plan quietly eases off before they burn out, and that rest days
+ * appear on their own instead of being a hard calendar rule.
+ *
+ * The floor matters — without it a long exam season would decay towards zero and
+ * the plan would stop planning exactly when it's needed most.
+ */
+export const FATIGUE_ONSET_DAYS = 3;
+export const FATIGUE_STEP = 0.12;
+export const FATIGUE_FLOOR = 0.6;
+
+export const fatigueFactor = (consecutiveDays) =>
+  Math.max(FATIGUE_FLOOR, 1 - Math.max(0, consecutiveDays - FATIGUE_ONSET_DAYS) * FATIGUE_STEP);
 /** Sessions needed before observed history outweighs the self-report. */
 export const MIN_SESSIONS_FOR_HISTORY = 3;
 
@@ -322,6 +358,10 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     // Sub-block leftovers dropped as rounding. Tracked so scheduled + rounding +
     // unscheduled always accounts for totalEffortMinutes.
     roundingMinutes: 0,
+    // Days the fatigue model or the hard ceiling held back, so a plan that looks
+    // thin can be explained instead of looking broken.
+    easedDays: [],
+    cappedDays: [],
     unscheduled: [],
     fullDays: [],
     skippedNoDate: [],
@@ -414,6 +454,8 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
   // ─── 2. Walk the calendar, filling each day's budget ───
   const tasks = [];
+  // Length of the current unbroken run of study days, which drives `fatigueFactor`.
+  let consecutiveStudyDays = 0;
 
   for (let day = 0; day <= horizon; day++) {
     const date = addDays(today, day);
@@ -422,11 +464,17 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     const active = items.filter(
       (item) => item.remaining > 0 && day >= item.startDay && day <= item.daysUntil
     );
-    if (active.length === 0) continue;
+    if (active.length === 0) {
+      consecutiveStudyDays = 0;
+      continue;
+    }
 
     const nearestExamDays = Math.min(...active.map((item) => item.daysUntil - day));
     const isRestDay = restDaySet.has(date.getDay()) && nearestExamDays > REST_OVERRIDE_DAYS;
-    if (isRestDay) continue;
+    if (isRestDay) {
+      consecutiveStudyDays = 0;
+      continue;
+    }
 
     // Re-score for *this* day, not for today: urgency is what changes as the
     // calendar advances, and it's the reason an exam that got crowded out early
@@ -442,24 +490,52 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       })
       .sort((a, b) => b.score - a.score || a.item.daysUntil - b.item.daysUntil);
 
-    let budgetLeft = dailyCapacity;
+    // Capacity for *this* day: the base budget eased by how long the current run
+    // of study days has been, and never above the absolute daily ceiling.
+    const ease = fatigueFactor(consecutiveStudyDays);
+    const dayCapacity = Math.min(Math.round(dailyCapacity * ease), HARD_DAILY_CAP_MINUTES);
+    if (ease < 1) diagnostics.easedDays.push(dateKey);
+
+    let budgetLeft = dayCapacity;
     let placedToday = 0;
+    let placedMinutes = 0;
 
     dayScored.forEach(({ item, detail }) => {
       const isPanic = item.daysUntil <= PANIC_DAYS;
 
-      // Panic ignores the budget: the exam is in two days and most of the work is
-      // still owed, so a tidy plan the student can't use is worse than a hard one.
+      // Panic ignores the daily budget — the exam is in two days — but never the
+      // absolute ceiling. Without this second check, each panic exam took its own
+      // block regardless of how many other panic exams shared the day.
+      if (placedMinutes + MIN_BLOCK_MINUTES > HARD_DAILY_CAP_MINUTES) {
+        if (!diagnostics.cappedDays.includes(dateKey)) diagnostics.cappedDays.push(dateKey);
+        return;
+      }
       if (budgetLeft < MIN_BLOCK_MINUTES && !isPanic) return;
 
       // Nothing is due today unless the outstanding work is above the burn-down
-      // curve. The last day of the window has a target of zero, so whatever is
-      // left always comes due then rather than quietly expiring.
-      if (!isPanic && item.remaining <= targetRemaining(item, day)) return;
+      // curve — *unless* deferring would make it unschedulable. The curve decides
+      // when the work happens, never whether it happens at all.
+      //
+      // Without that second half the scheduler was not work-conserving after all:
+      // a 230-minute exam six days out had its early days skipped by the curve,
+      // then ran out of room because a day only takes one block per exam, and
+      // reported 30 minutes as an overload while the week still had 500 minutes
+      // free. A false shortfall is worse than a plan that starts a day early.
+      let schedulableLeft = 0;
+      for (let d = day; d <= item.daysUntil; d++) {
+        const at = addDays(today, d);
+        const rest = restDaySet.has(at.getDay());
+        if (!rest || item.daysUntil - d <= REST_OVERRIDE_DAYS) schedulableLeft++;
+      }
+      const sessionsNeeded = Math.ceil(item.remaining / preferredBlock);
+      const mustStartNow = sessionsNeeded >= schedulableLeft;
+
+      if (!isPanic && !mustStartNow && item.remaining <= targetRemaining(item, day)) return;
 
       const target = Math.min(preferredBlock, item.remaining);
       const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
-      let block = Math.max(5, roundTo5(Math.min(target, allowance)));
+      const roomLeft = HARD_DAILY_CAP_MINUTES - placedMinutes;
+      let block = Math.max(5, roundTo5(Math.min(target, allowance, roomLeft)));
 
       // Absorb a trailing scrap rather than leaving it owed forever: a remainder
       // below MIN_BLOCK can never earn its own row, so it would sit unscheduled
@@ -540,6 +616,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       item.sessions += 1;
       budgetLeft -= block;
       placedToday += 1;
+      placedMinutes += block;
       diagnostics.scheduledMinutes += block;
 
       // A leftover smaller than one block is rounding, not work. Left in place it
@@ -552,6 +629,8 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         item.remaining = 0;
       }
     });
+
+    consecutiveStudyDays = placedToday > 0 ? consecutiveStudyDays + 1 : 0;
 
     if (budgetLeft < MIN_BLOCK_MINUTES && items.some((item) => item.remaining > 0)) {
       diagnostics.fullDays.push(dateKey);
