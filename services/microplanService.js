@@ -315,9 +315,27 @@ export const estimateDailyCapacity = ({ profile, sessions, now = new Date() } = 
   return clamp(Math.round((selfReported + observed) / 2), CAPACITY_BOUNDS[0], CAPACITY_BOUNDS[1]);
 };
 
-const phaseFor = (progress, isPanic) => {
+/**
+ * A short window doesn't get a compressed introduction — it gets no introduction.
+ *
+ * The phases were mapped purely onto relative position in the window, so an exam
+ * three days out still opened with "léelo entero sin memorizar" squeezed into
+ * day one. With three days left, reading for the first time is not the priority:
+ * studying properly and practising is. Below this many days of window, the arc
+ * starts at ESTUDIO PROFUNDO instead.
+ */
+export const FULL_ARC_MIN_DAYS = 10;
+
+export const phaseFloorFor = (windowLength) => (windowLength >= FULL_ARC_MIN_DAYS ? 0 : 1);
+
+const phaseFor = (progress, isPanic, floor = 0) => {
   if (isPanic) return PANIC_PHASE;
-  return PHASES.find((band) => progress < band.until) || PHASES[PHASES.length - 1];
+  const available = PHASES.slice(floor);
+  // Re-normalise the bands over the phases this window has room for, so the
+  // remaining ones keep their relative weights instead of splitting evenly.
+  const from = floor === 0 ? 0 : PHASES[floor - 1].until;
+  const scaled = from + progress * (1 - from);
+  return available.find((band) => scaled < band.until) || available[available.length - 1];
 };
 
 /**
@@ -576,7 +594,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         ? TASK_PHASE
         : closesExam
           ? PHASES[PHASES.length - 1]
-          : phaseFor(progress, isPanic);
+          : phaseFor(progress, isPanic, phaseFloorFor(windowLength));
 
       const id = `${item.exam.id || `generated-${item.subjectName}`}-${dateKey}`;
       const text = isTask

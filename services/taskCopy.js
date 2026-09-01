@@ -38,9 +38,17 @@
 
 export const EXAM_FORMATS = ['problemas', 'desarrollo', 'test', 'idioma'];
 
-/** Safest default: a written-development exam is the most common shape and the
- *  least wrong when applied to something it isn't. */
-export const DEFAULT_FORMAT = 'desarrollo';
+/**
+ * `null` means "we don't know how this subject is examined", and that is a real
+ * answer, not a gap to paper over.
+ *
+ * This used to default to 'desarrollo'. A guess is worse than silence here:
+ * "Proyecto Integrado" and "Métodos Cuantitativos" match no root, and telling
+ * their student to "subrayar fechas, nombres y definiciones" is nonsense that
+ * costs trust. Unmatched subjects get the phase's neutral wording, which is
+ * true for any subject anywhere.
+ */
+export const UNKNOWN_FORMAT = null;
 
 /**
  * Roots, not full names. University subjects are compound ("Fundamentos de
@@ -124,11 +132,11 @@ const normalize = (value) =>
  */
 export const inferExamFormat = (subjectName) => {
   const name = normalize(subjectName);
-  if (!name) return DEFAULT_FORMAT;
+  if (!name) return UNKNOWN_FORMAT;
 
   const ordered = ['problemas', 'idioma', 'desarrollo'];
   const hit = ordered.find((format) => FORMAT_ROOTS[format].some((root) => name.includes(root)));
-  return hit || DEFAULT_FORMAT;
+  return hit || UNKNOWN_FORMAT;
 };
 
 /**
@@ -142,6 +150,34 @@ export const inferExamFormat = (subjectName) => {
  * review, because that is the only study behaviour that reliably predicts the
  * grade. Nobody prepares for an exam by rereading on the eve of it.
  */
+/**
+ * The base layer: one wording per phase that holds for any subject on earth.
+ *
+ * The phase is the part the planner genuinely knows — it comes from where the
+ * day sits in the exam's window, not from guessing what the subject is. So the
+ * phase carries the sentence, and the format only refines it when a root matched
+ * with confidence. No match, no invention.
+ */
+const NEUTRAL = {
+  INTRODUCCIÓN: [
+    'Primer contacto con {A}: léelo entero sin intentar memorizar',
+    'Ojea {A} y quédate con de qué va cada parte',
+  ],
+  'ESTUDIO PROFUNDO': [
+    'Trabaja {A} a fondo: resume o esquematiza, con los apuntes cerrados',
+    'Vuelve sobre {A} y marca lo que no sabrías explicar',
+  ],
+  PRÁCTICA: [
+    'Ponte a prueba con {A} como en el examen: sin apuntes y con tiempo',
+    'Practica {A} con lo que más te cueste, sin mirar la solución',
+  ],
+  'REPASO FINAL': [
+    'Tapa {A} y recupera lo que puedas. Lo que no salga, eso repasas',
+    'Repaso rápido de {A}: solo lo que fallaste antes',
+  ],
+  'MODO PÁNICO 🔥': ['{A}: solo lo esencial, lo que más cae. No entres en detalle'],
+};
+
 const COPY = {
   INTRODUCCIÓN: {
     problemas: [
@@ -248,10 +284,11 @@ const variantFor = (key, count) => {
  * @returns {string}
  */
 export const pickTaskText = ({ phase, format, subjectName, seed = '' }) => {
-  const byFormat = COPY[phase];
-  if (!byFormat) return `Repasa ${subjectName}`;
+  // Format-specific wording only when a root actually matched; otherwise the
+  // phase's neutral line, which never claims to know what kind of subject it is.
+  const variants = (format && COPY[phase]?.[format]) || NEUTRAL[phase];
+  if (!variants) return `Repasa ${subjectName}`;
 
-  const variants = byFormat[format] || byFormat[DEFAULT_FORMAT];
   const chosen = variants[variantFor(seed || phase, variants.length)];
   return chosen.replace(/\{A\}/g, subjectName);
 };

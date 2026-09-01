@@ -36,7 +36,7 @@ const load = (name) => import(`file://${join(here, name)}`);
 
 const { generateStudyPlan, LEVEL_PROFILES, levelProfileFor, gammaFor, MIN_BLOCK_MINUTES } =
   await load('microplanService.mjs');
-const { inferExamFormat, pickTaskText, DEFAULT_FORMAT } = await load('taskCopy.mjs');
+const { inferExamFormat, pickTaskText, UNKNOWN_FORMAT } = await load('taskCopy.mjs');
 
 const NOW = new Date('2026-11-16T08:00:00');
 const day = (n) => new Date(NOW.getTime() + n * 86400000).toISOString();
@@ -60,9 +60,11 @@ console.log('=== inferencia de formato ===');
   ['Inglés', 'idioma'],
   ['Latín II', 'idioma'],
   ['Valencià', 'idioma'],
-  ['Asignatura Rarísima de Nombre Inventado', DEFAULT_FORMAT],
-  ['', DEFAULT_FORMAT],
-  [null, DEFAULT_FORMAT],
+  ['Asignatura Rarísima de Nombre Inventado', UNKNOWN_FORMAT],
+  ['Proyecto Integrado', UNKNOWN_FORMAT],
+  ['Métodos Cuantitativos', UNKNOWN_FORMAT],
+  ['', UNKNOWN_FORMAT],
+  [null, UNKNOWN_FORMAT],
 ].forEach(([name, expected]) => check(`"${name}"`, inferExamFormat(name), expected));
 
 console.log('\n=== el texto cambia con el formato ===');
@@ -193,6 +195,36 @@ check('ninguna tarea después de su examen', hoy.tasks.every((t) => {
   const e = exams.find((x) => x.id === t.examId);
   return !e || new Date(t.date) <= new Date(e.date);
 }), true);
+
+console.log('\n=== capa neutra: asignaturas que no reconocemos ===');
+['INTRODUCCIÓN', 'ESTUDIO PROFUNDO', 'PRÁCTICA', 'REPASO FINAL'].forEach((ph) => {
+  const t = pickTaskText({ phase: ph, format: UNKNOWN_FORMAT, subjectName: 'Proyecto Integrado', seed: ph });
+  console.log(`  ${ph.padEnd(17)} ${t}`);
+  check(`  neutra sin {A} sin sustituir · ${ph}`, /\{A\}/.test(t), false);
+});
+check(
+  'una asignatura desconocida no hereda el texto de desarrollo',
+  pickTaskText({ phase: 'INTRODUCCIÓN', format: UNKNOWN_FORMAT, subjectName: 'X', seed: 'k' }) !==
+    pickTaskText({ phase: 'INTRODUCCIÓN', format: 'desarrollo', subjectName: 'X', seed: 'k' }),
+  true
+);
+
+console.log('\n=== ventana corta: se salta la introducción ===');
+const { phaseFloorFor } = await load('microplanService.mjs');
+check('ventana de 14 días → arco completo', phaseFloorFor(14), 0);
+check('ventana de 9 días → sin introducción', phaseFloorFor(9), 1);
+check('ventana de 3 días → sin introducción', phaseFloorFor(3), 1);
+[3, 6, 14].forEach((d) => {
+  const p = generateStudyPlan(
+    [{ id: 'x', name: 'Examen', subjectId: 'm', type: 'exam', date: day(d), manualPriority: 5 }],
+    subjects,
+    { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
+  );
+  const phases = [...new Set(p.tasks.map((t) => t.phase))];
+  console.log(`  examen en ${String(d).padStart(2)} días: ${phases.join(' → ')}`);
+  if (d <= 9) check(`  ${d} días: sin introducción`, phases.includes('INTRODUCCIÓN'), false);
+});
+
 
 console.log(`\n${fail === 0 ? '✅ todo correcto' : `❌ ${fail} fallos`}`);
 process.exit(fail === 0 ? 0 : 1);
