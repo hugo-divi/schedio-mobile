@@ -62,15 +62,11 @@ export const SUBJECT_COLORS_PRIME = [
 export const getSubjectColors = (userData) =>
   hasPrimeAccess(userData) ? SUBJECT_COLORS_PRIME : SUBJECT_COLORS_FREE;
 
-/**
- * Widget de pantalla de inicio (Android, aún sin construir): el tamaño base
- * (pequeño y mediano) es gratis para todos a propósito — es un mecanismo de
- * retención (cuenta atrás + racha), no una cuota, y paywallearlo mataría su
- * propio objetivo. Prime solo añade el tamaño grande. Sin consumidores
- * todavía: se fija aquí para que el widget nazca ya con el gate correcto.
+/*
+ * El widget de pantalla de inicio no aparece aquí a propósito: sus tres
+ * tamaños son gratis. Es un mecanismo de retención (cuenta atrás + racha),
+ * no una cuota, y reservar el 4x4 para Prime obligaba además a que ese
+ * tamaño tuviera un segundo diseño — el del anuncio — que era justo lo que
+ * veía quien no pagaba. Si algún día vuelve el gate, el modelo que dibuja
+ * los widgets se construye en services/widgetData.js.
  */
-export const WIDGET_SIZES_FREE = ['small', 'medium'];
-export const WIDGET_SIZES_PRIME = ['small', 'medium', 'large'];
-
-export const getAvailableWidgetSizes = (userData) =>
-  hasPrimeAccess(userData) ? WIDGET_SIZES_PRIME : WIDGET_SIZES_FREE;

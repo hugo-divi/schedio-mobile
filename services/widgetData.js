@@ -1,7 +1,6 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { localDateKey } from './priority';
-import { getAvailableWidgetSizes } from './permissions';
 
 const STORAGE_KEY = '@schedio/widgetModel';
 
@@ -35,7 +34,7 @@ const todaysPendingTasks = (microplans) => {
  * recomputed at render time in the widget itself, from `examDateIso`, so a
  * stale cached model still counts down correctly.
  */
-export const computeWidgetModel = ({ exams, microplans, subjects, streak, isPrime }) => {
+export const computeWidgetModel = ({ exams, microplans, subjects, streak }) => {
   const subjectsById = new Map((subjects || []).map((subject) => [subject.id, subject]));
   const examGroup = groupNearestExamDay(exams);
   const tasksToday = todaysPendingTasks(microplans);
@@ -48,7 +47,6 @@ export const computeWidgetModel = ({ exams, microplans, subjects, streak, isPrim
     synced: true,
     computedAt: new Date().toISOString(),
     streak: streak || 0,
-    availableWidgetSizes: getAvailableWidgetSizes({ isPrime }),
     hasExam: examGroup.length > 0,
     examDateIso: examGroup[0]?.date ? new Date(examGroup[0].date).toISOString() : null,
     exams: examGroup.map((exam) => ({

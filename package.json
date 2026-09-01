@@ -12,6 +12,7 @@
     "web": "expo start --web",
     "lint": "eslint .",
     "check:plan": "node scripts/check-plan.mjs",
+    "check:widgets": "node scripts/check-widgets.mjs",
     "prepare": "husky"
   },
   "dependencies": {

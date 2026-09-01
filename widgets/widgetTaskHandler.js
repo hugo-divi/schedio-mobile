@@ -15,7 +15,6 @@ const EMPTY_MODEL = {
   synced: false,
   hasExam: false,
   streak: 0,
-  availableWidgetSizes: ['small', 'medium'],
   exams: [],
   tasksToday: [],
 };
@@ -33,7 +32,20 @@ export async function widgetTaskHandler(props) {
     case 'WIDGET_UPDATE':
     case 'WIDGET_RESIZED': {
       const model = (await loadCachedWidgetModel()) || EMPTY_MODEL;
-      props.renderWidget(renderWidgetForName(props.widgetInfo.widgetName, model));
+      const { widgetName } = props.widgetInfo;
+      try {
+        props.renderWidget(renderWidgetForName(widgetName, model));
+      } catch (error) {
+        // `renderWidget` builds the native view tree synchronously, and
+        // anything it refuses (an unsupported element, a colour it can't
+        // parse) throws right here — which drew nothing at all. A widget
+        // that renders as a transparent hole is the worst outcome: it looks
+        // broken, it can't be tapped to fix itself, and it still occupies
+        // the cells. So the last resort is the one card that is always
+        // renderable, and it opens the app.
+        console.error(`Widget ${widgetName} failed to render`, error);
+        props.renderWidget(renderWidgetForName(widgetName, EMPTY_MODEL));
+      }
       break;
     }
 

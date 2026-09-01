@@ -227,7 +227,6 @@ export default function Dashboard() {
         microplans: useUserStore.getState().microplans,
         subjects: useUserStore.getState().subjects,
         streak: streakData.currentStreak || 0,
-        isPrime: useAuthStore.getState().isPrime,
       });
 
       loadAIRecommendation(profileData, examsData, streakData);

@@ -1011,7 +1011,6 @@ export default function StudySessionScreen() {
               microplans: useUserStore.getState().microplans,
               subjects: useUserStore.getState().subjects,
               streak: useUserStore.getState().stats.streak,
-              isPrime: useAuthStore.getState().isPrime,
             });
           })
           .catch((error) => console.warn('Could not refresh the widget', error));

@@ -388,7 +388,7 @@ export default function SchedioPlusScreen() {
           <Text style={styles.comingSoonLabel}>Próximamente</Text>
           <Text style={styles.comingSoonText}>
             Coach IA y vista de trimestre — incluidos con Prime en cuanto estén listos. El widget de
-            inicio en Android llegará gratis para todos; Prime añadirá el tamaño grande.
+            inicio en Android llegará gratis para todos, en sus tres tamaños.
           </Text>
         </View>
 
