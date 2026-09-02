@@ -33,9 +33,17 @@ import { inferExamFormat, pickTaskText, taskHandInText } from './taskCopy';
 
 // ─── Tunables ───
 
-/** Nothing is scheduled further out than this. Beyond ~3 weeks a plan is
- *  fiction, and every generated task costs space in the user document. */
-export const MAX_LEAD_DAYS = 21;
+/**
+ * Global ceiling on how early any exam can open its study window.
+ *
+ * Calibrated for the student Schedio is for, not for an organised one. Someone
+ * who already plans three weeks ahead doesn't need this app; the actual user
+ * starts about five days before an exam. A plan that opens 21 days out is
+ * fiction they will ignore, and teaching someone to ignore the plan is the one
+ * failure mode worth avoiding above all. Per-level windows in LEVEL_PROFILES sit
+ * under this; only Universidad reaches it.
+ */
+export const MAX_LEAD_DAYS = 14;
 
 /**
  * Hard cap on how far the plan extends, across all exams.
@@ -60,7 +68,7 @@ export const MAX_BLOCK_MINUTES = 50;
  * single day for weeks. Distributed practice beats massed practice, but not at
  * the price of eleven consecutive days of sessions too short to get going.
  */
-export const PREFERRED_BLOCK_MINUTES = 40;
+export const PREFERRED_BLOCK_MINUTES = 35;
 
 /**
  * Shape of the burn-down curve, as an exponent on progress through the study
@@ -77,21 +85,21 @@ export const BURN_GAMMA = 2;
  * is already stored on the profile as `course`, so this costs the student
  * nothing: no new question, no new field.
  *
- * The numbers below are not guesses about how much a student *should* study —
- * they're bounded by what the plan can actually schedule. With a ~30-day window
- * and ~90 min a day, five university subjects share about 3.100 minutes, so
- * anything above ~600 per subject would make every plan report an overload and
- * the warning would stop meaning anything.
+ * The numbers are deliberately modest. Schedio exists for the student who does
+ * not plan ahead — the one who starts about five days before an exam — so a
+ * profile calibrated for someone who studies three weeks out describes a user
+ * who would not have installed the app. Earlier values (150 min and a 21-day
+ * window for Bachillerato) came from that wrong picture.
  *
- * That fixes the frame too: the plan is a spine, not a total. It schedules the
- * sessions that have to land on particular days for the spacing to work; the
- * student puts their own hours on top. A plan that tries to account for every
- * hour of exam-period study becomes a second job and is always wrong.
+ * And the plan is a spine, not a total: it schedules the sessions that have to
+ * land on particular days for the spacing to work, and the student adds their own
+ * hours on top. A plan that tries to account for every hour of exam-period study
+ * becomes a second job and is always wrong.
  */
 export const LEVEL_PROFILES = {
-  ESO: { exam: 70, task: 25, leadDays: 10, block: 25 },
-  Bachillerato: { exam: 150, task: 45, leadDays: 21, block: 40 },
-  Universidad: { exam: 450, task: 90, leadDays: 30, block: 50 },
+  ESO: { exam: 60, task: 20, leadDays: 7, block: 25 },
+  Bachillerato: { exam: 120, task: 35, leadDays: 12, block: 35 },
+  Universidad: { exam: 300, task: 70, leadDays: 21, block: 45 },
 };
 
 /** 'Otro' and anything unrecognised sit in the middle rather than at an extreme. */
@@ -120,7 +128,7 @@ export const gammaFor = (reviewFrequency) => GAMMA_BY_REVIEW_HABIT[reviewFrequen
 /** Minutes per day by self-reported organisation level (1 "caos total" ..
  *  5 "muy organizado", from onboarding). Blended with observed history when
  *  there's enough of it. */
-export const CAPACITY_BY_ORGANIZATION = { 1: 45, 2: 60, 3: 75, 4: 95, 5: 120 };
+export const CAPACITY_BY_ORGANIZATION = { 1: 35, 2: 45, 3: 60, 4: 75, 5: 95 };
 
 /**
  * Plain-language reasons behind the numbers `estimateDailyCapacity` and
@@ -166,7 +174,7 @@ export const planReasonsFor = ({ organizationLevel, reviewFrequency } = {}) => {
 
   return reasons;
 };
-export const CAPACITY_BOUNDS = [30, 180];
+export const CAPACITY_BOUNDS = [25, 150];
 
 /**
  * Absolute ceiling for a single day, in minutes. Nothing crosses it — not even
@@ -197,6 +205,30 @@ export const FATIGUE_FLOOR = 0.6;
 
 export const fatigueFactor = (consecutiveDays) =>
   Math.max(FATIGUE_FLOOR, 1 - Math.max(0, consecutiveDays - FATIGUE_ONSET_DAYS) * FATIGUE_STEP);
+
+/**
+ * Exam pressure. A flat daily budget describes nobody.
+ *
+ * The student this app is for does 30 minutes on an ordinary Tuesday and two
+ * hours the night before an exam — that swing is the defining behaviour of
+ * someone who doesn't plan ahead, not a deviation from it. Modelling capacity as
+ * a constant meant three exams in one week reported over half the work as
+ * impossible, when in reality those are exactly the days the student finds time.
+ *
+ * Pulls the opposite way from `fatigueFactor`, and the two compose: crunch raises
+ * the budget, a long unbroken run lowers it. The hard daily ceiling still binds.
+ */
+export const PRESSURE_STEPS = [
+  { within: 1, factor: 2 },
+  { within: 3, factor: 1.6 },
+  { within: 7, factor: 1.25 },
+];
+
+export const pressureFactor = (daysToNearestExam) => {
+  if (!Number.isFinite(daysToNearestExam)) return 1;
+  const step = PRESSURE_STEPS.find((s) => daysToNearestExam <= s.within);
+  return step ? step.factor : 1;
+};
 /** Sessions needed before observed history outweighs the self-report. */
 export const MIN_SESSIONS_FOR_HISTORY = 3;
 
@@ -318,13 +350,17 @@ export const estimateDailyCapacity = ({ profile, sessions, now = new Date() } = 
 /**
  * A short window doesn't get a compressed introduction — it gets no introduction.
  *
+ * Set at 7 days, not 10: for a student who starts five days out, a ten-day
+ * threshold means the introduction phase practically never appears anyway, so
+ * the constant was describing a case that doesn't happen.
+ *
  * The phases were mapped purely onto relative position in the window, so an exam
  * three days out still opened with "léelo entero sin memorizar" squeezed into
  * day one. With three days left, reading for the first time is not the priority:
  * studying properly and practising is. Below this many days of window, the arc
  * starts at ESTUDIO PROFUNDO instead.
  */
-export const FULL_ARC_MIN_DAYS = 10;
+export const FULL_ARC_MIN_DAYS = 7;
 
 export const phaseFloorFor = (windowLength) => (windowLength >= FULL_ARC_MIN_DAYS ? 0 : 1);
 
@@ -511,7 +547,8 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     // Capacity for *this* day: the base budget eased by how long the current run
     // of study days has been, and never above the absolute daily ceiling.
     const ease = fatigueFactor(consecutiveStudyDays);
-    const dayCapacity = Math.min(Math.round(dailyCapacity * ease), HARD_DAILY_CAP_MINUTES);
+    const push = pressureFactor(nearestExamDays);
+    const dayCapacity = Math.min(Math.round(dailyCapacity * ease * push), HARD_DAILY_CAP_MINUTES);
     if (ease < 1) diagnostics.easedDays.push(dateKey);
 
     let budgetLeft = dayCapacity;

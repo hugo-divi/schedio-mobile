@@ -212,7 +212,8 @@ check(
 console.log('\n=== ventana corta: se salta la introducción ===');
 const { phaseFloorFor } = await load('microplanService.mjs');
 check('ventana de 14 días → arco completo', phaseFloorFor(14), 0);
-check('ventana de 9 días → sin introducción', phaseFloorFor(9), 1);
+check('ventana de 9 días → arco completo (umbral 7)', phaseFloorFor(9), 0);
+check('ventana de 6 días → sin introducción', phaseFloorFor(6), 1);
 check('ventana de 3 días → sin introducción', phaseFloorFor(3), 1);
 [3, 6, 14].forEach((d) => {
   const p = generateStudyPlan(
@@ -225,6 +226,31 @@ check('ventana de 3 días → sin introducción', phaseFloorFor(3), 1);
   if (d <= 9) check(`  ${d} días: sin introducción`, phases.includes('INTRODUCCIÓN'), false);
 });
 
+
+console.log('\n=== presion de examen y cansancio ===');
+const { pressureFactor, fatigueFactor, HARD_DAILY_CAP_MINUTES } = await load('microplanService.mjs');
+check('sin examen cerca no sube nada', pressureFactor(20), 1);
+check('a 3 días sube', pressureFactor(3) > 1, true);
+check('la víspera sube más que a 3 días', pressureFactor(1) > pressureFactor(3), true);
+check('cansancio y presión tiran en sentidos opuestos', fatigueFactor(8) < 1 && pressureFactor(1) > 1, true);
+
+const crunch = generateStudyPlan(
+  [
+    { id: 'a', name: 'A', subjectId: 'm', type: 'exam', date: day(5), manualPriority: 5 },
+    { id: 'b', name: 'B', subjectId: 'h', type: 'exam', date: day(6), manualPriority: 5 },
+  ],
+  subjects,
+  { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 2 } }
+);
+const perDay = {};
+crunch.tasks.forEach((t) => {
+  const k = t.date.slice(0, 10);
+  perDay[k] = (perDay[k] || 0) + t.duration;
+});
+const peak = Math.max(...Object.values(perDay));
+console.log(`  semana de examenes: pico de ${peak} min en un dia`);
+check('ni con presion se pasa del techo de 5 h', peak <= HARD_DAILY_CAP_MINUTES, true);
+check('dos examenes seguidos se reparten', new Set(crunch.tasks.map((t) => t.examId)).size, 2);
 
 console.log(`\n${fail === 0 ? '✅ todo correcto' : `❌ ${fail} fallos`}`);
 process.exit(fail === 0 ? 0 : 1);
