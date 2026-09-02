@@ -227,6 +227,34 @@ check('ventana de 3 días → sin introducción', phaseFloorFor(3), 1);
 });
 
 
+console.log();
+console.log('=== suelo de sesion ===');
+const { MIN_SESSION_MINUTES } = await load('priority.mjs');
+let shortest = 999;
+[
+  ['ESO', 1],
+  ['ESO', 5],
+  ['Bachillerato', 3],
+  ['Bachillerato', 10],
+  ['Universidad', 7],
+].forEach(([course, dif]) => {
+  [1, 3, 5, 9, 14].forEach((n) => {
+    const p = generateStudyPlan(
+      [
+        { id: 'x', name: 'E', subjectId: 's', type: 'exam', date: day(n), manualPriority: 5 },
+        { id: 'y', name: 'T', subjectId: 's', type: 'task', date: day(n), manualPriority: 3 },
+      ],
+      [{ id: 's', name: 'Asig', difficulty: dif, color: '#888' }],
+      { now: NOW, profile: { course, organizationLevel: 1 } }
+    );
+    p.tasks.forEach((t) => {
+      if (t.duration < shortest) shortest = t.duration;
+    });
+  });
+});
+console.log('  bloque mas corto en 25 escenarios: ' + shortest + ' min');
+check('ninguna sesion baja del suelo', shortest >= MIN_SESSION_MINUTES, true);
+
 console.log('\n=== presion de examen y cansancio ===');
 const { pressureFactor, fatigueFactor, HARD_DAILY_CAP_MINUTES } = await load('microplanService.mjs');
 check('sin examen cerca no sube nada', pressureFactor(20), 1);
