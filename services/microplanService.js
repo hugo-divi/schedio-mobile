@@ -5,6 +5,7 @@ import {
   daysBetween,
   toDate,
   localDateKey,
+  MIN_SESSION_MINUTES,
 } from './priority';
 import { inferExamFormat, pickTaskText, taskHandInText } from './taskCopy';
 
@@ -636,7 +637,15 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         const target = Math.min(preferredBlock, item.remaining);
         const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
         const roomLeft = HARD_DAILY_CAP_MINUTES - placedMinutes;
-        let block = Math.max(5, roundTo5(Math.min(target, allowance, roomLeft)));
+        const raw = roundTo5(Math.min(target, allowance, roomLeft));
+
+        // No session below the floor. `Math.max(5, …)` let a scrap through as a
+        // five-minute row whenever it happened to close an exam's effort.
+        let block = raw;
+        if (raw < MIN_SESSION_MINUTES) {
+          if (roomLeft < MIN_SESSION_MINUTES || item.remaining < MIN_SESSION_MINUTES) return;
+          block = MIN_SESSION_MINUTES;
+        }
 
         // Absorb a trailing scrap rather than leaving it owed forever: a remainder
         // below MIN_BLOCK can never earn its own row, so it would sit unscheduled
@@ -730,7 +739,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         // pushed `remaining` negative, so the scheduled total overshot the effort.
         // Counted separately so the three figures still reconcile against
         // totalEffortMinutes.
-        if (item.remaining > 0 && item.remaining < MIN_BLOCK_MINUTES) {
+        if (item.remaining > 0 && item.remaining < MIN_SESSION_MINUTES) {
           diagnostics.roundingMinutes += item.remaining;
           item.remaining = 0;
         }

@@ -82,6 +82,16 @@ export const BASE_EFFORT_MINUTES = {
 };
 export const EFFORT_DIFFICULTY_RANGE = [0.6, 1.8];
 
+/**
+ * The floor for any study session, in minutes.
+ *
+ * Below this there is nothing to learn: the time goes into finding the page and
+ * remembering where you left off. A plan that asks for seven minutes of Historia
+ * is not being precise, it's being silly, and it teaches the student that the
+ * numbers are arbitrary.
+ */
+export const MIN_SESSION_MINUTES = 15;
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -189,7 +199,11 @@ export const estimateEffortMinutes = (event, subject, baseByType = BASE_EFFORT_M
   const base = baseByType[type] ?? BASE_EFFORT_MINUTES[type];
   const [lo, hi] = EFFORT_DIFFICULTY_RANGE;
   const multiplier = lo + difficultyFactor(subject) * (hi - lo);
-  return Math.round(base * multiplier);
+  // Never below one session's worth. An easy ESO hand-in worked out to twelve
+  // minutes, which then became a twelve-minute row in the plan — and nothing is
+  // learned in twelve minutes. If it deserves a place in the plan at all, it
+  // deserves a real session.
+  return Math.max(MIN_SESSION_MINUTES, Math.round(base * multiplier));
 };
 
 /**
