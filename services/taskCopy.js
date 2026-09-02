@@ -175,7 +175,11 @@ const NEUTRAL = {
     'Tapa {A} y recupera lo que puedas. Lo que no salga, eso repasas',
     'Repaso rápido de {A}: solo lo que fallaste antes',
   ],
-  'MODO PÁNICO 🔥': ['{A}: solo lo esencial, lo que más cae. No entres en detalle'],
+  'MODO PÁNICO 🔥': [
+    '{A}: solo lo esencial, lo que más cae. No entres en detalle',
+    '{A}: repasa lo que peor lleves y déjalo ahí',
+    '{A}: una vuelta rápida a todo, sin pararte',
+  ],
 };
 
 const COPY = {
@@ -252,11 +256,29 @@ const COPY = {
     ],
     idioma: ['Repasa solo el vocabulario de {A} que fallaste', 'Lee tus frases de {A} en voz alta'],
   },
+  // Panic days now hold two or three sessions of the same exam, so a single
+  // variant per format meant three identical rows stacked on one day.
   'MODO PÁNICO 🔥': {
-    problemas: ['{A}: las fórmulas y un ejercicio tipo de cada una. Nada más'],
-    desarrollo: ['{A}: solo los titulares. Fechas, nombres y la idea de cada tema'],
-    test: ['{A}: los conceptos que más se repiten. No entres en detalle'],
-    idioma: ['{A}: vocabulario y las estructuras que más caen'],
+    problemas: [
+      '{A}: las fórmulas y un ejercicio tipo de cada una. Nada más',
+      '{A}: repite los ejercicios que peor te salieron',
+      '{A}: un examen antiguo entero, con el reloj',
+    ],
+    desarrollo: [
+      '{A}: solo los titulares. Fechas, nombres y la idea de cada tema',
+      '{A}: cuéntate cada tema en dos frases, sin mirar',
+      '{A}: repasa lo que hayas marcado y nada más',
+    ],
+    test: [
+      '{A}: los conceptos que más se repiten. No entres en detalle',
+      '{A}: hazte un test rápido y quédate con los fallos',
+      '{A}: repasa solo lo que confundes entre sí',
+    ],
+    idioma: [
+      '{A}: vocabulario y las estructuras que más caen',
+      '{A}: repasa las palabras que sigues fallando',
+      '{A}: lee en voz alta lo que tengas preparado',
+    ],
   },
 };
 
@@ -281,16 +303,20 @@ const variantFor = (key, count) => {
  * @param {string} input.format - one of EXAM_FORMATS
  * @param {string} input.subjectName - substituted for {A}
  * @param {string} input.seed - stable key for variant selection (the task id)
+ * @param {number} [input.index] - which session of this exam on this day (0-based).
+ *   Offsets the variant so two sessions of the same exam on the same day never
+ *   land on the same sentence: the hash alone collides often, and a panic day
+ *   holding three identical rows reads as a bug.
  * @returns {string}
  */
-export const pickTaskText = ({ phase, format, subjectName, seed = '' }) => {
+export const pickTaskText = ({ phase, format, subjectName, seed = '', index = 0 }) => {
   // Format-specific wording only when a root actually matched; otherwise the
   // phase's neutral line, which never claims to know what kind of subject it is.
   const variants = (format && COPY[phase]?.[format]) || NEUTRAL[phase];
   if (!variants) return `Repasa ${subjectName}`;
 
-  const chosen = variants[variantFor(seed || phase, variants.length)];
-  return chosen.replace(/\{A\}/g, subjectName);
+  const pick = (variantFor(seed || phase, variants.length) + index) % variants.length;
+  return variants[pick].replace(/\{A\}/g, subjectName);
 };
 
 /**

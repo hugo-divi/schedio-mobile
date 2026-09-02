@@ -251,6 +251,36 @@ export const REST_OVERRIDE_DAYS = 7;
  */
 export const PANIC_DAYS = 2;
 
+/**
+ * Focus. A student with a hard exam in two days does not spend twenty minutes on
+ * an easy one six days away — they give the near exam the whole day.
+ *
+ * The scheduler ranked exams by score but still handed a block to every exam
+ * whose curve said it was due, so a comfortable far exam quietly took time from
+ * an imminent one. Inside this many days, an exam claims the day: anything
+ * further out is deferred, unless deferring would leave it unschedulable.
+ *
+ * Work-conserving, as always — the deferred exam's pressure rises and it takes
+ * the days back once the near one is done.
+ */
+export const FOCUS_DAYS = 3;
+
+/**
+ * How many sessions one exam may take in a single day.
+ *
+ * One block each was the rule, and it was the other half of the same mistake:
+ * an exam two days out could physically not receive more than 35 minutes a day,
+ * so it reported a shortfall while the student had capacity going spare. Nobody
+ * revises for a hard exam tomorrow in one sitting of half an hour.
+ */
+export const BLOCKS_PER_DAY_BY_URGENCY = [
+  { within: 1, blocks: 3 },
+  { within: FOCUS_DAYS, blocks: 2 },
+];
+
+export const blocksAllowedFor = (daysLeft) =>
+  BLOCKS_PER_DAY_BY_URGENCY.find((s) => daysLeft <= s.within)?.blocks ?? 1;
+
 /** Tasks past this many per day are flagged "Opcional hoy". */
 export const CORE_TASKS_PER_DAY = 2;
 
@@ -555,135 +585,159 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     let placedToday = 0;
     let placedMinutes = 0;
 
-    dayScored.forEach(({ item, detail }) => {
-      const isPanic = item.daysUntil <= PANIC_DAYS;
+    // The nearest exam among today's candidates decides whether the day belongs
+    // to it. Rounds let an urgent exam take a second and third session before a
+    // distant one gets its first, which is how a student actually spends the day
+    // before a hard exam.
+    const nearestActive = Math.min(...active.map((item) => item.daysUntil - day));
+    const focusMode = nearestActive <= FOCUS_DAYS;
 
-      // Panic ignores the daily budget — the exam is in two days — but never the
-      // absolute ceiling. Without this second check, each panic exam took its own
-      // block regardless of how many other panic exams shared the day.
-      if (placedMinutes + MIN_BLOCK_MINUTES > HARD_DAILY_CAP_MINUTES) {
-        if (!diagnostics.cappedDays.includes(dateKey)) diagnostics.cappedDays.push(dateKey);
-        return;
-      }
-      if (budgetLeft < MIN_BLOCK_MINUTES && !isPanic) return;
+    for (let round = 0; round < 3; round++) {
+      let placedThisRound = 0;
 
-      // Nothing is due today unless the outstanding work is above the burn-down
-      // curve — *unless* deferring would make it unschedulable. The curve decides
-      // when the work happens, never whether it happens at all.
-      //
-      // Without that second half the scheduler was not work-conserving after all:
-      // a 230-minute exam six days out had its early days skipped by the curve,
-      // then ran out of room because a day only takes one block per exam, and
-      // reported 30 minutes as an overload while the week still had 500 minutes
-      // free. A false shortfall is worse than a plan that starts a day early.
-      let schedulableLeft = 0;
-      for (let d = day; d <= item.daysUntil; d++) {
-        const at = addDays(today, d);
-        const rest = restDaySet.has(at.getDay());
-        if (!rest || item.daysUntil - d <= REST_OVERRIDE_DAYS) schedulableLeft++;
-      }
-      const sessionsNeeded = Math.ceil(item.remaining / preferredBlock);
-      const mustStartNow = sessionsNeeded >= schedulableLeft;
+      dayScored.forEach(({ item, detail }) => {
+        const isPanic = item.daysUntil <= PANIC_DAYS;
+        const daysLeft = item.daysUntil - day;
+        if (item.remaining <= 0) return;
+        if (round >= blocksAllowedFor(daysLeft)) return;
 
-      if (!isPanic && !mustStartNow && item.remaining <= targetRemaining(item, day)) return;
+        // Panic ignores the daily budget — the exam is in two days — but never the
+        // absolute ceiling. Without this second check, each panic exam took its own
+        // block regardless of how many other panic exams shared the day.
+        if (placedMinutes + MIN_BLOCK_MINUTES > HARD_DAILY_CAP_MINUTES) {
+          if (!diagnostics.cappedDays.includes(dateKey)) diagnostics.cappedDays.push(dateKey);
+          return;
+        }
+        if (budgetLeft < MIN_BLOCK_MINUTES && !isPanic) return;
 
-      const target = Math.min(preferredBlock, item.remaining);
-      const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
-      const roomLeft = HARD_DAILY_CAP_MINUTES - placedMinutes;
-      let block = Math.max(5, roundTo5(Math.min(target, allowance, roomLeft)));
+        // Nothing is due today unless the outstanding work is above the burn-down
+        // curve — *unless* deferring would make it unschedulable. The curve decides
+        // when the work happens, never whether it happens at all.
+        //
+        // Without that second half the scheduler was not work-conserving after all:
+        // a 230-minute exam six days out had its early days skipped by the curve,
+        // then ran out of room because a day only takes one block per exam, and
+        // reported 30 minutes as an overload while the week still had 500 minutes
+        // free. A false shortfall is worse than a plan that starts a day early.
+        let schedulableLeft = 0;
+        for (let d = day; d <= item.daysUntil; d++) {
+          const at = addDays(today, d);
+          const rest = restDaySet.has(at.getDay());
+          if (!rest || item.daysUntil - d <= REST_OVERRIDE_DAYS) schedulableLeft++;
+        }
+        const sessionsNeeded = Math.ceil(item.remaining / preferredBlock);
+        const mustStartNow = sessionsNeeded >= schedulableLeft;
 
-      // Absorb a trailing scrap rather than leaving it owed forever: a remainder
-      // below MIN_BLOCK can never earn its own row, so it would sit unscheduled
-      // and get reported as an overload — a 7-minute "no te cabe" that makes the
-      // real warnings unbelievable.
-      //
-      // Must still respect the day's budget, which is the one thing panic mode is
-      // allowed to break. Absorbing before checking was quietly pushing days a few
-      // minutes over capacity.
-      const scrap = item.remaining - block;
-      const absorbed = block + scrap;
-      if (
-        scrap > 0 &&
-        scrap < MIN_BLOCK_MINUTES &&
-        absorbed <= MAX_BLOCK_MINUTES &&
-        (isPanic || absorbed <= budgetLeft)
-      ) {
-        block = item.remaining;
-      }
+        // An exam that isn't imminent yields the day to one that is.
+        if (focusMode && daysLeft > FOCUS_DAYS && !mustStartNow) return;
 
-      // Too small to be worth a row, unless it's the last of this exam's work.
-      if (block < MIN_BLOCK_MINUTES && block < item.remaining) return;
+        if (!isPanic && !mustStartNow && item.remaining <= targetRemaining(item, day)) return;
 
-      const windowLength = Math.max(1, item.daysUntil - item.startDay);
-      const progress = (day - item.startDay) / windowLength;
-      const isTask = item.exam.type === 'task';
-      // Final if nothing schedulable is left afterwards. Comparing `block` against
-      // the full remainder called a task "Avanzar con…" when the 11 minutes left
-      // were about to be dropped as rounding and nothing more was ever coming.
-      const isFinalBlock = item.remaining - block < MIN_BLOCK_MINUTES;
+        const target = Math.min(preferredBlock, item.remaining);
+        const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
+        const roomLeft = HARD_DAILY_CAP_MINUTES - placedMinutes;
+        let block = Math.max(5, roundTo5(Math.min(target, allowance, roomLeft)));
 
-      // The last session before an exam is a review, whatever the arithmetic says.
-      // In a short window the effort runs out before the exam day, so `progress`
-      // never approaches 1 and the arc stopped at PRÁCTICA — an exam prepared
-      // without ever being revised.
-      const closesExam = isFinalBlock && item.sessions > 0 && !isPanic;
-      const band = isTask
-        ? TASK_PHASE
-        : closesExam
-          ? PHASES[PHASES.length - 1]
-          : phaseFor(progress, isPanic, phaseFloorFor(windowLength));
+        // Absorb a trailing scrap rather than leaving it owed forever: a remainder
+        // below MIN_BLOCK can never earn its own row, so it would sit unscheduled
+        // and get reported as an overload — a 7-minute "no te cabe" that makes the
+        // real warnings unbelievable.
+        //
+        // Must still respect the day's budget, which is the one thing panic mode is
+        // allowed to break. Absorbing before checking was quietly pushing days a few
+        // minutes over capacity.
+        const scrap = item.remaining - block;
+        const absorbed = block + scrap;
+        if (
+          scrap > 0 &&
+          scrap < MIN_BLOCK_MINUTES &&
+          absorbed <= MAX_BLOCK_MINUTES &&
+          (isPanic || absorbed <= budgetLeft)
+        ) {
+          block = item.remaining;
+        }
 
-      const id = `${item.exam.id || `generated-${item.subjectName}`}-${dateKey}`;
-      const text = isTask
-        ? taskHandInText(item.exam.name || item.subjectName, {
-            isFinal: isFinalBlock,
-            isOnly: isFinalBlock && item.sessions === 0,
-          })
-        : pickTaskText({
-            phase: band.phase,
-            format: item.format,
-            subjectName: item.subjectName,
-            seed: id,
-          });
+        // Too small to be worth a row, unless it's the last of this exam's work.
+        if (block < MIN_BLOCK_MINUTES && block < item.remaining) return;
 
-      tasks.push({
-        id,
-        examId: item.exam.id,
-        subjectId: item.exam.subjectId,
-        subjectName: item.subjectName,
-        subjectColor: item.subjectColor,
-        date: date.toISOString(),
-        text,
-        phase: band.phase,
-        type: band.type,
-        completed: false,
-        duration: block,
-        isPanicMode: isPanic,
-        // Beyond the core count the day is into its slack, so these can slide.
-        // Panic tasks never can.
-        isOptional: placedToday >= CORE_TASKS_PER_DAY && !isPanic,
-        // Carried for the UI and for debugging why the order came out this way.
-        priorityScore: Math.round(detail.score),
-        reason: explain(detail, item.subjectName),
+        const windowLength = Math.max(1, item.daysUntil - item.startDay);
+        const progress = (day - item.startDay) / windowLength;
+        const isTask = item.exam.type === 'task';
+        // Final if nothing schedulable is left afterwards. Comparing `block` against
+        // the full remainder called a task "Avanzar con…" when the 11 minutes left
+        // were about to be dropped as rounding and nothing more was ever coming.
+        const isFinalBlock = item.remaining - block < MIN_BLOCK_MINUTES;
+
+        // The last session before an exam is a review, whatever the arithmetic says.
+        // In a short window the effort runs out before the exam day, so `progress`
+        // never approaches 1 and the arc stopped at PRÁCTICA — an exam prepared
+        // without ever being revised.
+        const closesExam = isFinalBlock && item.sessions > 0 && !isPanic;
+        const band = isTask
+          ? TASK_PHASE
+          : closesExam
+            ? PHASES[PHASES.length - 1]
+            : phaseFor(progress, isPanic, phaseFloorFor(windowLength));
+
+        // The first session of the day keeps the historical id so existing
+        // `planOverrides` keep matching; later ones are suffixed.
+        const base = `${item.exam.id || `generated-${item.subjectName}`}-${dateKey}`;
+        const id = round === 0 ? base : `${base}-${round + 1}`;
+        const text = isTask
+          ? taskHandInText(item.exam.name || item.subjectName, {
+              isFinal: isFinalBlock,
+              isOnly: isFinalBlock && item.sessions === 0,
+            })
+          : pickTaskText({
+              phase: band.phase,
+              format: item.format,
+              subjectName: item.subjectName,
+              seed: base,
+              index: round,
+            });
+
+        tasks.push({
+          id,
+          examId: item.exam.id,
+          subjectId: item.exam.subjectId,
+          subjectName: item.subjectName,
+          subjectColor: item.subjectColor,
+          date: date.toISOString(),
+          text,
+          phase: band.phase,
+          type: band.type,
+          completed: false,
+          duration: block,
+          isPanicMode: isPanic,
+          // Beyond the core count the day is into its slack, so these can slide.
+          // Panic tasks never can.
+          isOptional: placedToday >= CORE_TASKS_PER_DAY && !isPanic,
+          // Carried for the UI and for debugging why the order came out this way.
+          priorityScore: Math.round(detail.score),
+          reason: explain(detail, item.subjectName),
+        });
+
+        item.remaining -= block;
+        item.sessions += 1;
+        budgetLeft -= block;
+        placedToday += 1;
+        placedThisRound += 1;
+        placedMinutes += block;
+        diagnostics.scheduledMinutes += block;
+
+        // A leftover smaller than one block is rounding, not work. Left in place it
+        // survived until it earned its own row — a 5-minute task in the UI — and
+        // pushed `remaining` negative, so the scheduled total overshot the effort.
+        // Counted separately so the three figures still reconcile against
+        // totalEffortMinutes.
+        if (item.remaining > 0 && item.remaining < MIN_BLOCK_MINUTES) {
+          diagnostics.roundingMinutes += item.remaining;
+          item.remaining = 0;
+        }
       });
 
-      item.remaining -= block;
-      item.sessions += 1;
-      budgetLeft -= block;
-      placedToday += 1;
-      placedMinutes += block;
-      diagnostics.scheduledMinutes += block;
-
-      // A leftover smaller than one block is rounding, not work. Left in place it
-      // survived until it earned its own row — a 5-minute task in the UI — and
-      // pushed `remaining` negative, so the scheduled total overshot the effort.
-      // Counted separately so the three figures still reconcile against
-      // totalEffortMinutes.
-      if (item.remaining > 0 && item.remaining < MIN_BLOCK_MINUTES) {
-        diagnostics.roundingMinutes += item.remaining;
-        item.remaining = 0;
-      }
-    });
+      if (placedThisRound === 0) break;
+    }
 
     consecutiveStudyDays = placedToday > 0 ? consecutiveStudyDays + 1 : 0;
 
