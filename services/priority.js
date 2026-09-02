@@ -38,6 +38,15 @@ export const GRADE_MAX = 10;
 export const GRADE_NEUTRAL = 5;
 
 /**
+ * Point gap that counts as "as much as is ever at stake".
+ *
+ * Gaps between a real average and a realistic target rarely exceed four points,
+ * so normalising over the full 0-10 scale would squash every difference into the
+ * bottom of the range and make the factor useless.
+ */
+export const RISK_GAP_SPAN = 4;
+
+/**
  * How fast urgency decays, in days. At `URGENCY_HALF_LIFE` days out an exam sits
  * at half the urgency of an exam today. 7 keeps a full week meaningfully urgent
  * without flattening the month behind it.
@@ -166,6 +175,15 @@ export const difficultyFactor = (subject) =>
 export const riskFactor = (subject) => {
   const raw = Number(subject?.averageGrade);
   const grade = Number.isFinite(raw) ? clamp(raw, 0, GRADE_MAX) : GRADE_NEUTRAL;
+
+  // With a target set, what's at stake is the distance to it — not the distance
+  // to a ten. Without one this kept assuming every student wants a ten, so
+  // someone content with passing Filosofía was given work as if they were going
+  // for the top mark.
+  const target = Number(subject?.targetGrade);
+  if (Number.isFinite(target) && target > 0) {
+    return clamp(Math.max(0, clamp(target, 0, GRADE_MAX) - grade) / RISK_GAP_SPAN, 0, 1);
+  }
   return 1 - grade / GRADE_MAX;
 };
 

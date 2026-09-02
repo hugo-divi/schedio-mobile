@@ -255,6 +255,51 @@ let shortest = 999;
 console.log('  bloque mas corto en 25 escenarios: ' + shortest + ' min');
 check('ninguna sesion baja del suelo', shortest >= MIN_SESSION_MINUTES, true);
 
+console.log('');
+console.log('=== objetivo, descansos y readiness ===');
+const { riskFactor } = await load('priority.mjs');
+const { DEFAULT_REST_DAYS, estimateDailyCapacity } = await load('microplanService.mjs');
+
+check('sin objetivo, se mantiene el comportamiento de antes', riskFactor({ averageGrade: 5 }), 0.5);
+check('un 4,2 que solo quiere aprobar arriesga poco', riskFactor({ averageGrade: 4.2, targetGrade: 5 }) < 0.3, true);
+check('el mismo 4,2 yendo a por un 9 arriesga mucho', riskFactor({ averageGrade: 4.2, targetGrade: 9 }) > 0.9, true);
+check('ya por encima del objetivo: riesgo cero', riskFactor({ averageGrade: 8.1, targetGrade: 7 }), 0);
+check('el fin de semana libre por defecto', DEFAULT_REST_DAYS.join(), '0,6');
+
+// Misma fecha en los dos: así lo único que puede desempatar es el objetivo.
+// Con fechas distintas manda la urgencia (peso 40 contra 20), que es lo correcto.
+const sameDay = [
+  { id: 'e1', name: 'Ex Mates', subjectId: 'm', type: 'exam', date: day(12), manualPriority: 5 },
+  { id: 'e2', name: 'Ex Historia', subjectId: 'h', type: 'exam', date: day(12), manualPriority: 5 },
+];
+const withObj = generateStudyPlan(
+  sameDay,
+  [
+    { id: 'm', name: 'Matemáticas', difficulty: 5, averageGrade: 4.2, targetGrade: 5, color: '#f00' },
+    { id: 'h', name: 'Historia', difficulty: 5, averageGrade: 4.2, targetGrade: 9, color: '#0f0' },
+  ],
+  { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
+);
+const first = withObj.tasks[0];
+console.log('  mismo 4,2 y misma fecha: primero entra ' + first.subjectName);
+check('el que va a por el 9 entra antes', first.subjectName, 'Historia');
+
+check('readiness trae una entrada por examen', withObj.diagnostics.readiness.length, 2);
+check('y lleva sesiones y minutos', typeof withObj.diagnostics.readiness[0].sessions, 'number');
+console.log('  readiness[0]:', JSON.stringify(withObj.diagnostics.readiness[0]));
+
+const cap = estimateDailyCapacity({
+  profile: { organizationLevel: 3 },
+  completions: [
+    { date: day(-1), minutes: 20 },
+    { date: day(-2), minutes: 25 },
+    { date: day(-3), minutes: 20 },
+  ],
+  now: NOW,
+});
+console.log('  nivel 3 (60 min) con 20-25 min reales: ' + cap + ' min/dia');
+check('la capacidad baja cuando cumple poco', cap < 60, true);
+
 console.log('\n=== presion de examen y cansancio ===');
 const { pressureFactor, fatigueFactor, HARD_DAILY_CAP_MINUTES } = await load('microplanService.mjs');
 check('sin examen cerca no sube nada', pressureFactor(20), 1);

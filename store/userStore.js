@@ -163,6 +163,10 @@ const useUserStore = create((set, get) => ({
           // Editable from Perfil, so the screen needs it in the store rather
           // than re-reading the document to show what's currently selected.
           region: data.region || null,
+          // Weekday indices the student marked as free. Left undefined when unset
+          // so the generator falls back to DEFAULT_REST_DAYS and an account that
+          // never touched it keeps the weekend off.
+          restDays: Array.isArray(data.restDays) ? data.restDays : undefined,
           onboardingCompleted: data.onboardingCompleted || false,
           averageGrade: data.profile?.averageGrade || 0,
           // The estimate shown at the end of onboarding, brought back so
@@ -580,9 +584,18 @@ const useUserStore = create((set, get) => ({
         }
 
         const { generateStudyPlan, reconcilePlan } = await import('../services/microplanService');
+        // Minutes actually ticked, per day, straight out of the overrides. This is
+        // what lets the daily budget correct itself: promise 60 minutes a day,
+        // watch 25 get done, plan less tomorrow.
+        const completions = Object.values(planOverrides || {})
+          .filter((o) => o?.completed && Number(o.minutes) > 0)
+          .map((o) => ({ date: o.updatedAt, minutes: Number(o.minutes) }));
+
         const { tasks: generated, diagnostics } = generateStudyPlan(exams, currentSubjects, {
           sessions: currentSessions,
+          completions,
           profile,
+          restDays: profile?.restDays,
         });
 
         // Generation is only half of it: the fresh plan then has to absorb
@@ -632,39 +645,6 @@ const useUserStore = create((set, get) => ({
     }
   },
 
-  generateAiPlans: async (uid) => {
-    set({ loading: true });
-    const { subjects } = get();
-    try {
-      const { getUpcomingExams } = await import('../services/exams');
-      const { getSessionHistory } = await import('../services/sessions');
-      const { getStudyPlanSuggestion } = await import('../services/aiService');
-
-      const exams = await getUpcomingExams(uid, 20);
-      const sessions = await getSessionHistory(uid, 10);
-
-      const aiPlans = await getStudyPlanSuggestion(exams, subjects, sessions);
-
-      if (aiPlans && Array.isArray(aiPlans) && aiPlans.length > 0) {
-        set({ microplans: aiPlans, loading: false });
-
-        const userRef = doc(db, 'users', uid);
-        await updateDoc(userRef, {
-          microplans: aiPlans,
-          'stats.lastPlanGenerationDate': new Date().toDateString(),
-        });
-        return true;
-      } else {
-        set({ loading: false });
-        return false;
-      }
-    } catch (error) {
-      console.error('Error generating AI plans:', error);
-      set({ error: 'No se pudo generar el plan con IA', loading: false });
-      return false;
-    }
-  },
-
   completeMicroTask: async (uid, taskId) => {
     const { microplans, gamification } = get();
     const task = microplans.find((t) => t.id === taskId);
@@ -676,7 +656,7 @@ const useUserStore = create((set, get) => ({
     // granted 50 XP on *every* call, so un-ticking paid out as well and tapping
     // the checkbox back and forth minted XP indefinitely.
     if (!nowCompleted) {
-      await writePlanOverride(get, set, uid, taskId, { completed: false });
+      await writePlanOverride(get, set, uid, taskId, { completed: false, minutes: null });
       return { bonusXp: 0 };
     }
 
@@ -698,7 +678,11 @@ const useUserStore = create((set, get) => ({
       set,
       uid,
       taskId,
-      { completed: true },
+      // `minutes` is what makes the daily budget learn: the override survives the
+      // nightly regeneration but the task object does not, so without storing the
+      // duration here we would know *that* a session was done and never *how
+      // long* it was. One integer in a record already being written.
+      { completed: true, minutes: task.duration || null },
       { gamification: newGameData }
     );
 

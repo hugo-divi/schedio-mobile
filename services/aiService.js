@@ -81,7 +81,7 @@ XP total: ${gamification?.xp || 0}
 Materias (${subjects?.length || 0}):
 ${subjectsByDifficulty
   .slice(0, 5)
-  .map((s) => `- ${s.name} (Dificultad: ${s.difficulty}/5)`)
+  .map((s) => `- ${s.name} (Dificultad: ${s.difficulty}/10)`)
   .join('\n')}
 
 Sesiones de estudio recientes: ${sessions?.length || 0} sesiones
@@ -201,7 +201,7 @@ ${exams
   .join('\n')}
 
 Materias y IDs:
-${subjects?.map((s) => `- ID: ${s.id}, Nombre: ${s.name} (Dificultad: ${s.difficulty}/5)`).join('\n')}
+${subjects?.map((s) => `- ID: ${s.id}, Nombre: ${s.name} (Dificultad: ${s.difficulty}/10)`).join('\n')}
 
 Sesiones recientes: ${sessions?.length || 0}
     `.trim();
@@ -368,7 +368,9 @@ export const identifyWeakSubjects = (sessions, subjects, exams) => {
   const weakSubjects = Object.values(subjectStats).filter((stat) => {
     const hasUpcomingExams = stat.upcomingExamsCount > 0;
     const lowStudyTime = stat.totalTime < 60; // Menos de 1 hora
-    const highDifficulty = stat.difficulty >= 4;
+    // 1-10 scale (see services/priority.js): 4 was a threshold from when this
+    // was read as 1-5, so it flagged nearly every subject as hard.
+    const highDifficulty = stat.difficulty >= 7;
     const notStudiedRecently =
       !stat.lastStudied ||
       Date.now() - new Date(stat.lastStudied).getTime() > 7 * 24 * 60 * 60 * 1000; // 7 días

@@ -125,10 +125,17 @@ export const GAMMA_BY_REVIEW_HABIT = {
 };
 
 export const gammaFor = (reviewFrequency) => GAMMA_BY_REVIEW_HABIT[reviewFrequency] ?? BURN_GAMMA;
-
-/** Minutes per day by self-reported organisation level (1 "caos total" ..
- *  5 "muy organizado", from onboarding). Blended with observed history when
- *  there's enough of it. */
+/**
+ * Minutes per day by self-reported organisation level (1 "caos total" ..
+ * 5 "muy organizado", from onboarding). Blended with what the student actually
+ * completes once there is enough of it.
+ *
+ * Observed minutes come from **ticked tasks**, not from the study timer. Plenty
+ * of studying happens on paper, without battery, or in a library with the app
+ * closed; tying the plan's accounting to the chronometer would make the loop
+ * work only for the students who use it. Ticking a box is a deliberate act, so
+ * it is taken at face value.
+ */
 export const CAPACITY_BY_ORGANIZATION = { 1: 35, 2: 45, 3: 60, 4: 75, 5: 95 };
 
 /**
@@ -233,9 +240,15 @@ export const pressureFactor = (daysToNearestExam) => {
 /** Sessions needed before observed history outweighs the self-report. */
 export const MIN_SESSIONS_FOR_HISTORY = 3;
 
-/** Weekdays off (0 = Sunday). Preserves the old "no studying on Sundays"
- *  behaviour; `feat/streak-rest-days` can pass its own set. */
-export const DEFAULT_REST_DAYS = [0];
+/**
+ * Weekdays with no plan by default, 0 = Sunday.
+ *
+ * The weekend, not just Sunday. Two rest days a week is what a student expects;
+ * one was an arbitrary leftover. The student picks their own two — someone who
+ * studies weekends and rests on Wednesday changes them — and `restDays` comes
+ * in from their profile.
+ */
+export const DEFAULT_REST_DAYS = [0, 6];
 /** Rest days stop applying once an exam is this close — matching the old rule,
  *  which only skipped Sundays when the exam was more than a week away. */
 export const REST_OVERRIDE_DAYS = 7;
@@ -345,12 +358,12 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
  * than asked: the student who most needs a plan is the new one, who has nothing
  * to answer with yet.
  */
-export const estimateDailyCapacity = ({ profile, sessions, now = new Date() } = {}) => {
+export const estimateDailyCapacity = ({ profile, completions, now = new Date() } = {}) => {
   const level = clamp(Math.round(Number(profile?.organizationLevel) || 3), 1, 5);
   const selfReported = CAPACITY_BY_ORGANIZATION[level];
 
-  const recent = (Array.isArray(sessions) ? sessions : []).filter((session) => {
-    const date = toDate(session?.date);
+  const recent = (Array.isArray(completions) ? completions : []).filter((entry) => {
+    const date = toDate(entry?.date);
     return date && daysBetween(date, now) <= 21 && daysBetween(date, now) >= 0;
   });
 
@@ -361,10 +374,10 @@ export const estimateDailyCapacity = ({ profile, sessions, now = new Date() } = 
   // Average over *active* days, not over the whole window: dividing by 21 would
   // punish a student who studies hard three times a week.
   const byDay = {};
-  recent.forEach((session) => {
-    const minutes = Number(session.duration);
+  recent.forEach((entry) => {
+    const minutes = Number(entry.minutes);
     if (!Number.isFinite(minutes) || minutes <= 0) return;
-    const key = formatDate(toDate(session.date));
+    const key = formatDate(toDate(entry.date));
     byDay[key] = (byDay[key] || 0) + minutes;
   });
 
@@ -433,7 +446,14 @@ const explain = (detail, subjectName) => {
  * @returns {{ tasks: Array, diagnostics: Object }}
  */
 export const generateStudyPlan = (exams, subjects, options = {}) => {
-  const { now = new Date(), sessions = [], profile = null, restDays = DEFAULT_REST_DAYS } = options;
+  const {
+    now = new Date(),
+    sessions = [],
+    // Ticked tasks: `[{ date, minutes }]`. Drives the daily budget.
+    completions = [],
+    profile = null,
+    restDays = DEFAULT_REST_DAYS,
+  } = options;
 
   const today = startOfDay(now);
   const diagnostics = {
@@ -450,6 +470,10 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     unscheduled: [],
     fullDays: [],
     skippedNoDate: [],
+    // Per-exam state, for the "por examen" view. The loop already tracks all of
+    // it; without returning it the screen would re-derive from the task list and
+    // could disagree with the scheduler that produced it.
+    readiness: [],
   };
 
   if (!Array.isArray(exams) || exams.length === 0) {
@@ -473,7 +497,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
   diagnostics.level = profile?.course || DEFAULT_LEVEL;
   diagnostics.preferredBlock = preferredBlock;
 
-  const dailyCapacity = estimateDailyCapacity({ profile, sessions, now });
+  const dailyCapacity = estimateDailyCapacity({ profile, completions, now });
   diagnostics.dailyCapacity = dailyCapacity;
 
   const studiedMinutesBySubject = summarizeStudyLoad(sessions, { now });
@@ -757,6 +781,20 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
   // ─── 3. Report what didn't fit, instead of hiding it ───
   items.forEach((item) => {
+    diagnostics.readiness.push({
+      examId: item.exam.id,
+      examName: item.exam.name,
+      subjectId: item.exam.subjectId,
+      subjectName: item.subjectName,
+      subjectColor: item.subjectColor,
+      daysUntil: item.daysUntil,
+      sessions: item.sessions,
+      totalEffortMinutes: item.totalEffort,
+      plannedMinutes: item.totalEffort - item.remaining,
+      remainingMinutes: Math.max(0, item.remaining),
+      startsInDays: item.startDay,
+    });
+
     // Only a shortfall big enough to be worth a session counts as overload.
     // Anything under one block is rounding, not a week the student can't survive.
     if (item.remaining >= MIN_BLOCK_MINUTES) {
