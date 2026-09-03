@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import useAuthStore from '../store/authStore';
 import { needsOnboarding } from '../services/onboarding';
 import { resolveGuestEntry } from '../services/welcome';
+import SchedioSplash from '../components/SchedioSplash';
 
 // The auth listener resolves on its own in practice (see
 // store/authStore.js), but startup must never be able to hang behind the
@@ -16,6 +17,17 @@ export default function Home() {
   const user = useAuthStore((state) => state.user);
   const loading = useAuthStore((state) => state.loading);
   const authResolved = useAuthStore((state) => state.authResolved);
+
+  // Where the student is headed, once we know. This used to be a `replace` the
+  // moment it was decided; it is held instead so the splash animation and the
+  // auth handshake can run at the same time rather than one after the other.
+  // `SchedioSplash` leaves as soon as both are done.
+  const [target, setTarget] = useState(null);
+  // Set once the splash has finished leaving. Kept apart from the navigation
+  // itself because the two don't always arrive in that order: the splash gives
+  // up on its own after a hard cap, so it can finish with no route decided yet.
+  const [splashDone, setSplashDone] = useState(false);
+  const shown = useRef(false);
 
   useEffect(() => {
     if (!loading) return;
@@ -34,11 +46,12 @@ export default function Home() {
 
     // The awaits below give `user` time to change underneath this run (the
     // auth listener resolving just after the watchdog gave up, say). Without
-    // this, a stale pass could land its `replace` *after* the newer one and
+    // this, a stale pass could land its decision *after* the newer one and
     // send an account that just restored to the wrong screen.
     let cancelled = false;
 
     (async () => {
+      let next;
       if (!user) {
         // The welcome carousel is strictly pre-account, so it needs proof
         // there is no account — not merely that we stopped waiting for one.
@@ -49,27 +62,44 @@ export default function Home() {
         // a signed-in student gets a login screen instead of an intro that
         // was never meant for them, and a genuinely new one still sees the
         // carousel on the next launch, since this run was never counted.
-        const target = authResolved ? await resolveGuestEntry() : '/login';
-        if (!cancelled) router.replace(target);
+        next = authResolved ? await resolveGuestEntry() : '/login';
       } else if (!user.emailVerified) {
         // Same gate login.js enforces — a restored session for a
         // password account that never verified shouldn't skip it.
-        if (!cancelled) router.replace('/verify-email');
+        next = '/verify-email';
       } else {
         // Same as login.js: an account that abandoned onboarding goes back
         // into it rather than landing on a dashboard with no subjects.
-        const target = (await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard';
-        if (!cancelled) router.replace(target);
+        next = (await needsOnboarding(user.uid)) ? '/onboarding' : '/dashboard';
       }
-      // Only now — the native splash covers this whole decision, so the
-      // student never sees anything but it until we know where they land.
-      SplashScreen.hideAsync().catch(() => {});
+      if (!cancelled) setTarget(next);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [loading, user, authResolved, router]);
+  }, [loading, user, authResolved]);
 
-  return null;
+  // The native splash covers everything up to the animated one's first frame,
+  // so this is the handover: hiding it any earlier would show a bare screen,
+  // any later and the animation's opening frames would be hidden behind it.
+  const handleShown = useCallback(() => {
+    if (shown.current) return;
+    shown.current = true;
+    SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  // Deliberately dependency-free, so the splash's exit animation is never
+  // restarted by this callback changing identity underneath it.
+  const handleFinish = useCallback(() => setSplashDone(true), []);
+
+  // Navigate once the splash has finished leaving — it fades and keeps rising,
+  // and the destination fades in underneath it. Waiting on both means a splash
+  // that hit its own cap before auth resolved still lands somewhere, instead of
+  // stranding the student on a screen that has already faded out.
+  useEffect(() => {
+    if (splashDone && target) router.replace(target);
+  }, [splashDone, target, router]);
+
+  return <SchedioSplash ready={target !== null} onShown={handleShown} onFinish={handleFinish} />;
 }

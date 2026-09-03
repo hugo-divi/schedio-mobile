@@ -16,8 +16,8 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { tokens } from '../theme/tokens';
-import { uploadFile } from '../services/storage';
-import useUserStore, { PRIME_WEEKLY_UPLOADS } from '../store/userStore';
+import { uploadFile, MAX_UPLOAD_BYTES, formatBytes, FileTooLargeError } from '../services/storage';
+import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS } from '../store/primeIntentStore';
 import { auth } from '../services/firebase';
@@ -38,13 +38,19 @@ const UploadModal = ({
 }) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  // La tarea de Firebase en curso, para poder cortarla.
+  const [task, setTask] = useState(null);
   const [subjectId, setSubjectId] = useState(initialSubjectId);
   const [limitSheetVisible, setLimitSheetVisible] = useState(false);
   const canUpload = useUserStore((state) => state.canUpload);
-  const recordUpload = useUserStore((state) => state.recordUpload);
   const weeklyUploadLimit = useUserStore((state) => state.weeklyUploadLimit);
   const isPrime = useAuthStore((state) => state.isPrime);
+  const uploadsThisWeek = useUserStore((state) => state.uploadsThisWeek);
   const router = useRouter();
+
+  // El aviso decia siempre "3 archivos/semana" aunque quedasen cero: el momento
+  // en que el limite importa es justo el que no se estaba contando.
+  const remaining = Math.max(0, FREE_WEEKLY_UPLOADS - uploadsThisWeek());
 
   useEffect(() => {
     if (visible) setSubjectId(initialSubjectId);
@@ -75,6 +81,28 @@ const UploadModal = ({
     router.push('/plus');
   };
 
+  /**
+   * Los tres selectores informan del peso con nombres distintos (`size` en
+   * documentos, `fileSize` en imágenes) y a veces no lo informan. Cuando está,
+   * se corta aquí para no gastar datos; cuando no, lo caza `uploadFile`.
+   */
+  const rejectIfTooLarge = (asset) => {
+    const size = asset?.size ?? asset?.fileSize;
+    if (typeof size === 'number' && size > MAX_UPLOAD_BYTES) {
+      Alert.alert(
+        'Archivo demasiado grande',
+        `"${asset.name || 'El archivo'}" pesa ${formatBytes(size)}. El máximo por archivo es ` +
+          `${formatBytes(MAX_UPLOAD_BYTES)}.`
+      );
+      return true;
+    }
+    return false;
+  };
+
+  const cancelUpload = () => {
+    if (task) task.cancel();
+  };
+
   const handlePickImage = async () => {
     if (!canUpload()) {
       handleLimitReached();
@@ -87,7 +115,7 @@ const UploadModal = ({
         quality: 0.8,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && !rejectIfTooLarge(result.assets[0])) {
         processUpload(result.assets[0].uri, 'image');
       }
     } catch (error) {
@@ -117,7 +145,7 @@ const UploadModal = ({
         quality: 0.8,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && !rejectIfTooLarge(result.assets[0])) {
         processUpload(result.assets[0].uri, 'image');
       }
     } catch (error) {
@@ -138,7 +166,7 @@ const UploadModal = ({
         copyToCacheDirectory: true,
       });
 
-      if (!result.canceled) {
+      if (!result.canceled && !rejectIfTooLarge(result.assets[0])) {
         processUpload(result.assets[0].uri, 'document', result.assets[0].name);
       }
     } catch (error) {
@@ -159,12 +187,9 @@ const UploadModal = ({
       const name = fileName || uri.split('/').pop();
       const storagePath = `${pathPrefix || `users/${user.uid}/resources`}/${Date.now()}_${name}`;
 
-      const downloadURL = await uploadFile(uri, storagePath, (prog) => {
-        setProgress(prog);
+      const downloadURL = await uploadFile(uri, storagePath, (prog) => setProgress(prog), {
+        onTaskCreated: setTask,
       });
-
-      // Record upload in store (history)
-      await recordUpload(user.uid);
 
       if (onUploadSuccess) {
         const subject = subjects.find((s) => s.id === subjectId) || null;
@@ -184,9 +209,18 @@ const UploadModal = ({
 
       onClose();
     } catch (error) {
+      // Cancelar es una decisión del alumno, no un fallo: se cierra sin ruido.
+      if (error?.code === 'storage/canceled') {
+        return;
+      }
+      if (error instanceof FileTooLargeError) {
+        Alert.alert('Archivo demasiado grande', error.message);
+        return;
+      }
       console.error('Upload error:', error);
       Alert.alert('Error', 'Falló la subida del archivo.');
     } finally {
+      setTask(null);
       setUploading(false);
       setProgress(0);
     }
@@ -216,6 +250,13 @@ const UploadModal = ({
               <View style={styles.progressBarBg}>
                 <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
               </View>
+              <TouchableOpacity
+                onPress={cancelUpload}
+                style={styles.cancelButton}
+                accessibilityRole="button"
+              >
+                <Text style={styles.cancelText}>Cancelar subida</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <>
@@ -284,7 +325,9 @@ const UploadModal = ({
                     <Text style={styles.primeTitle}>Schedio Prime</Text>
                   </View>
                   <Text style={styles.primeText}>
-                    Límite: 3 archivos/semana. Con Prime, {PRIME_WEEKLY_UPLOADS}/semana.
+                    Te quedan {remaining} de {FREE_WEEKLY_UPLOADS} subidas esta semana. Con Prime,{' '}
+                    {PRIME_WEEKLY_UPLOADS}/semana. Máximo {formatBytes(MAX_UPLOAD_BYTES)} por
+                    archivo.
                   </Text>
                 </View>
               )}
@@ -435,6 +478,16 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#4A90E2',
     borderRadius: 3,
+  },
+  cancelButton: {
+    marginTop: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  cancelText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontWeight: '600',
   },
   primeBanner: {
     backgroundColor: 'rgba(255, 214, 10, 0.1)',

@@ -8,6 +8,7 @@ import {
   getDocs,
   query,
   limit,
+  orderBy,
   addDoc,
   deleteDoc,
   where,
@@ -86,14 +87,18 @@ const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
 };
 
 /** Re-exported for screens that display the quota (plan-aware limits live in services/permissions.js). */
+/**
+ * Techo de materiales que se traen al abrir la app. Con 15 subidas semanales
+ * de Prime, 50 se agotaban en poco mas de tres meses de curso.
+ */
+export const MAX_RESOURCES_LOADED = 200;
+
 export const FREE_WEEKLY_UPLOADS = WEEKLY_UPLOADS_FREE;
 export const PRIME_WEEKLY_UPLOADS = WEEKLY_UPLOADS_PRIME;
 
 const initialState = {
   profile: null,
   subjects: [],
-  // Timestamps of past uploads, used for the rolling weekly allowance.
-  uploadsHistory: [],
   // The plan the UI renders. DERIVED — regenerated from exams and then merged
   // with `manualTasks` + `planOverrides`. Still persisted so the first paint
   // after a cold start doesn't need a round trip, but it is no longer the source
@@ -188,7 +193,6 @@ const useUserStore = create((set, get) => ({
           profile: profileData,
           stats: statsData,
           gamification: gameData,
-          uploadsHistory: data?.uploadsHistory || [], // Load history
           microplans: microplansData,
           // Both must load before any regeneration, or reconciliation runs with
           // an empty override map and reverts everything the student did.
@@ -206,7 +210,12 @@ const useUserStore = create((set, get) => ({
       // Load Resources
       try {
         const resourcesRef = collection(db, 'users', uid, 'resources');
-        const resourcesSnap = await getDocs(query(resourcesRef, limit(50)));
+        // Sin orderBy, Firestore devolvia 50 documentos por ID: con mas de 50
+        // materiales el alumno veia 50 al azar y el resto desaparecia de la
+        // Mochila sin aviso. Ahora salen los mas recientes primero.
+        const resourcesSnap = await getDocs(
+          query(resourcesRef, orderBy('createdAt', 'desc'), limit(MAX_RESOURCES_LOADED))
+        );
         const resources = resourcesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
         set({ resources });
       } catch {
@@ -274,58 +283,70 @@ const useUserStore = create((set, get) => ({
   },
 
   /**
-   * Uploads inside the rolling seven-day window. Split out of `canUpload` so
-   * the Mochila can show how much of the free allowance is left, instead of
-   * only finding out when an upload is refused.
+   * Subidas dentro de la ventana móvil de siete días. Se cuenta sobre los
+   * materiales que siguen existiendo, no sobre un contador aparte: así, borrar
+   * un archivo devuelve la subida, que es lo que el alumno espera. El precio es
+   * que subir y borrar en bucle no consume cupo; a cambio nadie se queda una
+   * semana bloqueado por un archivo que ya no tiene.
    */
   uploadsThisWeek: () => {
-    const { uploadsHistory } = get();
-    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return (uploadsHistory || []).filter((timestamp) => timestamp > oneWeekAgo).length;
-  },
-
-  recordUpload: async (userId) => {
-    const { uploadsHistory } = get();
-    const now = Date.now();
-    const newHistory = [...(uploadsHistory || []), now];
-
-    set({ uploadsHistory: newHistory });
-
-    try {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, { uploadsHistory: newHistory });
-    } catch (error) {
-      console.error('Error recording upload:', error);
-    }
-  },
-
-  addResource: async (userId, resourceData) => {
     const { resources } = get();
-    // Optimistic update
-    set({ resources: [resourceData, ...resources] });
+    const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return (resources || []).filter((resource) => {
+      const at = Date.parse(resource?.createdAt);
+      return Number.isFinite(at) && at > oneWeekAgo;
+    }).length;
+  },
+
+  /**
+   * Optimista, pero con vuelta atras: antes, si Firestore fallaba, la tarjeta
+   * se quedaba en pantalla y el archivo desaparecia al siguiente arranque sin
+   * que el alumno supiera nunca que no se habia guardado.
+   * @returns {Promise<boolean>} si quedo guardado de verdad.
+   */
+  addResource: async (userId, resourceData) => {
+    const previous = get().resources;
+    set({ resources: [resourceData, ...previous] });
 
     try {
       const resourcesRef = collection(db, 'users', userId, 'resources');
-      await addDoc(resourcesRef, resourceData);
+      const created = await addDoc(resourcesRef, resourceData);
+      // Guardar el id que asigna Firestore deja la ficha local igual que la
+      // que llega al recargar, en vez de una sin `id` hasta el proximo arranque.
+      set({
+        resources: get().resources.map((r) =>
+          r.path === resourceData.path ? { ...r, id: created.id } : r
+        ),
+      });
+      return true;
     } catch (error) {
       console.error('Error adding resource:', error);
+      set({ resources: previous });
+      return false;
     }
   },
 
+  /**
+   * El callback async dentro de `forEach` no se esperaba: la funcion terminaba
+   * antes de que el borrado ocurriese y cualquier fallo quedaba como promesa
+   * rechazada sin capturar. Como el archivo ya se ha borrado de Storage para
+   * cuando llegamos aqui, un fallo silencioso dejaba una ficha fantasma con
+   * una URL muerta al recargar.
+   * @returns {Promise<boolean>} si se borro de verdad.
+   */
   removeResource: async (userId, resourcePath) => {
-    const { resources } = get();
-    const updatedResources = resources.filter((r) => r.path !== resourcePath);
-    set({ resources: updatedResources });
+    const previous = get().resources;
+    set({ resources: previous.filter((r) => r.path !== resourcePath) });
 
     try {
       const resourcesRef = collection(db, 'users', userId, 'resources');
-      const q = query(resourcesRef, where('path', '==', resourcePath));
-      const snapshot = await getDocs(q);
-      snapshot.forEach(async (doc) => {
-        await deleteDoc(doc.ref);
-      });
+      const snapshot = await getDocs(query(resourcesRef, where('path', '==', resourcePath)));
+      await Promise.all(snapshot.docs.map((entry) => deleteDoc(entry.ref)));
+      return true;
     } catch (error) {
       console.error('Error removing resource:', error);
+      set({ resources: previous });
+      return false;
     }
   },
 

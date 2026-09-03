@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "jsEngine": "hermes",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash-mark.png",
       "resizeMode": "contain",
       "backgroundColor": "#191919"
     },

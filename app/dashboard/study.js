@@ -48,6 +48,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { tokens } from '../../theme/tokens';
+import { TAB_BAR_STYLE } from '../../components/ui/InlineSheet';
 import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
 import { syncHomeScreenWidgets } from '../../services/widgetData';
@@ -1239,19 +1240,9 @@ export default function StudySessionScreen() {
     const hidden = step === 'timer';
     navigation.setOptions({
       headerShown: false,
-      tabBarStyle: hidden
-        ? { display: 'none' }
-        : {
-            height: 85,
-            paddingBottom: 25,
-            backgroundColor: tokens.colors.surfaceCard,
-            elevation: 0,
-            borderTopWidth: 1,
-            borderTopColor: tokens.colors.borderDefault,
-            shadowColor: 'transparent',
-            shadowOpacity: 0,
-            display: 'flex',
-          },
+      // Se reconstruia aqui a mano, copia literal de la del layout: si una
+      // cambiaba y la otra no, la barra saltaba al volver del cronometro.
+      tabBarStyle: hidden ? { display: 'none' } : { ...TAB_BAR_STYLE, display: 'flex' },
     });
   }, [step, navigation]);
 
@@ -1516,7 +1507,7 @@ export default function StudySessionScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <Animated.View entering={FadeInDown.duration(320)}>
-          <Text style={styles.screenTitle}>Estudiar</Text>
+          <Text style={styles.screenTitle}>Clase</Text>
         </Animated.View>
 
         {/* Materia */}

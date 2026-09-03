@@ -21,6 +21,26 @@ export const TAB_BAR_HEIGHT = 85;
 export const TAB_BAR_PADDING_BOTTOM = 25;
 
 /**
+ * El aspecto de la barra, en un solo sitio.
+ *
+ * Estaba escrito entero dos veces: en `screenOptions` del layout y otra vez en
+ * app/dashboard/study.js, que rehace `tabBarStyle` al salir del cronómetro
+ * porque durante la sesión la esconde. Las dos copias tenían que coincidir
+ * exactamente o la barra daba un salto al volver, y nada lo garantizaba.
+ */
+export const TAB_BAR_STYLE = {
+  height: TAB_BAR_HEIGHT,
+  paddingBottom: TAB_BAR_PADDING_BOTTOM,
+  backgroundColor: tokens.colors.surfaceCard,
+  elevation: 0,
+  // Separador de un pelo en vez de sombra: el rediseño es plano.
+  borderTopWidth: 1,
+  borderTopColor: tokens.colors.borderDefault,
+  shadowColor: 'transparent',
+  shadowOpacity: 0,
+};
+
+/**
  * Where the raised "+" sits, measured from the bottom of the screen.
  *
  * Tab items centre in the bar's content box (height minus its bottom padding),

@@ -4,14 +4,16 @@ import { View, StyleSheet, Pressable, Platform } from 'react-native';
 import React, { useEffect, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import Animated, {
+  Easing,
   FadeIn,
   LinearTransition,
   interpolateColor,
   useSharedValue,
   useAnimatedStyle,
   withSpring,
+  withTiming,
 } from 'react-native-reanimated';
-import { FAB_SIZE, FAB_BOTTOM } from '../../components/ui/InlineSheet';
+import { FAB_SIZE, FAB_BOTTOM, TAB_BAR_STYLE } from '../../components/ui/InlineSheet';
 import { tokens } from '../../theme/tokens';
 import QuickActionsModal from '../../components/QuickActionsModal';
 import EventModal from '../../components/EventModal';
@@ -160,17 +162,7 @@ export default function DashboardLayout() {
       sceneContainerStyle: {
         backgroundColor: tokens.colors.background,
       },
-      tabBarStyle: {
-        height: 85,
-        paddingBottom: 25,
-        backgroundColor: tokens.colors.surfaceCard,
-        elevation: 0,
-        // Hairline separator instead of a shadow — the redesign is flat.
-        borderTopWidth: 1,
-        borderTopColor: tokens.colors.borderDefault,
-        shadowColor: 'transparent',
-        shadowOpacity: 0,
-      },
+      tabBarStyle: TAB_BAR_STYLE,
       tabBarActiveTintColor: tokens.colors.accent,
       tabBarInactiveTintColor: tokens.colors.textDisabled,
       // Every tab draws itself through PillTab now, icon and name together —
@@ -212,6 +204,38 @@ export default function DashboardLayout() {
 
   const fabIconStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${fabProgress.value * 45}deg` }],
+  }));
+
+  /**
+   * Entrada y salida del "+".
+   *
+   * Antes se montaba y desmontaba en seco (`sessionActive ? null : …`), así que
+   * al empezar una sesión el botón desaparecía de golpe y al terminarla volvía
+   * a aparecer de golpe. Ahora sigue montado y se anima:
+   *
+   *  · al volver, entra con el mismo muelle que ya usan la píldora de la
+   *    pestaña activa y la rotación del icono — está poco amortiguado (ζ≈0,72),
+   *    así que se pasa un pelo de tamaño y se asienta, que es lo que hace que
+   *    se lea como que "vuelve" en vez de aparecer;
+   *  · al irse, no rebota: sale con la curva y la duración estándar del
+   *    sistema, más corta, porque una salida lenta estorba a lo que viene
+   *    detrás (la pantalla de sesión).
+   *
+   * La rotación del icono es independiente y no se toca: se compone con esta
+   * porque vive en la vista de dentro.
+   */
+  const fabPresence = useSharedValue(sessionActive ? 0 : 1);
+  useEffect(() => {
+    fabPresence.value = sessionActive
+      ? withTiming(0, { duration: 180, easing: Easing.bezier(0.2, 0.8, 0.2, 1) })
+      : withSpring(1, { damping: 18, stiffness: 260, mass: 0.6 });
+  }, [sessionActive, fabPresence]);
+
+  const fabPresenceStyle = useAnimatedStyle(() => ({
+    // El muelle se pasa de 1; la opacidad hay que recortarla, la escala no
+    // (ese pequeño exceso es justo el rebote que se busca).
+    opacity: Math.min(1, fabPresence.value),
+    transform: [{ scale: 0.6 + fabPresence.value * 0.4 }],
   }));
 
   const toggleQuickActions = () => {
@@ -257,11 +281,11 @@ export default function DashboardLayout() {
         <Tabs.Screen
           name="study"
           options={{
-            title: 'Estudiar',
+            title: 'Clase',
             // The one tab that must keep running while it isn't on screen: it
             // owns the session timer.
             freezeOnBlur: false,
-            tabBarButton: (props) => <PillTab {...props} icon={BookOpen} label="Estudiar" />,
+            tabBarButton: (props) => <PillTab {...props} icon={BookOpen} label="Clase" />,
           }}
         />
         {/* Center FAB Button */}
@@ -309,7 +333,15 @@ export default function DashboardLayout() {
 
       {/* Last child on purpose: it has to paint over the sheet above, the way
           the "+" sits on the sheet's top edge rather than under it. */}
-      {sessionActive ? null : (
+      {/* Durante la sesión el botón sigue montado pero es invisible: hay que
+          quitarlo de los toques y del lector de pantalla a mano, porque
+          Estudiar se construyó a propósito sin salida. */}
+      <Animated.View
+        style={[styles.fabSlot, fabPresenceStyle]}
+        pointerEvents={sessionActive ? 'none' : 'auto'}
+        accessibilityElementsHidden={sessionActive}
+        importantForAccessibility={sessionActive ? 'no-hide-descendants' : 'auto'}
+      >
         <Pressable
           onPress={toggleQuickActions}
           style={({ pressed }) => [styles.fab, pressed && { transform: [{ scale: 0.92 }] }]}
@@ -320,7 +352,7 @@ export default function DashboardLayout() {
             <Plus size={28} color="#FFFFFF" strokeWidth={3} />
           </Animated.View>
         </Pressable>
-      )}
+      </Animated.View>
 
       <EventModal
         visible={eventModalVisible}
@@ -370,12 +402,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: tokens.colors.textPrimary,
   },
-  fab: {
+  // El sitio que ocupa el botón, separado de su aspecto: la escala de entrada
+  // y salida va aquí, para que el `scale: 0.92` de la pulsación siga viviendo
+  // en el Pressable sin que uno pise al otro.
+  fabSlot: {
     position: 'absolute',
     alignSelf: 'center',
     bottom: FAB_BOTTOM,
     width: FAB_SIZE,
     height: FAB_SIZE,
+  },
+  fab: {
+    width: '100%',
+    height: '100%',
     borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.accent,
     alignItems: 'center',

@@ -86,15 +86,16 @@ const AUTH_ERROR_MESSAGES = {
 };
 
 /**
- * TEMPORARY kill switch for the "Continuar con Google" button, flipped off
- * for the 23 Aug 2026 Play Store production submission: real closed-testing
- * builds still hit DEVELOPER_ERROR and the root cause wasn't confirmed in
- * time, so login/register hide the button entirely rather than ship a visibly
- * broken control in front of Google's reviewer or a real student. Email
- * verification + account deletion — the actual Play Store data-policy
- * requirements — don't depend on this. Flip back to true once diagnosed.
+ * Kill switch for the "Continuar con Google" button in login/register. Was off
+ * for the Play Store production submission while every native sign-in hit
+ * DEVELOPER_ERROR: the SHA-1 registered in Firebase was the Play *upload* key
+ * (`ce625773…`, what signs the AAB), never the Play *app signing* key
+ * (`6879f835…`, what actually signs the APK Google installs on a device), so
+ * Play Services could never match the calling app to an OAuth client. The
+ * right fingerprint is registered now, so the button is back — see
+ * getGoogleSignInErrorMessage below for what the failure looked like.
  */
-export const GOOGLE_SIGNIN_ENABLED = false;
+export const GOOGLE_SIGNIN_ENABLED = true;
 
 /** Plain-Spanish message for a Firebase Auth error, for showing in the UI. */
 export const getAuthErrorMessage = (error) =>

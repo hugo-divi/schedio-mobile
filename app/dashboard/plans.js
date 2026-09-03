@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   Platform,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -464,7 +465,6 @@ export default function PlansScreen() {
   const resources = useUserStore((state) => state.resources);
   const subjects = useUserStore((state) => state.subjects);
   const planDiagnostics = useUserStore((state) => state.planDiagnostics);
-  const uploadsHistory = useUserStore((state) => state.uploadsHistory);
   const profile = useUserStore((state) => state.profile);
 
   const params = useLocalSearchParams();
@@ -542,10 +542,15 @@ export default function PlansScreen() {
     if (nextWeek.some((day) => isSameDay(day, new Date(target.date)))) setWeekOffset(1);
   }, [highlightId, microplans]);
 
+  // Se cuenta sobre los materiales vivos, igual que `canUpload` en el store:
+  // borrar un archivo devuelve la subida de esa semana.
   const uploadsUsed = useMemo(() => {
     const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    return (uploadsHistory || []).filter((timestamp) => timestamp > oneWeekAgo).length;
-  }, [uploadsHistory]);
+    return (resources || []).filter((resource) => {
+      const at = Date.parse(resource?.createdAt);
+      return Number.isFinite(at) && at > oneWeekAgo;
+    }).length;
+  }, [resources]);
 
   // Prime raised the ceiling (15/week) but didn't remove it — still worth showing.
   const uploadLimit = isPrime ? PRIME_WEEKLY_UPLOADS : FREE_WEEKLY_UPLOADS;
@@ -654,7 +659,16 @@ export default function PlansScreen() {
 
   const handleUploadSuccess = async (fileData) => {
     if (!user) return;
-    await useUserStore.getState().addResource(user.uid, fileData);
+    const saved = await useUserStore.getState().addResource(user.uid, fileData);
+    // El archivo esta en Storage, pero sin ficha no aparece en la Mochila: hay
+    // que decirlo, porque antes la tarjeta se quedaba en pantalla y el material
+    // se esfumaba al siguiente arranque.
+    if (!saved) {
+      Alert.alert(
+        'No se pudo guardar',
+        'El archivo se subió pero no quedó registrado en tu Mochila. Vuelve a intentarlo.'
+      );
+    }
   };
 
   const deleteResource = (resource) =>

@@ -335,12 +335,22 @@ export default function Dashboard() {
 
   useEffect(() => () => clearTimeout(gradePromptTimerRef.current), []);
 
-  // Independent effect for the tour to prevent render loops
+  // Independent effect for the tour to prevent render loops.
+  //
+  // El `!loading` no es cosmético. `fetchData` escribe `profile` (via
+  // loadUserData) antes que `exams` y `pendingExams`, y loadUserData todavía
+  // hace otro await despues de escribir el perfil, asi que hay un render real
+  // con el tour visible y los examenes aun vacios. En ese hueco el tour no
+  // sabia el nombre del examen del onboarding (texto generico en el paso 3) y,
+  // peor, `hasPendingExams` cambiaba de false a true a mitad de recorrido:
+  // el array de pasos crecia de 6 a 7 con el indice ya en marcha. Esperar a que
+  // termine la carga cierra las dos cosas de una vez. `setLoading(false)` vive
+  // en un `finally`, asi que esto no se puede quedar bloqueado ni si falla.
   useEffect(() => {
-    if (profile && profile.isNewAccount && !profile.hasSeenTour) {
+    if (!loading && profile && profile.isNewAccount && !profile.hasSeenTour) {
       setTourVisible(true);
     }
-  }, [profile]);
+  }, [loading, profile]);
 
   const handleTourComplete = async () => {
     setTourVisible(false);

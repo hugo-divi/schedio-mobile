@@ -1,12 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
 import {
   CalendarPlus,
   Star,
   FileText,
   Package,
-  Play,
   Sparkles,
   ChevronLeft,
   ChevronRight,
@@ -86,7 +84,6 @@ function ActionRow({ icon: Icon, label, desc, locked, disabled, onPress }) {
 // ── Sheet ───────────────────────────────────────────────────────────────────
 
 export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFile }) {
-  const router = useRouter();
   const isPrime = useAuthStore((state) => state.isPrime);
 
   const [view, setView] = useState(VIEW_MAIN);
@@ -263,15 +260,9 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
                 onAddFile();
               }}
             />
-            <ActionRow
-              icon={Play}
-              label="Empezar sesión de estudio"
-              desc="Elige materia y tiempo"
-              onPress={() => {
-                close();
-                router.push('/dashboard/study');
-              }}
-            />
+            {/* Se quitó "Empezar sesión de estudio": la pestaña Clase lleva
+                justo ahí, así que era un paso de más para llegar al mismo
+                sitio, y su fila era la que obligaba a desplazar esta hoja. */}
             {/* Inert on purpose, like the planner on the Plan screen: CLAUDE.md
                 puts the coach outside the initial launch. */}
             <ActionRow

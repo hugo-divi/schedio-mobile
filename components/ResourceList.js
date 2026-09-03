@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, Image, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  Modal,
+  ActivityIndicator,
+  Linking,
+  Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { deleteFile } from '../services/storage';
 import { BottomSheet, sheetStyles } from './ui/BottomSheet';
@@ -9,6 +20,35 @@ const ResourceList = ({ resources, onDelete, isDarkMode }) => {
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
+  // La imagen que se está mirando a pantalla completa.
+  const [viewing, setViewing] = useState(null);
+  const [imageLoading, setImageLoading] = useState(false);
+
+  /**
+   * Hasta ahora la tarjeta no tenía `onPress`: se podían guardar apuntes y no
+   * abrirlos nunca. Las imágenes se ven dentro de la app; los PDF se delegan al
+   * visor del sistema, que ya sabe hacerlo mejor que nosotros.
+   */
+  const openResource = async (resource) => {
+    if (!resource?.url) return;
+
+    if (resource.type === 'image') {
+      setImageLoading(true);
+      setViewing(resource);
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(resource.url);
+      if (!supported) throw new Error('unsupported');
+      await Linking.openURL(resource.url);
+    } catch {
+      Alert.alert(
+        'No se pudo abrir',
+        'No hay ninguna aplicación en el móvil que pueda abrir este archivo.'
+      );
+    }
+  };
 
   if (!resources || resources.length === 0) return null;
 
@@ -56,7 +96,14 @@ const ResourceList = ({ resources, onDelete, isDarkMode }) => {
         contentContainerStyle={styles.list}
       >
         {resources.map((resource, index) => (
-          <TouchableOpacity key={index} style={styles.card} activeOpacity={0.7}>
+          <TouchableOpacity
+            key={resource.path || resource.id || index}
+            style={styles.card}
+            activeOpacity={0.7}
+            onPress={() => openResource(resource)}
+            accessibilityRole="button"
+            accessibilityLabel={`Abrir ${resource.name}`}
+          >
             <View style={styles.preview}>
               {resource.type === 'image' ? (
                 <Image source={{ uri: resource.url }} style={styles.image} />
@@ -90,6 +137,38 @@ const ResourceList = ({ resources, onDelete, isDarkMode }) => {
           </TouchableOpacity>
         ))}
       </ScrollView>
+
+      <Modal
+        visible={!!viewing}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewing(null)}
+      >
+        <View style={styles.viewerBackdrop}>
+          <TouchableOpacity
+            style={styles.viewerClose}
+            onPress={() => setViewing(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar"
+          >
+            <Ionicons name="close" size={26} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {imageLoading && <ActivityIndicator size="large" color="#FFFFFF" />}
+
+          {viewing && (
+            <Image
+              source={{ uri: viewing.url }}
+              style={styles.viewerImage}
+              onLoadEnd={() => setImageLoading(false)}
+            />
+          )}
+
+          <Text style={styles.viewerName} numberOfLines={2}>
+            {viewing?.name}
+          </Text>
+        </View>
+      </Modal>
 
       <BottomSheet
         visible={!!pendingDelete}
@@ -188,6 +267,40 @@ const styles = StyleSheet.create({
   date: {
     fontSize: 11,
     color: '#8E8E93',
+  },
+  viewerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.94)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  viewerImage: {
+    width: '100%',
+    height: '80%',
+    resizeMode: 'contain',
+  },
+  viewerClose: {
+    position: 'absolute',
+    top: 48,
+    right: 20,
+    zIndex: 2,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerName: {
+    position: 'absolute',
+    bottom: 40,
+    left: 24,
+    right: 24,
+    textAlign: 'center',
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

@@ -1,122 +1,51 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   Modal,
   StyleSheet,
-  Dimensions,
   Animated,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
-import { ChevronRight, X, Sparkles } from 'lucide-react-native';
+import { ChevronRight, ChevronLeft, X, Sparkles } from 'lucide-react-native';
 import Svg, { Defs, Mask, Rect as SvgRect } from 'react-native-svg';
-import { useRouter } from 'expo-router';
 import { tokens } from '../theme/tokens';
+import { buildSteps, cardTopFor } from '../services/tour';
+import { TAB_BAR_HEIGHT } from './ui/InlineSheet';
 
-const { width, height } = Dimensions.get('window');
 const font = tokens.typography.families.inter;
 
-/**
- * Coach marks over the real app, in the flat design language — no more
- * GlassCard blur, which was the last screen still drawing it. Content
- * rewritten against the app as it stands now: the stats strip opens the rank
- * ladder rather than a modal that no longer exists, the calendar section
- * covers exams and tasks together, and the central "+" button, the Mochila
- * tab and the profile's real analysis — none of which existed when this tour
- * was last written — each get their own step.
- */
 const GuidedTour = ({
   onComplete,
   tourRefs = {},
   hasPendingExams = false,
   onboardingGoalName = null,
 }) => {
-  const router = useRouter();
   const [step, setStep] = useState(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [maskRect, setMaskRect] = useState(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const baseSteps = [
-    {
-      title: 'Bienvenido a Schedio',
-      content: 'Un minuto y ya sabes moverte. Empezamos por tu pantalla de Inicio.',
-      position: { top: height * 0.35 },
-      refKey: null,
-    },
-    {
-      title: 'Racha, nivel y media',
-      content:
-        'Cada sesión de estudio suma XP y mantiene viva tu racha. Toca tu nivel para ver el camino completo hasta el siguiente rango.',
-      position: { top: height * 0.62 },
-      refKey: 'statsStripRef',
-    },
-    {
-      title: 'Tu día, resumido',
-      // Personalised for a fresh account when the student's own onboarding
-      // goal is known — falls back to the generic line otherwise, including
-      // for every account that onboarded before this existed.
-      content: onboardingGoalName
-        ? `¿Ves esto? Es lo que tú mismo acabas de crear: ${onboardingGoalName}. Tócalo cuando quieras para empezar.`
-        : 'Una sugerencia pensada para hoy, y un botón para empezar a estudiar sin más vueltas.',
-      position: { top: height * 0.62 },
-      refKey: 'heroCardRef',
-    },
-  ];
+  // El inicializador de useState corre una sola vez: los pasos quedan fijados
+  // con los datos que había al abrir el tour y ya no cambian de longitud.
+  const [steps] = useState(() => buildSteps({ hasPendingExams, onboardingGoalName }));
 
-  if (hasPendingExams) {
-    baseSteps.push({
-      title: 'Por calificar',
-      content: 'Pon nota a los exámenes que ya has hecho: es lo que alimenta tu media.',
-      position: { top: height * 0.1 },
-      refKey: 'pendingSectionRef',
-    });
-  }
+  // Se lee en cada render, no al importar el modulo: antes era
+  // `Dimensions.get('window')` a nivel de fichero, capturado una sola vez, asi
+  // que rotar el movil o abrir pantalla dividida dejaba todas las posiciones
+  // calculadas sobre un alto que ya no era el de la pantalla.
+  const { width, height } = useWindowDimensions();
+  const [cardHeight, setCardHeight] = useState(0);
 
-  baseSteps.push({
-    title: 'Tu calendario',
-    content:
-      'El mes de un vistazo, con lo próximo justo debajo. Mantén pulsado un examen para editarlo, o tócalo para verlo en tu plan.',
-    position: { top: height * 0.1 },
-    refKey: 'calendarSectionRef',
-  });
+  // Toda la aritmetica vive en services/tour.js para poder comprobarla en Node
+  // (scripts/check-tour.mjs); aqui solo se le pasan las medidas del momento.
+  const cardTop = useMemo(
+    () => cardTopFor({ maskRect, cardHeight, screenHeight: height, tabBarHeight: TAB_BAR_HEIGHT }),
+    [maskRect, cardHeight, height]
+  );
 
-  baseSteps.push({
-    title: 'El botón del centro',
-    content:
-      'Añadir un examen, calificar uno, apuntar algo rápido, subir un archivo a tu mochila o empezar a estudiar — todo a un toque, desde cualquier pantalla.',
-    position: { top: height * 0.3 },
-    refKey: null,
-  });
-
-  /*
-   * The tour stays on Inicio.
-   *
-   * Three further steps used to walk through Estudiar, Plan and Perfil by
-   * pushing their routes. They couldn't work: this component is rendered from
-   * app/dashboard/index.js, so its Modal belongs to the Inicio screen — the
-   * moment it navigated to another tab, Inicio stopped being the active screen
-   * and the card vanished. Coming back to Inicio brought it straight back,
-   * still on the same step, and it navigated away again. A loop with no exit.
-   *
-   * Fixing it properly means lifting the tour into app/dashboard/_layout.js,
-   * where QuickActionsModal already lives above the tabs — but the highlight
-   * mask measures refs that belong to Inicio, so those have to move with it.
-   * Too much surgery to do on the way to a store submission.
-   *
-   * Ending here costs little: the tab bar now names the tab you are on, which
-   * is most of what those three steps were explaining.
-   */
-  baseSteps.push({
-    title: 'Y eso es todo',
-    content:
-      'Abajo tienes Estudiar, Plan y tu Perfil. Échales un ojo cuando quieras — se explican solos.',
-    position: { top: height * 0.3 },
-    refKey: null,
-  });
-
-  const steps = baseSteps;
   const isLastStep = step === steps.length - 1;
 
   const runFadeIn = () => {
@@ -127,45 +56,72 @@ const GuidedTour = ({
     }).start(() => setIsTransitioning(false));
   };
 
+  /**
+   * Los `setTimeout` que quedasen vivos al cerrar el tour seguian corriendo y
+   * llamaban a `setMaskRect` / `setIsTransitioning` sobre un componente ya
+   * desmontado. Se guardan aqui para poder cancelarlos.
+   */
+  const timers = useRef([]);
+  const later = (fn, ms) => {
+    timers.current.push(setTimeout(fn, ms));
+  };
+
+  useEffect(
+    () => () => {
+      timers.current.forEach(clearTimeout);
+      timers.current = [];
+    },
+    []
+  );
+
   const performStepLogic = (currentStepConfig) => {
-    if (currentStepConfig.route) {
+    // Ya no se hace `router.push('/dashboard')`. El tour se renderiza desde
+    // Inicio, o sea que la pantalla ya es esa: cada push apilaba otra entrada
+    // identica y, tras seis pasos, hacian falta seis toques del boton atras de
+    // Android para salir del dashboard.
+    const target = currentStepConfig.refKey ? tourRefs[currentStepConfig.refKey]?.current : null;
+    const scroller = tourRefs.scrollViewRef?.current;
+
+    // Paso sin resaltado, o con un ref que aun no esta montado: solo se
+    // oscurece la pantalla.
+    if (!target || !scroller) {
       setMaskRect(null);
-      router.push(currentStepConfig.route);
-      setTimeout(runFadeIn, 300);
+      runFadeIn();
       return;
     }
 
-    if (
-      currentStepConfig.refKey &&
-      tourRefs[currentStepConfig.refKey]?.current &&
-      tourRefs.scrollViewRef?.current
-    ) {
-      router.push('/dashboard');
-      setTimeout(() => {
-        tourRefs[currentStepConfig.refKey].current.measureLayout(
-          tourRefs.scrollViewRef.current,
-          (x, y, w, h) => {
-            tourRefs.scrollViewRef.current.scrollTo({ y: Math.max(0, y - 100), animated: true });
-            setTimeout(() => {
-              if (tourRefs[currentStepConfig.refKey]?.current) {
-                tourRefs[currentStepConfig.refKey].current.measure((fx, fy, w2, h2, px, py) => {
-                  setMaskRect({ x: px, y: py, width: w2, height: h2 });
-                  runFadeIn();
-                });
-              }
-            }, 400);
-          },
-          () => {
-            setMaskRect(null);
-            runFadeIn();
-          }
-        );
-      }, 100);
-    } else {
-      router.push('/dashboard');
-      setMaskRect(null);
-      runFadeIn();
-    }
+    // El encadenado es: dejar que el layout se asiente (100 ms), medir donde
+    // esta el elemento dentro del scroll, desplazarse hasta el, esperar a que
+    // ese desplazamiento termine (400 ms) y recien entonces medirlo en
+    // coordenadas de pantalla, que es lo que necesita la mascara.
+    later(() => {
+      target.measureLayout(
+        scroller,
+        (x, y) => {
+          scroller.scrollTo({ y: Math.max(0, y - 100), animated: true });
+          later(() => {
+            const current = tourRefs[currentStepConfig.refKey]?.current;
+            if (!current) {
+              setMaskRect(null);
+              runFadeIn();
+              return;
+            }
+            current.measure((fx, fy, w, h, px, py) => {
+              setMaskRect({ x: px, y: py, width: w, height: h });
+              runFadeIn();
+            });
+          }, 400);
+        },
+        () => {
+          // measureLayout fallando dejaba el paso sin resaltado y sin rastro.
+          // Sigue sin resaltado, porque no hay nada mejor que hacer, pero al
+          // menos queda constancia de por que.
+          console.warn('GuidedTour: no se pudo medir', currentStepConfig.refKey);
+          setMaskRect(null);
+          runFadeIn();
+        }
+      );
+    }, 100);
   };
 
   useEffect(() => {
@@ -173,35 +129,43 @@ const GuidedTour = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleNext = () => {
+  /** Cambio de paso: se desvanece, se mueve el indice y se recoloca. */
+  const goToStep = (nextIndex) => {
     if (isTransitioning) return;
-
-    if (!isLastStep) {
-      setIsTransitioning(true);
-      Animated.timing(fadeAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start(() => {
-        setStep(step + 1);
-        performStepLogic(steps[step + 1]);
-      });
-    } else {
-      router.push('/dashboard');
-      onComplete();
-    }
+    setIsTransitioning(true);
+    Animated.timing(fadeAnim, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      setStep(nextIndex);
+      performStepLogic(steps[nextIndex]);
+    });
   };
 
-  const dimOpacity = steps[step].route
-    ? Platform.OS === 'web'
-      ? 0.55
-      : 0.4
-    : Platform.OS === 'web'
-      ? 0.75
-      : 0.65;
+  const handleNext = () => {
+    if (isTransitioning) return;
+    if (isLastStep) {
+      onComplete();
+      return;
+    }
+    goToStep(step + 1);
+  };
+
+  // Volver atras: lo mismo que pediste para el mini onboarding de Planes.
+  // Saltarse un paso sin querer dejaba de tener arreglo.
+  const handleBack = () => {
+    if (step > 0) goToStep(step - 1);
+  };
+
+  // Antes esto se ramificaba por `steps[step].route`, que ya no existe en
+  // ningun paso: la rama "clara" no se pintaba nunca.
+  const dimOpacity = Platform.OS === 'web' ? 0.75 : 0.65;
 
   return (
-    <Modal transparent visible animationType="fade">
+    // `onRequestClose` es obligatorio en Android para que el boton atras
+    // fisico haga algo. Sin el, durante el tour no respondia a nada.
+    <Modal transparent visible animationType="fade" onRequestClose={onComplete}>
       <View style={StyleSheet.absoluteFill}>
         <Svg height="100%" width="100%" style={StyleSheet.absoluteFill}>
           <Defs>
@@ -244,9 +208,12 @@ const GuidedTour = ({
         </Svg>
 
         <Animated.View
-          style={[styles.contentContainer, { opacity: fadeAnim }, steps[step].position]}
+          style={[styles.contentContainer, { opacity: fadeAnim, top: cardTop, width: width - 48 }]}
         >
-          <View style={styles.card}>
+          <View
+            style={styles.card}
+            onLayout={(event) => setCardHeight(event.nativeEvent.layout.height)}
+          >
             <View style={styles.header}>
               <View style={styles.badge}>
                 <Sparkles size={16} color={tokens.colors.accent} strokeWidth={2} />
@@ -265,9 +232,23 @@ const GuidedTour = ({
             <Text style={styles.text}>{steps[step].content}</Text>
 
             <View style={styles.footer}>
+              {/* Se reserva el hueco en el primer paso en vez de esconder el
+                  boton, para que los puntos no salten de sitio al avanzar. */}
+              <TouchableOpacity
+                style={[styles.backBtn, step === 0 && styles.backBtnHidden]}
+                onPress={handleBack}
+                disabled={step === 0}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Paso anterior"
+              >
+                <ChevronLeft size={20} color={tokens.colors.textSecondary} strokeWidth={2} />
+              </TouchableOpacity>
+
               <View style={styles.dots}>
-                {steps.map((_, i) => (
-                  <View key={i} style={[styles.dot, i === step && styles.activeDot]} />
+                {steps.map((stepConfig, i) => (
+                  <View key={stepConfig.key} style={[styles.dot, i === step && styles.activeDot]} />
                 ))}
               </View>
 
@@ -292,7 +273,8 @@ export default GuidedTour;
 
 const styles = StyleSheet.create({
   contentContainer: {
-    width: width - 48,
+    // `top` y `width` llegan en linea: dependen de la pantalla y del elemento
+    // resaltado, asi que no pueden vivir en una hoja de estilos estatica.
     alignSelf: 'center',
     position: 'absolute',
     zIndex: 100,
@@ -335,6 +317,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  backBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnHidden: {
+    opacity: 0,
   },
   dots: {
     flexDirection: 'row',
