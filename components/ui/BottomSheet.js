@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -63,6 +63,9 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const keyboardShift = useSharedValue(0);
+  // Extra scroll room added under the content when the sheet is too tall to be
+  // lifted clear of the keyboard on its own (see the keyboard effect below).
+  const [keyboardPad, setKeyboardPad] = useState(0);
   // Set by the sheet's onLayout so the keyboard-avoidance effect below knows
   // how tall the actual (possibly short) sheet is, not just the screen.
   const sheetHeightRef = useRef(0);
@@ -81,6 +84,7 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
     translateY.value = SCREEN_HEIGHT;
     translateY.value = withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) });
     keyboardShift.value = 0;
+    setKeyboardPad(0);
     // A sheet reopened after being scrolled down would otherwise start with
     // the content drag disarmed until the first scroll event.
     scrollAtTop.value = true;
@@ -94,6 +98,12 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   // never gets pushed past a comfortable top margin — uncapped, shifting by the
   // full keyboard height crowded the title right up against the status bar on
   // sheets much shorter than the keyboard is tall.
+  //
+  // Whatever overlap the cap leaves uncovered is added as scroll room under the
+  // content instead, so a tall sheet (the new-exam form, the subject editor
+  // with all its fields) can still scroll its lower fields and its action
+  // buttons above the keyboard. A short sheet lifts fully, so this stays 0 and
+  // nothing about it changes.
   useEffect(() => {
     if (!visible) return;
 
@@ -107,12 +117,14 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
         duration: event?.duration || 220,
         easing: Easing.out(Easing.cubic),
       });
+      setKeyboardPad(Math.max(0, overlap - clampedOverlap));
     };
     const onHide = (event) => {
       keyboardShift.value = withTiming(0, {
         duration: event?.duration || 200,
         easing: Easing.out(Easing.cubic),
       });
+      setKeyboardPad(0);
     };
 
     const showSub = Keyboard.addListener(KEYBOARD_SHOW_EVENT, onShow);
@@ -212,7 +224,10 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
           <ScrollView
             ref={scrollRef}
             style={styles.scroll}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + insets.bottom }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: 24 + insets.bottom + keyboardPad },
+            ]}
             showsVerticalScrollIndicator={false}
             bounces={false}
             keyboardShouldPersistTaps="handled"
