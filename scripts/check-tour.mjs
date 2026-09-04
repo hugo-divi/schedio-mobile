@@ -24,21 +24,19 @@ import { fileURLToPath } from 'node:url';
 const services = join(dirname(fileURLToPath(import.meta.url)), '..', 'services');
 const here = mkdtempSync(join(tmpdir(), 'schedio-tour-'));
 writeFileSync(join(here, 'tour.mjs'), readFileSync(join(services, 'tour.js'), 'utf8'));
+// El alto real de la barra vive aquí — puro, sin React Native, así que ya no
+// hace falta escarbar el texto de components/ui/InlineSheet.js con una regex
+// para sacarlo (que es lo que se rompió al mover la constante a este mismo
+// fichero: la regex buscaba un `export const` literal que dejó de estar ahí).
+writeFileSync(
+  join(here, 'tabBarLayout.mjs'),
+  readFileSync(join(services, 'tabBarLayout.js'), 'utf8')
+);
 
 const { buildSteps, cardTopFor, CARD_GAP, SCREEN_MARGIN_TOP, CARD_HEIGHT_GUESS } = await import(
   `file://${join(here, 'tour.mjs')}`
 );
-
-/**
- * El alto real de la barra vive en components/ui/InlineSheet.js, que importa
- * React Native y no se puede cargar aquí. Se lee del fichero en vez de copiar
- * el número, para que este script falle si alguien lo cambia allí sin querer.
- */
-const inlineSheet = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'ui', 'InlineSheet.js'),
-  'utf8'
-);
-const TAB_BAR_HEIGHT = Number(/export const TAB_BAR_HEIGHT = (\d+)/.exec(inlineSheet)?.[1]);
+const { TAB_BAR_HEIGHT } = await import(`file://${join(here, 'tabBarLayout.mjs')}`);
 const SCREEN_MARGIN_BOTTOM = TAB_BAR_HEIGHT + CARD_GAP;
 
 let failures = 0;
@@ -183,7 +181,7 @@ ok(
 );
 
 ok(
-  'el alto de la barra se lee de InlineSheet',
+  'el alto de la barra se lee de tabBarLayout.js',
   Number.isFinite(TAB_BAR_HEIGHT) && TAB_BAR_HEIGHT > 0,
   `${TAB_BAR_HEIGHT} px`
 );

@@ -45,7 +45,7 @@ export const cardTopFor = ({ maskRect, cardHeight, screenHeight, tabBarHeight })
   const bottomMargin = (Number.isFinite(tabBarHeight) ? tabBarHeight : 0) + CARD_GAP;
   const ceiling = screenHeight - bottomMargin - size;
 
-  // Pasos sin resaltado (bienvenida, botón central, cierre): centrada.
+  // Pasos sin resaltado (bienvenida, botón +, cierre): centrada.
   if (!maskRect) return Math.max(floor, (screenHeight - size) / 2);
 
   const below = maskRect.y + maskRect.height + CARD_GAP;
@@ -122,9 +122,15 @@ export const buildSteps = ({ hasPendingExams = false, onboardingGoalName = null 
 
   steps.push({
     key: 'plus',
-    title: 'El botón del centro',
+    // Antes decía "El botón del centro", de cuando el "+" flotaba en el hueco
+    // central de la barra. Al pasar a vivir en línea, junto a Perfil, "central"
+    // dejó de ser verdad.
+    title: 'El botón +',
     content:
-      'Añadir un examen, calificar uno, apuntar algo rápido, subir un archivo a tu mochila o empezar a estudiar — todo a un toque, desde cualquier pantalla.',
+      // "o empezar a estudiar" describía una acción que ya no existe en la
+      // hoja (se quitó junto con "Empezar sesión de estudio": la pestaña
+      // Clase lleva al mismo sitio). Corregido de paso.
+      'Añadir un examen, calificar uno, apuntar algo rápido o subir un archivo a tu mochila — todo a un toque, desde cualquier pantalla.',
     refKey: null,
   });
 

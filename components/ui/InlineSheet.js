@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { View, Pressable, StyleSheet, Dimensions } from 'react-native';
+import { View, Pressable, StyleSheet, Dimensions, Keyboard, Platform } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,16 +9,18 @@ import Animated, {
 } from 'react-native-reanimated';
 import { ScrollView } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
+import { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM } from '../../services/tabBarLayout';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-/**
- * Mirrors `tabBarStyle.height` in app/dashboard/_layout.js. Exported so the
- * layout and every sheet that has to clear the bar read the same number
- * instead of each hard-coding 85.
- */
-export const TAB_BAR_HEIGHT = 85;
-export const TAB_BAR_PADDING_BOTTOM = 25;
+const KEYBOARD_SHOW_EVENT = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+const KEYBOARD_HIDE_EVENT = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+// Los números en sí viven en services/tabBarLayout.js — puro, sin React
+// Native, para que scripts/check-tab-bar.mjs los pueda comprobar de verdad.
+// Reexportados aquí porque QuickActionsModal y GuidedTour ya los importaban
+// desde este fichero.
+export { TAB_BAR_HEIGHT, TAB_BAR_PADDING_BOTTOM };
 
 /**
  * El aspecto de la barra, en un solo sitio.
@@ -41,18 +43,6 @@ export const TAB_BAR_STYLE = {
 };
 
 /**
- * Where the raised "+" sits, measured from the bottom of the screen.
- *
- * Tab items centre in the bar's content box (height minus its bottom padding),
- * and the button is then lifted clear of the bar. Derived rather than typed as
- * a magic number so changing the bar's height moves the button with it.
- */
-export const FAB_SIZE = 52;
-export const FAB_LIFT = 20;
-export const FAB_BOTTOM =
-  TAB_BAR_PADDING_BOTTOM + (TAB_BAR_HEIGHT - TAB_BAR_PADDING_BOTTOM) / 2 + FAB_LIFT - FAB_SIZE / 2;
-
-/**
  * A sheet that stops above the tab bar instead of covering it.
  *
  * `BottomSheet` is built on React Native's `Modal`, which draws into its own
@@ -65,24 +55,64 @@ export const FAB_BOTTOM =
  * `bottomOffset` is how much room to leave at the bottom — the tab bar's
  * height. The scrim stops at the same line for the same reason.
  *
- * Being outside `Modal` also means the keyboard behaves natively here: the
- * manual keyboard tracking `BottomSheet` needs is only necessary because a
- * Modal doesn't inherit the activity's resize behaviour.
+ * The keyboard is tracked by hand and the sheet lifted over it, the same as
+ * `BottomSheet`: this used to lean on the activity's resize, but Expo's
+ * edge-to-edge stops that resize from reaching the JS layout.
  */
 export default function InlineSheet({ visible, onClose, bottomOffset = 0, children }) {
   const progress = useSharedValue(0);
+  // The sheet is an ordinary in-activity View, so it was left to rely on the
+  // activity's own keyboard resize. Under Expo's edge-to-edge that resize no
+  // longer shrinks the JS layout, so the keyboard covered the note and grade
+  // fields. Tracking it directly and lifting the sheet — the same thing
+  // BottomSheet does — works regardless of that.
+  const keyboardShift = useSharedValue(0);
 
   useEffect(() => {
+    // Antes el cierre usaba `withTiming` (una curva lineal) contra un muelle
+    // en la apertura — la asimetría se notaba: abrir se sentía orgánico,
+    // cerrar se sentía mecánico al lado. Ahora las dos direcciones son el
+    // mismo tipo de movimiento; el cierre lleva más amortiguación y rigidez
+    // para seguir siendo rápido y decidido, no para parecer un rebote.
     progress.value = visible
       ? withSpring(1, { damping: 22, stiffness: 240, mass: 0.7 })
-      : withTiming(0, { duration: 180, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
+      : withSpring(0, { damping: 28, stiffness: 300, mass: 0.7 });
   }, [visible, progress]);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    const onShow = (event) => {
+      const height = event?.endCoordinates?.height ?? 0;
+      // The sheet already sits `bottomOffset` (the tab bar) above the screen
+      // edge, and the keyboard covers that bar — only the overlap beyond it
+      // needs compensating.
+      const overlap = Math.max(0, height - bottomOffset);
+      keyboardShift.value = withTiming(-overlap, {
+        duration: event?.duration || 220,
+        easing: Easing.out(Easing.cubic),
+      });
+    };
+    const onHide = (event) => {
+      keyboardShift.value = withTiming(0, {
+        duration: event?.duration || 200,
+        easing: Easing.out(Easing.cubic),
+      });
+    };
+
+    const showSub = Keyboard.addListener(KEYBOARD_SHOW_EVENT, onShow);
+    const hideSub = Keyboard.addListener(KEYBOARD_HIDE_EVENT, onHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [visible, bottomOffset, keyboardShift]);
 
   // Translated by a fixed large distance rather than by measured height: the
   // sheet's content changes between views (five actions, a note field, a grade
   // form) and re-measuring mid-animation made it jump.
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: (1 - progress.value) * (SCREEN_HEIGHT * 0.6) }],
+    transform: [{ translateY: (1 - progress.value) * (SCREEN_HEIGHT * 0.6) + keyboardShift.value }],
     opacity: progress.value === 0 ? 0 : 1,
   }));
 
@@ -157,9 +187,10 @@ const styles = StyleSheet.create({
   },
   body: {
     paddingHorizontal: 20,
-    // Clears the raised "+" that overlaps this sheet's bottom edge, so the
-    // last action is never sitting underneath it. The button's top edge lands
-    // ~16px inside the sheet, so this has room to spare at 32.
-    paddingBottom: 32,
+    // Era 32: compensaba el "+" elevado, que sobresalía por encima de la
+    // barra y se montaba sobre el borde inferior del sheet. En línea ya no
+    // sobresale por ningún lado — este es aire de cortesía para la última
+    // fila, a juego con el paddingHorizontal.
+    paddingBottom: 20,
   },
 });
