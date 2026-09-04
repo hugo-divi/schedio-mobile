@@ -38,41 +38,59 @@ const palette = {
   premiumBg: 'rgba(212, 169, 76, 0.12)',
   premiumBorder: 'rgba(212, 169, 76, 0.3)',
   /**
-   * Closed palette for subject labels, one fixed tone each — mirrors
-   * tokens/subjects.css in the design system. Desaturated for the dark
-   * background: these categorise, they don't decorate, so the student picks
-   * from these eight rather than from a free colour wheel.
+   * Paleta cerrada para las materias, ordenada por tono.
+   *
+   * Dos reglas, y las dos se comprueban en scripts/check-subject-colors.mjs:
+   *
+   *  1. **Ningún tono cerca del acento.** El azul de Schedio (#2979FF, tono
+   *     218°) significa "seleccionado" en toda la app, así que una materia azul
+   *     compite con esa señal. La paleta anterior tenía `tic` a 10° del acento
+   *     — el mismo azul a efectos prácticos — y otros dos a 20°. Ahora hay una
+   *     banda prohibida de ±32° y no entra nadie.
+   *  2. **Ordenadas por tono**, no por asignatura. Antes las claves eran
+   *     materias (`mates`, `historia`) en orden arbitrario, así que el
+   *     selector salía revuelto y añadir un color obligaba a inventarse una
+   *     asignatura. Ahora son nombres de color y el selector se lee como una
+   *     rueda.
+   *
+   * Los veinte tonos (ocho aquí, doce en `subjectsExtra`) se reparten a 14,8°
+   * uno de otro saltando la banda del acento. La luz compensa el tono —los
+   * amarillo-verdes se perciben más claros que los violetas al mismo valor—
+   * con `52 + 9·cos(tono − 270°)`, que es la curva que ya seguía la paleta
+   * vieja a ojo.
+   *
+   * Estas ocho son las gratuitas, repartidas entre las veinte para que sean lo
+   * más distintas posible entre sí.
    */
   subjects: {
-    tecno: '#2FA4A6',
-    historia: '#C9922F',
-    filosofia: '#8A6FD4',
-    quimica: '#3FA76B',
-    mates: '#E0705A',
-    tic: '#4C9BE0',
-    ingles: '#D46A9A',
-    lengua: '#6C6FD4',
+    rojo: '#CC3E3E',
+    ambar: '#B89531',
+    lima: '#91AF2E',
+    esmeralda: '#33B22F',
+    menta: '#33BE74',
+    indigo: '#8161D5',
+    purpura: '#BA60D5',
+    fucsia: '#D0508F',
   },
   /**
-   * Unlocked with Prime, whose subject cap (20, see MAX_SUBJECTS_PRIME in
-   * services/permissions.js) would otherwise run past the eight tones above
-   * and force two subjects to share a colour. Same desaturated weight as
-   * `subjects`, spaced by hue so each one still reads as distinct at the
-   * ~34px dot the picker renders.
+   * Los doce que desbloquea Prime, cuyo tope de 20 materias
+   * (MAX_SUBJECTS_PRIME en services/permissions.js) agotaría las ocho de
+   * arriba. Rellenan los huecos entre ellas, así que la lista completa sigue
+   * saliendo ordenada por tono.
    */
   subjectsExtra: {
-    geologia: '#CC3E3E',
-    economia: '#B9AC31',
-    biologia: '#94AD2E',
-    geografia: '#6EAD2E',
-    musica: '#47AD2E',
-    griego: '#2EAD3B',
-    informatica: '#2EAD87',
-    fisica: '#56ADD2',
-    arte: '#9E66D6',
-    dibujo: '#C066D6',
-    latin: '#D45EC8',
-    religion: '#D45E81',
+    coral: '#C85935',
+    naranja: '#C07833',
+    oro: '#B2B12F',
+    verde: '#70AD2E',
+    hoja: '#51AE2E',
+    jade: '#31B74E',
+    turquesa: '#35C79D',
+    cian: '#3CCBC5',
+    violeta: '#9E62D5',
+    orquidea: '#D45DD2',
+    magenta: '#D257B2',
+    frambuesa: '#CE4768',
   },
   // Semantic exceptions — restricted use, never decorative.
   trendUp: '#5AB98A',

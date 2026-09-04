@@ -18,7 +18,8 @@
     "check:fab-springs": "node scripts/check-fab-springs.mjs",
     "check:widgets": "node scripts/check-widgets.mjs",
     "prepare": "husky",
-    "check:streak-rules": "node scripts/check-streak-rules.mjs"
+    "check:streak-rules": "node scripts/check-streak-rules.mjs",
+    "check:subject-colors": "node scripts/check-subject-colors.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",
