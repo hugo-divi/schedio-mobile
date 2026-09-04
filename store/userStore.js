@@ -182,6 +182,17 @@ const useUserStore = create((set, get) => ({
           // so the generator falls back to DEFAULT_REST_DAYS and an account that
           // never touched it keeps the weekend off.
           restDays: Array.isArray(data.restDays) ? data.restDays : undefined,
+          // Las tres respuestas del mini-onboarding de Planes. Alimentan el
+          // techo del dia, el presupuesto diario y la curva de presion --
+          // services/planProfile.js. Sin ellas el plan usa los valores fijos
+          // de siempre, asi que una cuenta antigua no nota nada.
+          planSurvey: data.planSurvey || null,
+          hasSeenPlanOnboarding: data.hasSeenPlanOnboarding || false,
+          // Lo lee Planes para no lanzar su mini-onboarding encima del tour.
+          // Estaba solo en el documento crudo que se trae Inicio; el perfil
+          // del store no lo exponia, asi que ninguna otra pantalla podia
+          // saber si el tour ya habia pasado.
+          hasSeenTour: data.hasSeenTour || false,
           onboardingCompleted: data.onboardingCompleted || false,
           averageGrade: data.profile?.averageGrade || 0,
           // The estimate shown at the end of onboarding, brought back so
@@ -875,6 +886,39 @@ const useUserStore = create((set, get) => ({
     } catch (error) {
       console.error('Error in removeSubject action:', error);
       throw error;
+    }
+  },
+
+  /**
+   * Guarda las respuestas del mini-onboarding de Planes y regenera el plan.
+   *
+   * Se llama al terminar la tercera pregunta, no al final del flujo: los dos
+   * pasos que quedan mandan al alumno a otra pantalla y puede no volver. Lo
+   * que mueve el algoritmo se guarda antes de que exista esa posibilidad.
+   *
+   * `markSeen` solo se pone al llegar al final, para que abandonar a medias no
+   * cuente como haberlo visto.
+   */
+  savePlanSurvey: async (uid, survey, { markSeen = false } = {}) => {
+    const { profile } = get();
+    const fields = {};
+    // `null` significa "solo marcar como visto". Sin esta guarda, cerrar el
+    // flujo desde el ultimo paso escribia un objeto vacio encima y borraba las
+    // tres respuestas que se habian guardado dos pasos antes.
+    if (survey && Object.keys(survey).length > 0) fields.planSurvey = survey;
+    if (markSeen) fields.hasSeenPlanOnboarding = true;
+    if (Object.keys(fields).length === 0) return true;
+
+    set({ profile: { ...(profile || {}), ...fields } });
+    try {
+      if (uid) await updateDoc(doc(db, 'users', uid), fields);
+      // El presupuesto y la presion acaban de cambiar, asi que el plan que hay
+      // en pantalla ya no corresponde a estas respuestas.
+      if (uid) await get().initDailyMicroplans(uid, true);
+      return true;
+    } catch (error) {
+      console.error('Error saving the plan survey:', error);
+      return false;
     }
   },
 

@@ -19,7 +19,8 @@
     "check:widgets": "node scripts/check-widgets.mjs",
     "prepare": "husky",
     "check:streak-rules": "node scripts/check-streak-rules.mjs",
-    "check:subject-colors": "node scripts/check-subject-colors.mjs"
+    "check:subject-colors": "node scripts/check-subject-colors.mjs",
+    "check:plan-profile": "node scripts/check-plan-profile.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

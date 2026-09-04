@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import PlanOnboarding from '../../components/PlanOnboarding';
 import {
   Plus,
   Clock,
@@ -703,6 +704,19 @@ export default function PlansScreen() {
   const subjects = useUserStore((state) => state.subjects);
   const planDiagnostics = useUserStore((state) => state.planDiagnostics);
   const profile = useUserStore((state) => state.profile);
+
+  /**
+   * La primera entrada a Planes pregunta tres cosas antes de ensenar nada.
+   *
+   * Va DETRAS del tour a proposito: los dos se lanzan sobre una cuenta recien
+   * hecha y encadenarlos sin condicion los pisaria. Y se corta en cuanto el
+   * perfil dice que ya se vio, con un estado local ademas del campo guardado
+   * para que la pantalla cambie en el momento y no cuando Firestore conteste.
+   */
+  const [planOnboardingDone, setPlanOnboardingDone] = useState(false);
+  const showPlanOnboarding =
+    !planOnboardingDone && !!profile?.hasSeenTour && !profile?.hasSeenPlanOnboarding;
+
   // No hay una lista de exámenes compartida en el store (cada pantalla la pide
   // por su cuenta, igual que hace Inicio o Perfil); este contador es la señal
   // para volver a pedirla cuando algo la cambia en otro sitio.
@@ -1320,6 +1334,29 @@ export default function PlansScreen() {
       )}
     </View>
   );
+
+  if (showPlanOnboarding) {
+    return (
+      <PlanOnboarding
+        // Se guarda al cerrar la tercera pregunta (`done: false`) y otra vez al
+        // llegar al final. Marcar "visto" solo en el segundo caso es lo que
+        // hace que abandonar a medias no cuente como haberlo pasado.
+        onFinish={(answers, { done }) => {
+          useUserStore.getState().savePlanSurvey(user?.uid, answers, { markSeen: done });
+          if (done) setPlanOnboardingDone(true);
+        }}
+        onOpenStreak={() => router.push('/dashboard/streak')}
+        // Irse a poner objetivos cierra el flujo: ya no queda ningun paso
+        // detras, y volver de Perfil para ver una pantalla de "listo" seria
+        // hacerle dar un rodeo para nada.
+        onOpenSubjects={() => {
+          useUserStore.getState().savePlanSurvey(user?.uid, null, { markSeen: true });
+          setPlanOnboardingDone(true);
+          router.push('/dashboard/profile');
+        }}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>

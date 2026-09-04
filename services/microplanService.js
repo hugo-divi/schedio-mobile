@@ -8,6 +8,7 @@ import {
   MIN_SESSION_MINUTES,
 } from './priority';
 import { inferExamFormat, pickTaskText, taskHandInText } from './taskCopy';
+import { maxDayMinutesFor, normalDayMinutesFor, pressureStepsFor } from './planProfile';
 
 /**
  * Study plan generation.
@@ -232,9 +233,17 @@ export const PRESSURE_STEPS = [
   { within: 7, factor: 1.25 },
 ];
 
-export const pressureFactor = (daysToNearestExam) => {
+/**
+ * Cuanto se multiplica el presupuesto del dia por tener un examen encima.
+ *
+ * Los escalones ya no son siempre los mismos: el mini-onboarding de Planes
+ * pregunta cuanto le dedicaria el alumno a un examen importante, y de ahi sale
+ * su curva (services/planProfile.js). Quien no haya contestado se queda con
+ * `PRESSURE_STEPS`, que es la de siempre.
+ */
+export const pressureFactor = (daysToNearestExam, steps = PRESSURE_STEPS) => {
   if (!Number.isFinite(daysToNearestExam)) return 1;
-  const step = PRESSURE_STEPS.find((s) => daysToNearestExam <= s.within);
+  const step = steps.find((s) => daysToNearestExam <= s.within);
   return step ? step.factor : 1;
 };
 /** Sessions needed before observed history outweighs the self-report. */
@@ -372,8 +381,13 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
  * to answer with yet.
  */
 export const estimateDailyCapacity = ({ profile, completions, now = new Date() } = {}) => {
+  // Lo que el alumno DIJO que estudia un dia normal, si se lo hemos
+  // preguntado. `CAPACITY_BY_ORGANIZATION` era una tabla que convertia a ojo
+  // una pregunta sobre habitos ("¿llevas tus tareas apuntadas?") en minutos;
+  // preguntarlo directamente mide lo que hace falta medir. Se queda de reserva
+  // para las cuentas anteriores a esa pregunta.
   const level = clamp(Math.round(Number(profile?.organizationLevel) || 3), 1, 5);
-  const selfReported = CAPACITY_BY_ORGANIZATION[level];
+  const selfReported = normalDayMinutesFor(profile?.planSurvey) ?? CAPACITY_BY_ORGANIZATION[level];
 
   const recent = (Array.isArray(completions) ? completions : []).filter((entry) => {
     const date = toDate(entry?.date);
@@ -504,6 +518,11 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
   const leadDays = level.leadDays;
   const preferredBlock = clamp(level.block, MIN_BLOCK_MINUTES, MAX_BLOCK_MINUTES);
   const gamma = gammaFor(profile?.reviewFrequency);
+  // Techo del dia y curva de presion, del mini-onboarding de Planes si el
+  // alumno lo ha contestado. Quien no lo haya hecho se queda exactamente con
+  // los valores fijos de antes, que es lo que devuelven estas dos por defecto.
+  const hardDailyCap = maxDayMinutesFor(profile?.planSurvey, HARD_DAILY_CAP_MINUTES);
+  const pressureSteps = pressureStepsFor(profile?.planSurvey, PRESSURE_STEPS);
 
   diagnostics.level = profile?.course || DEFAULT_LEVEL;
   diagnostics.preferredBlock = preferredBlock;
@@ -615,8 +634,8 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     // Capacity for *this* day: the base budget eased by how long the current run
     // of study days has been, and never above the absolute daily ceiling.
     const ease = fatigueFactor(consecutiveStudyDays);
-    const push = pressureFactor(nearestExamDays);
-    const dayCapacity = Math.min(Math.round(dailyCapacity * ease * push), HARD_DAILY_CAP_MINUTES);
+    const push = pressureFactor(nearestExamDays, pressureSteps);
+    const dayCapacity = Math.min(Math.round(dailyCapacity * ease * push), hardDailyCap);
     if (ease < 1) diagnostics.easedDays.push(dateKey);
 
     let budgetLeft = dayCapacity;
@@ -642,7 +661,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         // Panic ignores the daily budget — the exam is in two days — but never the
         // absolute ceiling. Without this second check, each panic exam took its own
         // block regardless of how many other panic exams shared the day.
-        if (placedMinutes + MIN_BLOCK_MINUTES > HARD_DAILY_CAP_MINUTES) {
+        if (placedMinutes + MIN_BLOCK_MINUTES > hardDailyCap) {
           if (!diagnostics.cappedDays.includes(dateKey)) diagnostics.cappedDays.push(dateKey);
           return;
         }
@@ -669,7 +688,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
         const target = Math.min(preferredBlock, item.remaining);
         const allowance = isPanic ? MAX_BLOCK_MINUTES : Math.min(target, budgetLeft);
-        const roomLeft = HARD_DAILY_CAP_MINUTES - placedMinutes;
+        const roomLeft = hardDailyCap - placedMinutes;
         const raw = roundTo5(Math.min(target, allowance, roomLeft));
 
         // No session below the floor. `Math.max(5, …)` let a scrap through as a

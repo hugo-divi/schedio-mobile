@@ -24,12 +24,13 @@ import { fileURLToPath } from 'node:url';
 
 const services = join(dirname(fileURLToPath(import.meta.url)), '..', 'services');
 const here = mkdtempSync(join(tmpdir(), 'schedio-check-'));
-for (const name of ['priority', 'taskCopy', 'microplanService']) {
+for (const name of ['priority', 'taskCopy', 'planProfile', 'microplanService']) {
   writeFileSync(
     join(here, `${name}.mjs`),
     readFileSync(join(services, `${name}.js`), 'utf8')
       .replace(/from '\.\/priority'/g, "from './priority.mjs'")
       .replace(/from '\.\/taskCopy'/g, "from './taskCopy.mjs'")
+      .replace(/from '\.\/planProfile'/g, "from './planProfile.mjs'")
   );
 }
 const load = (name) => import(`file://${join(here, name)}`);
