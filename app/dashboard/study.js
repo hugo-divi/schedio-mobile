@@ -1477,10 +1477,6 @@ export default function StudySessionScreen() {
       contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
       showsVerticalScrollIndicator={false}
     >
-      <Animated.View entering={FadeInDown.duration(320)}>
-        <Text style={styles.screenTitle}>Clase</Text>
-      </Animated.View>
-
       {/* Materia */}
       <View style={styles.section}>
         <SectionTitle>Materia</SectionTitle>
@@ -1560,11 +1556,14 @@ export default function StudySessionScreen() {
           short, and keeps a clear gap when it isn't. */}
       <View style={styles.bottomSpacer} />
 
+      {/* KeyboardAwareScrollView drives the content's paddingBottom, so the
+          gap that keeps this button off the tab bar lives on the button. */}
       <Button
         title="Comenzar sesión"
         onPress={handleStartPress}
         disabled={!selectedSubject}
         fullWidth
+        style={styles.startButton}
       />
     </KeyboardAwareScrollView>
   );
@@ -1950,14 +1949,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 40,
   },
-
-  // Setup header
-  screenTitle: {
-    fontFamily: font.bold,
-    fontSize: tokens.typography.screenTitle.size,
-    color: tokens.colors.textPrimary,
-    marginBottom: 4,
+  startButton: {
+    marginBottom: 24,
   },
+
   section: {
     marginTop: tokens.spacing.sectionGapMin,
     marginBottom: 0,
