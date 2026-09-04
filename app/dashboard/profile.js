@@ -829,28 +829,6 @@ export default function ProfileScreen() {
             onPress={() => router.push('/dashboard/ranks')}
           />
 
-          {/* Course and region were answered once in onboarding and then locked
-              away forever, even though both change (you pass a year, you move)
-              and both steer the planner. */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={openAcademic}
-            accessibilityRole="button"
-            accessibilityLabel="Editar tus datos académicos"
-          >
-            <Card padding={16}>
-              <View style={styles.academicHead}>
-                <Text style={styles.academicTitle}>Datos académicos</Text>
-                <Pencil size={15} color={tokens.colors.textSecondary} />
-              </View>
-              <Text style={styles.academicValue}>
-                {profile?.course || 'Sin curso'}
-                {' · '}
-                {regionLabelFor(profile?.region) || 'Sin comunidad'}
-              </Text>
-            </Card>
-          </TouchableOpacity>
-
           {/* Stats */}
           <View style={styles.statsRow}>
             <StatTile value={profile?.averageGrade || '—'} label="Promedio" />
@@ -955,6 +933,30 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
+
+          {/* Course and region were answered once in onboarding and then locked
+              away forever, even though both change (you pass a year, you move)
+              and both steer the planner. Sits just above Notes now — pulled up
+              from beside the level card, where it outranked sections students
+              actually come back to. */}
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={openAcademic}
+            accessibilityRole="button"
+            accessibilityLabel="Editar tus datos académicos"
+          >
+            <Card padding={16}>
+              <View style={styles.academicHead}>
+                <Text style={styles.academicTitle}>Datos académicos</Text>
+                <Pencil size={15} color={tokens.colors.textSecondary} />
+              </View>
+              <Text style={styles.academicValue}>
+                {profile?.course || 'Sin curso'}
+                {' · '}
+                {regionLabelFor(profile?.region) || 'Sin comunidad'}
+              </Text>
+            </Card>
+          </TouchableOpacity>
 
           {/* Notes */}
           <View>
