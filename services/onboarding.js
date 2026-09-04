@@ -243,12 +243,17 @@ export const estimatePotential = ({
   // (still capped at the ceiling and at 10, so this never produces an
   // impossible number, only a less timid one).
   //
-  // Raised from 0,2 to 0,45 on a second pass, which moves the top of the
-  // range 0,2–0,3 across the realistic band: a 5 goes from 6,7 to 7,0 and the
-  // 6,5 of the worked example from 7,8 to 8,0. The ceiling still binds where
-  // it should — a 9,4 doesn't move at all, because 60% of the gap it has left
-  // is all this is ever allowed to promise.
-  const BOOST = 0.45;
+  // Tercera pasada: de 0,45 a 0,75. Medido sobre los 192 casos de la banda
+  // realista (notas de 4 a 9,4 × las cuatro respuestas de organización × las
+  // cuatro de repaso), eso sube el alto del rango **0,22 de media, 0,30 como
+  // mucho** — dentro de las dos o tres décimas que se pedían, y sin que ningún
+  // caso se pase. Con 0,8 algunos llegaban a 0,40, ya fuera de rango.
+  //
+  // Los topes siguen mandando y son los que hacen que esto sea honesto: 41 de
+  // los 192 casos no se mueven ni una décima porque ya están contra el techo.
+  // Un 9,4 sigue dando 9,6–9,8 exactamente igual que antes, porque el 60% del
+  // hueco que le queda es todo lo que esto puede prometer jamás.
+  const BOOST = 0.75;
 
   const round = (n) => Math.round(Math.min(10, Math.min(ceiling, n)) * 10) / 10;
   let low = round(grade + gain * 0.7 + BOOST);
