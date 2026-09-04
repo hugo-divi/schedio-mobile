@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   StyleSheet,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -151,7 +152,25 @@ function StatTile({ value, label, accent = false }) {
  * El tic de "objetivo alcanzado" es verde y va en la esquina, no en el color
  * de la materia: Química ya es verde, así que el color no puede ser la señal.
  */
-function SubjectTile({ subject, onPress, index = 0 }) {
+/**
+ * Ancho de una ficha de materia.
+ *
+ * Se calcula en pixeles en vez de dejarlo en `width: '48%'` + `flexGrow`, que
+ * es lo que habia y salia mal: las fichas se repartian de tres en tres y tan
+ * estrechas que no cabia ni el nombre. Con `flexWrap` un porcentaje solo
+ * decide en que linea cae cada elemento, y el `flexGrow` volvia a repartir
+ * despues el sobrante entre las que hubieran entrado.
+ *
+ * `body` en esta pantalla tiene 20 de padding a cada lado y la cuadricula 12
+ * de hueco, asi que dos columnas salen de restar eso y partir por dos. Es
+ * aritmetica cerrada: no depende de que el padre resuelva un porcentaje.
+ */
+const BODY_PADDING = 20;
+const SUBJECT_GRID_GAP = 12;
+export const subjectTileWidth = (screenWidth) =>
+  (screenWidth - BODY_PADDING * 2 - SUBJECT_GRID_GAP) / 2;
+
+function SubjectTile({ subject, onPress, index = 0, width }) {
   const color = subject.color || SUBJECT_FALLBACK_COLOR;
   const average = Number(subject.average);
   const hasAverage = Number.isFinite(average) && average > 0;
@@ -164,7 +183,10 @@ function SubjectTile({ subject, onPress, index = 0 }) {
     // Staggered rather than all at once: the grid used to appear as a single
     // block, which reads as a screenshot instead of a screen being built.
     // Capped at 6 so a student with twenty subjects isn't waiting on a queue.
-    <Animated.View entering={FadeInDown.duration(320).delay(Math.min(index, 6) * 45)}>
+    <Animated.View
+      style={{ width }}
+      entering={FadeInDown.duration(320).delay(Math.min(index, 6) * 45)}
+    >
       <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.subjectTile}>
         {reached ? (
           <View style={styles.subjectReached}>
@@ -372,6 +394,8 @@ function BadgeStrip({ unlockedIds, onPress }) {
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const tileWidth = subjectTileWidth(screenWidth);
   const user = useAuthStore((state) => state.user);
   const isPrime = useAuthStore((state) => state.isPrime);
   // Prime's 20-subject cap needs more than the free eight tones, or two
@@ -920,6 +944,7 @@ export default function ProfileScreen() {
                     key={subject.id}
                     subject={subject}
                     index={index}
+                    width={tileWidth}
                     onPress={() => openSubject(subject)}
                   />
                 ))}
@@ -1803,7 +1828,7 @@ const styles = StyleSheet.create({
   difficultyOption: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: tokens.radius.button,
+    borderRadius: tokens.radius.btn,
     backgroundColor: tokens.colors.surfaceHover,
     borderWidth: 1,
     borderColor: 'transparent',
@@ -1831,8 +1856,8 @@ const styles = StyleSheet.create({
   // Vertical, no en fila: la ficha ya no lleva solo un número, lleva la media,
   // el objetivo y la barra entre los dos, y en fila no caben sin apretarse.
   subjectTile: {
-    width: '48%',
-    flexGrow: 1,
+    // El ancho lo pone el componente con subjectTileWidth(); aqui solo va lo
+    // que no depende de la pantalla.
     padding: 14,
     backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
