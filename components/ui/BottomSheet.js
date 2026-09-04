@@ -133,7 +133,14 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
       showSub.remove();
       hideSub.remove();
     };
-  }, [visible, insets.bottom, insets.top, keyboardShift]);
+    // insets.bottom/insets.top deliberately left out of the deps: Android's
+    // edge-to-edge safe-area recalculates them while the IME is open, and
+    // depending on them re-ran this effect mid-keyboard-session — detaching
+    // and reattaching the listeners, with a real chance of missing whichever
+    // show/hide event lands in that gap. The insets at the moment the sheet
+    // opens are what this needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, keyboardShift]);
 
   // Animate out, then let the parent unmount us.
   const dismiss = useCallback(() => {

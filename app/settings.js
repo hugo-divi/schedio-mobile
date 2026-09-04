@@ -249,7 +249,17 @@ export default function SettingsScreen() {
       hide.remove();
       setDeleteKbShift(0);
     };
-  }, [deleteOpen, insets.bottom]);
+    // insets.bottom deliberately left out of the deps. Android's edge-to-edge
+    // safe-area recalculates the bottom inset while the IME is open, and
+    // having it here re-ran this effect mid-keyboard-session: the cleanup
+    // tore the listeners down and reset the shift to 0 (the card snapped back
+    // onto the keyboard), then the new listeners only fire on the *next*
+    // show/hide — which never came until the dialog was closed and reopened.
+    // The password field was still focused underneath the keyboard the whole
+    // time, unreachable to type into. The inset at the moment the dialog opens
+    // is what this needs; it doesn't have to track a mid-session change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deleteOpen]);
 
   // Prime already has a place to go (Google Play's own subscription
   // management) — sending them back to the sales paywall would be a dead end.
