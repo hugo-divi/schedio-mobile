@@ -181,8 +181,16 @@ export default function Dashboard() {
       // placeholders while it does read as the tab being slow.
       if (!refreshing && !lastFetchRef.current) setLoading(true);
 
-      // Fetch user profile
-      const profileDoc = await getDoc(doc(db, 'users', user.uid));
+      // One wave instead of two: the profile document, the streak and the two
+      // exam views all go out together. `checkDailyStreak` writes only to
+      // streaks/{uid}, so nothing here reads a document another of these calls
+      // is writing, and the order they resolve in never mattered.
+      const [profileDoc, streakData, examsData, pendingExamsData] = await Promise.all([
+        getDoc(doc(db, 'users', user.uid)),
+        checkDailyStreak(user.uid),
+        getUpcomingExams(user.uid, 20),
+        getPendingExams(user.uid),
+      ]);
       const profileData = profileDoc.exists() ? profileDoc.data() : null;
       setProfile(profileData);
 
@@ -193,14 +201,9 @@ export default function Dashboard() {
         registerForPushNotifications(user.uid);
       }
 
-      const [streakData, examsData, pendingExamsData] = await Promise.all([
-        checkDailyStreak(user.uid),
-        getUpcomingExams(user.uid, 20),
-        getPendingExams(user.uid),
-      ]);
-
-      // Load subjects and user details via store
-      await useUserStore.getState().loadUserData(user.uid);
+      // Load subjects and user details via store, reusing the snapshot just
+      // read instead of fetching users/{uid} a second time.
+      await useUserStore.getState().loadUserData(user.uid, profileDoc);
 
       setUserData({
         streak: streakData.currentStreak || 0,

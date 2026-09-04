@@ -139,13 +139,19 @@ const initialState = {
 const useUserStore = create((set, get) => ({
   ...initialState,
 
-  loadUserData: async (uid) => {
+  loadUserData: async (uid, preloadedUserSnap = null) => {
     set({ loading: true, error: null });
     try {
       // Independent reads — awaiting them in sequence cost a round trip on
       // every cold start.
       const userRef = doc(db, 'users', uid);
-      const [subjectsData, userSnap] = await Promise.all([getUserSubjects(uid), getDoc(userRef)]);
+      // The dashboard has already read users/{uid} for its own header, so it
+      // hands that snapshot in rather than making this fetch the same document
+      // a second time. Every other caller omits it and the read happens here.
+      const [subjectsData, userSnap] = await Promise.all([
+        getUserSubjects(uid),
+        preloadedUserSnap ?? getDoc(userRef),
+      ]);
 
       let profileData = null;
       let statsData = initialState.stats;
@@ -207,20 +213,25 @@ const useUserStore = create((set, get) => ({
         });
       }
 
-      // Load Resources
-      try {
-        const resourcesRef = collection(db, 'users', uid, 'resources');
-        // Sin orderBy, Firestore devolvia 50 documentos por ID: con mas de 50
-        // materiales el alumno veia 50 al azar y el resto desaparecia de la
-        // Mochila sin aviso. Ahora salen los mas recientes primero.
-        const resourcesSnap = await getDocs(
-          query(resourcesRef, orderBy('createdAt', 'desc'), limit(MAX_RESOURCES_LOADED))
-        );
-        const resources = resourcesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        set({ resources });
-      } catch {
-        // Silently fail if resources subcollection isn't accessible or doesn't exist
-      }
+      // Load Resources — off this function's promise on purpose. They feed only
+      // the Mochila (plans.js), which reads `resources` from the store
+      // reactively, so nothing that awaits loadUserData needs them. Awaiting the
+      // read here held the dashboard skeleton (gated on `loading`) behind up to
+      // MAX_RESOURCES_LOADED docs that screen never renders.
+      (async () => {
+        try {
+          const resourcesRef = collection(db, 'users', uid, 'resources');
+          // Sin orderBy, Firestore devolvia 50 documentos por ID: con mas de 50
+          // materiales el alumno veia 50 al azar y el resto desaparecia de la
+          // Mochila sin aviso. Ahora salen los mas recientes primero.
+          const resourcesSnap = await getDocs(
+            query(resourcesRef, orderBy('createdAt', 'desc'), limit(MAX_RESOURCES_LOADED))
+          );
+          set({ resources: resourcesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) });
+        } catch {
+          // Silently fail if resources subcollection isn't accessible or doesn't exist
+        }
+      })();
     } catch (error) {
       logger.error('Error loading user data:', error);
       set({ error: error.message, loading: false });
