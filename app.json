@@ -9,11 +9,6 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "jsEngine": "hermes",
-    "splash": {
-      "image": "./assets/splash-mark.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#191919"
-    },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -54,6 +49,15 @@
     },
     "owner": "divi_8",
     "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/schedio-mark-white.png",
+          "imageWidth": 52,
+          "resizeMode": "contain",
+          "backgroundColor": "#191919"
+        }
+      ],
       [
         "expo-build-properties",
         {

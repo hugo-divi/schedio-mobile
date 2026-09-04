@@ -20,6 +20,18 @@ const MARK_WHITE = require('../assets/images/schedio-mark-white.png');
 const MARK_W = 511;
 const MARK_H = 488;
 
+/**
+ * Width of the mark, in dp.
+ *
+ * MUST stay equal to `imageWidth` in app.json's `expo-splash-screen` plugin
+ * config — that is the whole point of it being a fixed number rather than a
+ * share of the screen's width. The native splash draws its icon at an absolute
+ * dp size, so a proportional mark here would line up on one phone width and be
+ * visibly wrong on every other, and the handover between the two would show as
+ * the mark jumping size. Change one, change the other.
+ */
+const MARK_SIZE = 52;
+
 const EASE = Easing.bezier(...tokens.animations.primary);
 const EASE_OUT = Easing.out(Easing.cubic);
 // The exit accelerates instead of easing out — it is leaving, not arriving.
@@ -98,11 +110,7 @@ const DIVIDER_W = 32;
 export default function SchedioSplash({ ready, onShown, onFinish }) {
   const { width, height } = useWindowDimensions();
 
-  // 13% of the screen's width, measured off the design. Clamped so a tablet
-  // doesn't render a 120pt mark — the phone sizes this design was drawn for
-  // never reach either bound.
-  const markW = Math.min(96, Math.max(48, Math.round(width * 0.13)));
-  const markH = Math.round((markW * MARK_H) / MARK_W);
+  const markH = Math.round((MARK_SIZE * MARK_H) / MARK_W);
   const glowSize = Math.round(width * 0.62);
 
   // Resolved before anything starts: `null` means we don't know yet, and a few
@@ -290,7 +298,7 @@ export default function SchedioSplash({ ready, onShown, onFinish }) {
       )}
 
       <View style={styles.column} onLayout={onMeasure}>
-        <Animated.View style={[{ width: markW, height: markH }, logoStyle]}>
+        <Animated.View style={[{ width: MARK_SIZE, height: markH }, logoStyle]}>
           <Animated.View
             pointerEvents="none"
             style={[
@@ -298,7 +306,7 @@ export default function SchedioSplash({ ready, onShown, onFinish }) {
               {
                 width: glowSize,
                 height: glowSize,
-                left: (markW - glowSize) / 2,
+                left: (MARK_SIZE - glowSize) / 2,
                 top: (markH - glowSize) / 2,
               },
               glowStyle,
@@ -324,7 +332,11 @@ export default function SchedioSplash({ ready, onShown, onFinish }) {
             </Svg>
           </Animated.View>
 
-          <Image source={MARK_WHITE} style={{ width: markW, height: markH }} resizeMode="contain" />
+          <Image
+            source={MARK_WHITE}
+            style={{ width: MARK_SIZE, height: markH }}
+            resizeMode="contain"
+          />
         </Animated.View>
 
         {/* Both of these hold their space from the first frame. They only fade
