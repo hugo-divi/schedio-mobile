@@ -10,6 +10,8 @@ import {
   StyleSheet,
   Linking,
   AppState,
+  Keyboard,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -224,12 +226,30 @@ export default function SettingsScreen() {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  // The delete dialog is a plain Modal (its own window), so Android's
+  // adjustResize never reaches it — without this the keyboard covers the
+  // password field and the "Eliminar" button. Nudge the card clear of it.
+  const [deleteKbShift, setDeleteKbShift] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [notificationsSheet, setNotificationsSheet] = useState(false);
 
   const showAlert = (config) => setAlertConfig({ ...config, visible: true });
   const closeAlert = () => setAlertConfig((prev) => ({ ...prev, visible: false }));
+
+  useEffect(() => {
+    if (!deleteOpen || Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (event) => {
+      const height = event?.endCoordinates?.height ?? 0;
+      setDeleteKbShift(Math.max(0, height - insets.bottom - 24));
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setDeleteKbShift(0));
+    return () => {
+      show.remove();
+      hide.remove();
+      setDeleteKbShift(0);
+    };
+  }, [deleteOpen, insets.bottom]);
 
   // Prime already has a place to go (Google Play's own subscription
   // management) — sending them back to the sales paywall would be a dead end.
@@ -590,7 +610,12 @@ export default function SettingsScreen() {
         onRequestClose={() => !deleting && setDeleteOpen(false)}
       >
         <View style={styles.deleteOverlay}>
-          <View style={styles.deleteCard}>
+          <View
+            style={[
+              styles.deleteCard,
+              deleteKbShift ? { transform: [{ translateY: -deleteKbShift }] } : null,
+            ]}
+          >
             <View style={styles.deleteIcon}>
               <Trash2 size={26} color={tokens.colors.danger} strokeWidth={1.75} />
             </View>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   TextInput,
   Platform,
+  Keyboard,
   KeyboardAvoidingView,
   ActivityIndicator,
   AccessibilityInfo,
@@ -227,6 +228,25 @@ export default function Onboarding() {
   const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
 
   const { width } = useWindowDimensions();
+
+  // Expo's edge-to-edge stops Android's `adjustResize` from shrinking the JS
+  // layout, so a field low on a step (the grade on step 1) was left under the
+  // keyboard. Track it and make room ourselves, then scroll the field up.
+  const scrollRef = useRef(null);
+  const [keyboardPad, setKeyboardPad] = useState(0);
+
+  useEffect(() => {
+    // iOS is already handled by the KeyboardAvoidingView below.
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardPad(Math.max(0, (event?.endCoordinates?.height ?? 0) - insets.bottom));
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => setKeyboardPad(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom]);
 
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -649,6 +669,9 @@ export default function Onboarding() {
                 onChangeText={setCurrentGrade}
                 placeholder="Ej. 6,5"
                 keyboardType="decimal-pad"
+                onFocus={() =>
+                  setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 150)
+                }
               />
               {gradeError ? <Text style={styles.error}>{gradeError}</Text> : null}
               <Text style={styles.hint}>
@@ -1112,7 +1135,8 @@ export default function Onboarding() {
         style={styles.flex}
       >
         <ScrollView
-          contentContainerStyle={styles.content}
+          ref={scrollRef}
+          contentContainerStyle={[styles.content, { paddingBottom: 32 + keyboardPad }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -1123,7 +1147,9 @@ export default function Onboarding() {
           <Animated.View style={slideStyle}>{renderStep()}</Animated.View>
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+        <View
+          style={[styles.footer, { paddingBottom: insets.bottom + 16, marginBottom: keyboardPad }]}
+        >
           <Button
             title={step === TOTAL_STEPS ? 'Completar' : 'Siguiente'}
             fullWidth

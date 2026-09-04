@@ -24,6 +24,7 @@ export function Input({
   textContentType,
   returnKeyType,
   onSubmitEditing,
+  onFocus,
   editable = true,
   style,
 }) {
@@ -49,7 +50,10 @@ export function Input({
           returnKeyType={returnKeyType}
           onSubmitEditing={onSubmitEditing}
           editable={editable}
-          onFocus={() => setFocused(true)}
+          onFocus={(e) => {
+            setFocused(true);
+            onFocus?.(e);
+          }}
           onBlur={() => setFocused(false)}
         />
         {secure ? (

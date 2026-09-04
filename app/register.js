@@ -1,13 +1,5 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  Platform,
-  ScrollView,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Platform, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
@@ -26,6 +18,7 @@ import { tokens } from '../theme/tokens';
 import { openLegal } from '../constants/legal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import KeyboardAwareScrollView from '../components/ui/KeyboardAwareScrollView';
 import { GoogleMark, OrDivider } from '../components/ui/SocialAuth';
 
 const font = tokens.typography.families.inter;
@@ -115,135 +108,130 @@ export default function Register() {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         style={styles.flex}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Animated.Text entering={FadeInDown.duration(300).delay(70)} style={styles.title}>
-            Crea tu cuenta
-          </Animated.Text>
-          <Animated.Text entering={FadeInDown.duration(300).delay(110)} style={styles.subtitle}>
-            Empieza a organizar tu estudio hoy
-          </Animated.Text>
+        <Animated.Text entering={FadeInDown.duration(300).delay(70)} style={styles.title}>
+          Crea tu cuenta
+        </Animated.Text>
+        <Animated.Text entering={FadeInDown.duration(300).delay(110)} style={styles.subtitle}>
+          Empieza a organizar tu estudio hoy
+        </Animated.Text>
 
-          {error ? (
-            <Animated.View entering={FadeIn.duration(200)} style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </Animated.View>
-          ) : null}
-
-          <Animated.View entering={FadeInDown.duration(300).delay(180)}>
-            <Input
-              label="Nombre completo"
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="Tu nombre"
-              autoCapitalize="words"
-              autoComplete="name"
-              textContentType="name"
-              editable={!loading}
-            />
+        {error ? (
+          <Animated.View entering={FadeIn.duration(200)} style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
           </Animated.View>
+        ) : null}
 
-          <Animated.View entering={FadeInDown.duration(300).delay(250)} style={{ marginTop: 16 }}>
-            <Input
-              label="Correo electrónico"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="tucorreo@ejemplo.com"
-              keyboardType="email-address"
-              autoComplete="email"
-              textContentType="emailAddress"
-              editable={!loading}
-            />
-          </Animated.View>
+        <Animated.View entering={FadeInDown.duration(300).delay(180)}>
+          <Input
+            label="Nombre completo"
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder="Tu nombre"
+            autoCapitalize="words"
+            autoComplete="name"
+            textContentType="name"
+            editable={!loading}
+          />
+        </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(320)} style={{ marginTop: 16 }}>
-            <Input
-              label="Contraseña"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              secure
-              autoComplete="new-password"
-              textContentType="newPassword"
-              editable={!loading}
-            />
-            <Text style={styles.hint}>Mínimo {MIN_PASSWORD} caracteres.</Text>
-          </Animated.View>
+        <Animated.View entering={FadeInDown.duration(300).delay(250)} style={{ marginTop: 16 }}>
+          <Input
+            label="Correo electrónico"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="tucorreo@ejemplo.com"
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+            editable={!loading}
+          />
+        </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(360)} style={{ marginTop: 16 }}>
-            <Input
-              label="Repite la contraseña"
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="••••••••"
-              secure
-              autoComplete="new-password"
-              textContentType="newPassword"
-              returnKeyType="go"
-              onSubmitEditing={handleRegister}
-              editable={!loading}
-            />
-          </Animated.View>
+        <Animated.View entering={FadeInDown.duration(300).delay(320)} style={{ marginTop: 16 }}>
+          <Input
+            label="Contraseña"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            secure
+            autoComplete="new-password"
+            textContentType="newPassword"
+            editable={!loading}
+          />
+          <Text style={styles.hint}>Mínimo {MIN_PASSWORD} caracteres.</Text>
+        </Animated.View>
 
-          {/* Checkpoint 1, item 4: the policies have to be linked from
+        <Animated.View entering={FadeInDown.duration(300).delay(360)} style={{ marginTop: 16 }}>
+          <Input
+            label="Repite la contraseña"
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            placeholder="••••••••"
+            secure
+            autoComplete="new-password"
+            textContentType="newPassword"
+            returnKeyType="go"
+            onSubmitEditing={handleRegister}
+            editable={!loading}
+          />
+        </Animated.View>
+
+        {/* Checkpoint 1, item 4: the policies have to be linked from
               registration. The URLs live in constants/legal.js and are still
               blank because the documents themselves aren't written yet. */}
-          <Animated.Text entering={FadeInDown.duration(300).delay(390)} style={styles.legal}>
-            Al registrarte, aceptas los{' '}
-            <Text style={styles.legalLink} onPress={() => openLegal('terms')}>
-              Términos de servicio
-            </Text>{' '}
-            y la{' '}
-            <Text style={styles.legalLink} onPress={() => openLegal('privacy')}>
-              Política de privacidad
-            </Text>
-            .
-          </Animated.Text>
+        <Animated.Text entering={FadeInDown.duration(300).delay(390)} style={styles.legal}>
+          Al registrarte, aceptas los{' '}
+          <Text style={styles.legalLink} onPress={() => openLegal('terms')}>
+            Términos de servicio
+          </Text>{' '}
+          y la{' '}
+          <Text style={styles.legalLink} onPress={() => openLegal('privacy')}>
+            Política de privacidad
+          </Text>
+          .
+        </Animated.Text>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(460)} style={{ marginTop: 24 }}>
-            <Button
-              title="Crear cuenta"
-              fullWidth
-              loading={loading}
-              disabled={!canSubmit}
-              onPress={handleRegister}
-            />
-          </Animated.View>
+        <Animated.View entering={FadeInDown.duration(300).delay(460)} style={{ marginTop: 24 }}>
+          <Button
+            title="Crear cuenta"
+            fullWidth
+            loading={loading}
+            disabled={!canSubmit}
+            onPress={handleRegister}
+          />
+        </Animated.View>
 
-          {GOOGLE_SIGNIN_ENABLED && (
-            <>
-              <Animated.View entering={FadeInDown.duration(300).delay(540)}>
-                <OrDivider />
-              </Animated.View>
+        {GOOGLE_SIGNIN_ENABLED && (
+          <>
+            <Animated.View entering={FadeInDown.duration(300).delay(540)}>
+              <OrDivider />
+            </Animated.View>
 
-              <Animated.View entering={FadeInDown.duration(300).delay(600)}>
-                <Button
-                  title="Continuar con Google"
-                  variant="secondary"
-                  fullWidth
-                  disabled={loading}
-                  icon={<GoogleMark />}
-                  onPress={handleGoogleSignUp}
-                />
-              </Animated.View>
-            </>
-          )}
+            <Animated.View entering={FadeInDown.duration(300).delay(600)}>
+              <Button
+                title="Continuar con Google"
+                variant="secondary"
+                fullWidth
+                disabled={loading}
+                icon={<GoogleMark />}
+                onPress={handleGoogleSignUp}
+              />
+            </Animated.View>
+          </>
+        )}
 
-          <Animated.View entering={FadeInDown.duration(300).delay(670)} style={styles.footer}>
-            <Text style={styles.footerText}>¿Ya tienes cuenta? </Text>
-            <TouchableOpacity onPress={() => router.replace('/login')} disabled={loading}>
-              <Text style={styles.footerLink}>Inicia sesión</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <Animated.View entering={FadeInDown.duration(300).delay(670)} style={styles.footer}>
+          <Text style={styles.footerText}>¿Ya tienes cuenta? </Text>
+          <TouchableOpacity onPress={() => router.replace('/login')} disabled={loading}>
+            <Text style={styles.footerLink}>Inicia sesión</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

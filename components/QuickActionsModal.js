@@ -15,6 +15,7 @@ import { tokens } from '../theme/tokens';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import InlineSheet, { TAB_BAR_HEIGHT } from './ui/InlineSheet';
+import { BottomSheet, sheetStyles } from './ui/BottomSheet';
 import Button from './ui/Button';
 import { PremiumBadge } from './ui/Chip';
 
@@ -91,6 +92,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
   const [noteContent, setNoteContent] = useState('');
   const [savingNote, setSavingNote] = useState(false);
   const [selectedExam, setSelectedExam] = useState(null);
+  const [examToDelete, setExamToDelete] = useState(null);
   const [gradeInput, setGradeInput] = useState('');
   const [weightInput, setWeightInput] = useState('100');
   const [gradeError, setGradeError] = useState('');
@@ -131,6 +133,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
     setWeightInput('100');
     setGradeError('');
     setSelectedExam(null);
+    setExamToDelete(null);
     onClose();
   };
 
@@ -196,205 +199,227 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
     }
   };
 
-  const deleteExam = (exam) =>
-    Alert.alert('Eliminar examen', `¿Seguro que quieres eliminar "${exam.name}"?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            const { deleteExam: remove } = await import('../services/exams');
-            await remove(exam.id);
-            const { auth } = await import('../services/firebase');
-            await useUserStore.getState().loadUserData(auth.currentUser.uid);
-            useUserStore.getState().triggerExamRefresh();
-            loadExams();
-          } catch {
-            Alert.alert('Error', 'No se pudo eliminar el examen.');
-          }
-        },
-      },
-    ]);
+  // The confirm used to be an OS Alert.alert — a bare native dialog dropped on
+  // top of an otherwise fully themed sheet. Same swap as "Por calificar" on the
+  // home screen: a Schedio sheet instead.
+  const confirmDeleteExam = async () => {
+    const exam = examToDelete;
+    setExamToDelete(null);
+    if (!exam) return;
+    try {
+      const { deleteExam: remove } = await import('../services/exams');
+      await remove(exam.id);
+      const { auth } = await import('../services/firebase');
+      await useUserStore.getState().loadUserData(auth.currentUser.uid);
+      useUserStore.getState().triggerExamRefresh();
+      loadExams();
+    } catch {
+      Alert.alert('Error', 'No se pudo eliminar el examen.');
+    }
+  };
 
   // ── Render ──
 
   return (
-    <InlineSheet visible={visible} onClose={close} bottomOffset={TAB_BAR_HEIGHT}>
-      {view === VIEW_MAIN ? (
-        <>
-          <SheetHeader title="Acciones rápidas" />
-          <View style={styles.list}>
-            <ActionRow
-              icon={CalendarPlus}
-              label="Añadir examen o tarea"
-              desc="Y el plan se reorganiza solo"
-              onPress={() => {
-                close();
-                onAddExam();
-              }}
-            />
-            <ActionRow
-              icon={Star}
-              label="Nota de examen"
-              desc={
-                ungraded.length > 0
-                  ? `${ungraded.length} sin calificar`
-                  : 'No tienes exámenes pendientes de nota'
-              }
-              disabled={ungraded.length === 0}
-              onPress={() => setView(VIEW_PICK_EXAM)}
-            />
-            <ActionRow
-              icon={FileText}
-              label="Apunte rápido"
-              desc="Guarda una idea antes de que se vaya"
-              onPress={() => setView(VIEW_NOTE)}
-            />
-            <ActionRow
-              icon={Package}
-              label="Subir a la mochila"
-              desc="Apuntes, fotos o PDFs"
-              onPress={() => {
-                close();
-                onAddFile();
-              }}
-            />
-            {/* Se quitó "Empezar sesión de estudio": la pestaña Clase lleva
+    <>
+      <InlineSheet visible={visible} onClose={close} bottomOffset={TAB_BAR_HEIGHT}>
+        {view === VIEW_MAIN ? (
+          <>
+            <SheetHeader title="Acciones rápidas" />
+            <View style={styles.list}>
+              <ActionRow
+                icon={CalendarPlus}
+                label="Añadir examen o tarea"
+                desc="Y el plan se reorganiza solo"
+                onPress={() => {
+                  close();
+                  onAddExam();
+                }}
+              />
+              <ActionRow
+                icon={Star}
+                label="Nota de examen"
+                desc={
+                  ungraded.length > 0
+                    ? `${ungraded.length} sin calificar`
+                    : 'No tienes exámenes pendientes de nota'
+                }
+                disabled={ungraded.length === 0}
+                onPress={() => setView(VIEW_PICK_EXAM)}
+              />
+              <ActionRow
+                icon={FileText}
+                label="Apunte rápido"
+                desc="Guarda una idea antes de que se vaya"
+                onPress={() => setView(VIEW_NOTE)}
+              />
+              <ActionRow
+                icon={Package}
+                label="Subir a la mochila"
+                desc="Apuntes, fotos o PDFs"
+                onPress={() => {
+                  close();
+                  onAddFile();
+                }}
+              />
+              {/* Se quitó "Empezar sesión de estudio": la pestaña Clase lleva
                 justo ahí, así que era un paso de más para llegar al mismo
                 sitio, y su fila era la que obligaba a desplazar esta hoja. */}
-            {/* Inert on purpose, like the planner on the Plan screen: CLAUDE.md
+              {/* Inert on purpose, like the planner on the Plan screen: CLAUDE.md
                 puts the coach outside the initial launch. */}
-            <ActionRow
-              icon={Sparkles}
-              label="IA Schedio"
-              desc={isPrime ? 'Próximamente' : 'Próximamente · incluido en Prime'}
-              locked
-            />
-          </View>
-        </>
-      ) : null}
+              <ActionRow
+                icon={Sparkles}
+                label="IA Schedio"
+                desc={isPrime ? 'Próximamente' : 'Próximamente · incluido en Prime'}
+                locked
+              />
+            </View>
+          </>
+        ) : null}
 
-      {view === VIEW_NOTE ? (
-        <>
-          <SheetHeader title="Apunte rápido" onBack={back} />
-          <TextInput
-            style={styles.noteInput}
-            placeholder="¿Qué tienes en mente?"
-            placeholderTextColor={tokens.colors.textDisabled}
-            multiline
-            autoFocus
-            value={noteContent}
-            onChangeText={setNoteContent}
-          />
-          <View style={{ marginTop: 20 }}>
-            <Button
-              title="Guardar apunte"
-              fullWidth
-              loading={savingNote}
-              disabled={!noteContent.trim()}
-              onPress={saveNote}
+        {view === VIEW_NOTE ? (
+          <>
+            <SheetHeader title="Apunte rápido" onBack={back} />
+            <TextInput
+              style={styles.noteInput}
+              placeholder="¿Qué tienes en mente?"
+              placeholderTextColor={tokens.colors.textDisabled}
+              multiline
+              autoFocus
+              value={noteContent}
+              onChangeText={setNoteContent}
             />
-          </View>
-        </>
-      ) : null}
+            <View style={{ marginTop: 20 }}>
+              <Button
+                title="Guardar apunte"
+                fullWidth
+                loading={savingNote}
+                disabled={!noteContent.trim()}
+                onPress={saveNote}
+              />
+            </View>
+          </>
+        ) : null}
 
-      {view === VIEW_PICK_EXAM ? (
-        <>
-          <SheetHeader title="Calificar examen" onBack={back} />
-          {ungraded.length === 0 ? (
-            <Text style={styles.empty}>Todos tus exámenes ya tienen nota registrada.</Text>
-          ) : (
-            <>
-              <View style={styles.list}>
-                {ungraded.map((exam) => (
-                  <TouchableOpacity
-                    key={exam.id}
-                    activeOpacity={0.7}
-                    onPress={() => {
-                      setSelectedExam(exam);
-                      setGradeInput('');
-                      setWeightInput('100');
-                      setView(VIEW_GRADE);
-                    }}
-                    onLongPress={() => deleteExam(exam)}
-                    style={styles.row}
-                  >
-                    <View style={styles.rowBody}>
-                      <Text style={styles.rowLabel}>{exam.name}</Text>
-                      <Text style={styles.rowDesc}>
-                        {new Date(exam.date).toLocaleDateString('es-ES', {
-                          day: 'numeric',
-                          month: 'short',
-                        })}
-                      </Text>
-                    </View>
-                    <ChevronRight
-                      size={18}
-                      strokeWidth={1.75}
-                      color={tokens.colors.textSecondary}
-                    />
-                  </TouchableOpacity>
-                ))}
+        {view === VIEW_PICK_EXAM ? (
+          <>
+            <SheetHeader title="Calificar examen" onBack={back} />
+            {ungraded.length === 0 ? (
+              <Text style={styles.empty}>Todos tus exámenes ya tienen nota registrada.</Text>
+            ) : (
+              <>
+                <View style={styles.list}>
+                  {ungraded.map((exam) => (
+                    <TouchableOpacity
+                      key={exam.id}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        setSelectedExam(exam);
+                        setGradeInput('');
+                        setWeightInput('100');
+                        setView(VIEW_GRADE);
+                      }}
+                      onLongPress={() => setExamToDelete(exam)}
+                      style={styles.row}
+                    >
+                      <View style={styles.rowBody}>
+                        <Text style={styles.rowLabel}>{exam.name}</Text>
+                        <Text style={styles.rowDesc}>
+                          {new Date(exam.date).toLocaleDateString('es-ES', {
+                            day: 'numeric',
+                            month: 'short',
+                          })}
+                        </Text>
+                      </View>
+                      <ChevronRight
+                        size={18}
+                        strokeWidth={1.75}
+                        color={tokens.colors.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.hint}>Mantén pulsado un examen para eliminarlo.</Text>
+              </>
+            )}
+          </>
+        ) : null}
+
+        {view === VIEW_GRADE && selectedExam ? (
+          <>
+            <SheetHeader title={selectedExam.name} onBack={back} />
+
+            <View style={styles.gradeRow}>
+              <View style={[styles.gradeField, { flex: 2 }]}>
+                <Text style={styles.gradeLabel}>Nota (0-10)</Text>
+                <TextInput
+                  style={[styles.gradeInput, gradeError && styles.gradeInputError]}
+                  placeholder="8,5"
+                  placeholderTextColor={tokens.colors.textDisabled}
+                  keyboardType="decimal-pad"
+                  autoFocus
+                  maxLength={4}
+                  value={gradeInput}
+                  onChangeText={(t) => {
+                    setGradeInput(t);
+                    setGradeError('');
+                  }}
+                />
               </View>
-              <Text style={styles.hint}>Mantén pulsado un examen para eliminarlo.</Text>
-            </>
-          )}
-        </>
-      ) : null}
+              <View style={[styles.gradeField, { flex: 1 }]}>
+                <Text style={styles.gradeLabel}>Peso %</Text>
+                <TextInput
+                  style={styles.gradeInput}
+                  placeholder="100"
+                  placeholderTextColor={tokens.colors.textDisabled}
+                  keyboardType="numeric"
+                  maxLength={3}
+                  value={weightInput}
+                  onChangeText={(t) => {
+                    setWeightInput(t);
+                    setGradeError('');
+                  }}
+                />
+              </View>
+            </View>
 
-      {view === VIEW_GRADE && selectedExam ? (
-        <>
-          <SheetHeader title={selectedExam.name} onBack={back} />
+            {gradeError ? <Text style={styles.error}>{gradeError}</Text> : null}
 
-          <View style={styles.gradeRow}>
-            <View style={[styles.gradeField, { flex: 2 }]}>
-              <Text style={styles.gradeLabel}>Nota (0-10)</Text>
-              <TextInput
-                style={[styles.gradeInput, gradeError && styles.gradeInputError]}
-                placeholder="8,5"
-                placeholderTextColor={tokens.colors.textDisabled}
-                keyboardType="decimal-pad"
-                autoFocus
-                maxLength={4}
-                value={gradeInput}
-                onChangeText={(t) => {
-                  setGradeInput(t);
-                  setGradeError('');
-                }}
+            <View style={{ marginTop: 20 }}>
+              <Button
+                title="Guardar nota"
+                fullWidth
+                loading={savingGrade}
+                disabled={!gradeInput}
+                onPress={saveGrade}
               />
             </View>
-            <View style={[styles.gradeField, { flex: 1 }]}>
-              <Text style={styles.gradeLabel}>Peso %</Text>
-              <TextInput
-                style={styles.gradeInput}
-                placeholder="100"
-                placeholderTextColor={tokens.colors.textDisabled}
-                keyboardType="numeric"
-                maxLength={3}
-                value={weightInput}
-                onChangeText={(t) => {
-                  setWeightInput(t);
-                  setGradeError('');
-                }}
-              />
-            </View>
-          </View>
+          </>
+        ) : null}
+      </InlineSheet>
 
-          {gradeError ? <Text style={styles.error}>{gradeError}</Text> : null}
-
-          <View style={{ marginTop: 20 }}>
-            <Button
-              title="Guardar nota"
-              fullWidth
-              loading={savingGrade}
-              disabled={!gradeInput}
-              onPress={saveGrade}
-            />
-          </View>
-        </>
-      ) : null}
-    </InlineSheet>
+      <BottomSheet
+        visible={!!examToDelete}
+        onClose={() => setExamToDelete(null)}
+        title="Eliminar examen"
+        subtitle={`¿Seguro que quieres eliminar "${examToDelete?.name ?? ''}"?`}
+      >
+        <View style={sheetStyles.actions}>
+          <Button
+            title="Cancelar"
+            variant="secondary"
+            style={sheetStyles.actionButton}
+            onPress={() => setExamToDelete(null)}
+          />
+          <Button
+            title="Eliminar"
+            variant="danger"
+            style={sheetStyles.actionButton}
+            onPress={confirmDeleteExam}
+          />
+        </View>
+      </BottomSheet>
+    </>
   );
 }
 

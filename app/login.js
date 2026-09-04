@@ -1,15 +1,5 @@
 import { useState } from 'react';
-import {
-  View,
-  Text,
-  Image,
-  Platform,
-  ScrollView,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Alert,
-  StyleSheet,
-} from 'react-native';
+import { View, Text, Image, Platform, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -28,6 +18,7 @@ import { needsOnboarding } from '../services/onboarding';
 import { tokens } from '../theme/tokens';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import KeyboardAwareScrollView from '../components/ui/KeyboardAwareScrollView';
 import { GoogleMark, OrDivider } from '../components/ui/SocialAuth';
 
 const font = tokens.typography.families.inter;
@@ -117,129 +108,124 @@ export default function Login() {
 
   return (
     <View style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAwareScrollView
         style={styles.flex}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingTop: insets.top + 48 }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Animated.View entering={FadeIn.duration(400)} style={styles.brand}>
-            <View style={styles.logoBadge}>
-              {/* The brand mark, not the launcher icon: assets/icon.png is the
+        <Animated.View entering={FadeIn.duration(400)} style={styles.brand}>
+          <View style={styles.logoBadge}>
+            {/* The brand mark, not the launcher icon: assets/icon.png is the
                   rounded app tile and reads as a screenshot of the app inside
                   its own login screen. */}
-              <Image
-                source={require('../assets/images/schedio-mark.png')}
-                style={styles.logo}
-                resizeMode="contain"
-              />
-            </View>
-            <Text style={styles.brandName}>Schedio</Text>
+            <Image
+              source={require('../assets/images/schedio-mark.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={styles.brandName}>Schedio</Text>
+        </Animated.View>
+
+        <Animated.Text entering={FadeInDown.duration(300).delay(80)} style={styles.tagline}>
+          Que el estudio sea fácil
+        </Animated.Text>
+
+        <Animated.Text entering={FadeInDown.duration(300).delay(160)} style={styles.title}>
+          Bienvenido de nuevo
+        </Animated.Text>
+
+        {error ? (
+          <Animated.View entering={FadeIn.duration(200)} style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
           </Animated.View>
+        ) : null}
 
-          <Animated.Text entering={FadeInDown.duration(300).delay(80)} style={styles.tagline}>
-            Que el estudio sea fácil
-          </Animated.Text>
+        <Animated.View entering={FadeInDown.duration(300).delay(240)}>
+          <Input
+            label="Correo electrónico"
+            value={email}
+            onChangeText={setEmail}
+            placeholder="tucorreo@ejemplo.com"
+            keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
+            editable={!loading}
+          />
+        </Animated.View>
 
-          <Animated.Text entering={FadeInDown.duration(300).delay(160)} style={styles.title}>
-            Bienvenido de nuevo
-          </Animated.Text>
+        <Animated.View entering={FadeInDown.duration(300).delay(320)} style={{ marginTop: 16 }}>
+          <Input
+            label="Contraseña"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            secure
+            autoComplete="current-password"
+            textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={handleLogin}
+            editable={!loading}
+          />
+        </Animated.View>
 
-          {error ? (
-            <Animated.View entering={FadeIn.duration(200)} style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
+        <Animated.View entering={FadeInDown.duration(300).delay(380)} style={styles.forgotRow}>
+          <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
+            <Text style={styles.link}>¿Olvidaste tu contraseña?</Text>
+          </TouchableOpacity>
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.duration(300).delay(460)} style={{ marginTop: 24 }}>
+          <Button
+            title="Iniciar sesión"
+            fullWidth
+            loading={loading}
+            disabled={!email || !password}
+            onPress={handleLogin}
+          />
+        </Animated.View>
+
+        {GOOGLE_SIGNIN_ENABLED && (
+          <>
+            <Animated.View entering={FadeInDown.duration(300).delay(540)}>
+              <OrDivider />
             </Animated.View>
-          ) : null}
 
-          <Animated.View entering={FadeInDown.duration(300).delay(240)}>
-            <Input
-              label="Correo electrónico"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="tucorreo@ejemplo.com"
-              keyboardType="email-address"
-              autoComplete="email"
-              textContentType="emailAddress"
-              editable={!loading}
-            />
-          </Animated.View>
+            <Animated.View entering={FadeInDown.duration(300).delay(600)}>
+              <Button
+                title="Continuar con Google"
+                variant="secondary"
+                fullWidth
+                disabled={loading}
+                icon={<GoogleMark />}
+                onPress={handleGoogleLogin}
+              />
+            </Animated.View>
+          </>
+        )}
 
-          <Animated.View entering={FadeInDown.duration(300).delay(320)} style={{ marginTop: 16 }}>
-            <Input
-              label="Contraseña"
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              secure
-              autoComplete="current-password"
-              textContentType="password"
-              returnKeyType="go"
-              onSubmitEditing={handleLogin}
-              editable={!loading}
-            />
-          </Animated.View>
+        <Animated.View entering={FadeInDown.duration(300).delay(670)} style={styles.footer}>
+          <Text style={styles.footerText}>¿No tienes cuenta? </Text>
+          <TouchableOpacity onPress={() => router.push('/register')} disabled={loading}>
+            <Text style={styles.footerLink}>Regístrate</Text>
+          </TouchableOpacity>
+        </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(300).delay(380)} style={styles.forgotRow}>
-            <TouchableOpacity onPress={handleForgotPassword} disabled={loading}>
-              <Text style={styles.link}>¿Olvidaste tu contraseña?</Text>
-            </TouchableOpacity>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.duration(300).delay(460)} style={{ marginTop: 24 }}>
-            <Button
-              title="Iniciar sesión"
-              fullWidth
-              loading={loading}
-              disabled={!email || !password}
-              onPress={handleLogin}
-            />
-          </Animated.View>
-
-          {GOOGLE_SIGNIN_ENABLED && (
-            <>
-              <Animated.View entering={FadeInDown.duration(300).delay(540)}>
-                <OrDivider />
-              </Animated.View>
-
-              <Animated.View entering={FadeInDown.duration(300).delay(600)}>
-                <Button
-                  title="Continuar con Google"
-                  variant="secondary"
-                  fullWidth
-                  disabled={loading}
-                  icon={<GoogleMark />}
-                  onPress={handleGoogleLogin}
-                />
-              </Animated.View>
-            </>
-          )}
-
-          <Animated.View entering={FadeInDown.duration(300).delay(670)} style={styles.footer}>
-            <Text style={styles.footerText}>¿No tienes cuenta? </Text>
-            <TouchableOpacity onPress={() => router.push('/register')} disabled={loading}>
-              <Text style={styles.footerLink}>Regístrate</Text>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* The carousel stops offering itself after a few guest launches
+        {/* The carousel stops offering itself after a few guest launches
               (services/welcome.js), and anyone who skipped it landed straight
               here. Without this there is no route back to the one screen that
               explains what the app is for. Pushed, not replaced, so "Cerrar"
               returns to this form with whatever was typed still in it. */}
-          <Animated.View entering={FadeInDown.duration(300).delay(740)} style={styles.pitchRow}>
-            <TouchableOpacity
-              onPress={() => router.push('/welcome?from=login')}
-              disabled={loading}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.pitchLink}>¿Qué es Schedio?</Text>
-            </TouchableOpacity>
-          </Animated.View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <Animated.View entering={FadeInDown.duration(300).delay(740)} style={styles.pitchRow}>
+          <TouchableOpacity
+            onPress={() => router.push('/welcome?from=login')}
+            disabled={loading}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.pitchLink}>¿Qué es Schedio?</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   Dimensions,
   AppState,
-  KeyboardAvoidingView,
   InteractionManager,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,6 +47,7 @@ import Animated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { tokens } from '../../theme/tokens';
+import KeyboardAwareScrollView from '../../components/ui/KeyboardAwareScrollView';
 import { TAB_BAR_STYLE } from '../../components/ui/InlineSheet';
 import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
@@ -104,9 +104,6 @@ const RING_SIZE = Math.min(220, SCREEN_WIDTH - 96);
 const RING_STROKE = 6;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
-
-// Drag the session screen down this far to ask about stopping.
-const DRAG_TO_STOP = 120;
 
 // Swipe an objective this far left to delete it.
 const SWIPE_REVEAL = 96;
@@ -681,7 +678,6 @@ export default function StudySessionScreen() {
   // answers still gets their notes attached.
   const savedSessionRef = useRef(null);
 
-  const dragY = useSharedValue(0);
   const flash = useSharedValue(0);
 
   /**
@@ -1113,26 +1109,6 @@ export default function StudySessionScreen() {
 
   // ── Gestures ──
 
-  const dragToStop = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(isActive && !stopConfirmVisible)
-        .activeOffsetY([-20, 20])
-        .onUpdate((event) => {
-          if (event.translationY > 0) dragY.value = event.translationY;
-        })
-        .onEnd((event) => {
-          if (event.translationY > DRAG_TO_STOP) {
-            runOnJS(pauseTimer)();
-            runOnJS(setStopConfirmVisible)(true);
-          }
-          dragY.value = withSpring(0, { damping: 20, stiffness: 200 });
-        }),
-    [isActive, stopConfirmVisible, dragY, pauseTimer]
-  );
-
-  const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dragY.value }] }));
-
   // Mirrors the design's `blueFlash`: a hard bloom that peaks fast and drifts
   // outwards as it fades.
   const flashStyle = useAnimatedStyle(() => ({
@@ -1496,107 +1472,101 @@ export default function StudySessionScreen() {
   // ── Render: setup ──
 
   const renderSetup = () => (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.flex}
+    <KeyboardAwareScrollView
+      style={styles.scroll}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+      showsVerticalScrollIndicator={false}
     >
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Animated.View entering={FadeInDown.duration(320)}>
-          <Text style={styles.screenTitle}>Clase</Text>
-        </Animated.View>
+      <Animated.View entering={FadeInDown.duration(320)}>
+        <Text style={styles.screenTitle}>Clase</Text>
+      </Animated.View>
 
-        {/* Materia */}
-        <View style={styles.section}>
-          <SectionTitle>Materia</SectionTitle>
+      {/* Materia */}
+      <View style={styles.section}>
+        <SectionTitle>Materia</SectionTitle>
 
-          {subjectsLoading ? (
-            <View style={styles.subjectsPlaceholder}>
-              <ActivityIndicator color={tokens.colors.accent} />
-            </View>
-          ) : subjects.length === 0 ? (
-            <TouchableOpacity
-              style={styles.subjectsEmpty}
-              activeOpacity={0.8}
-              onPress={() => router.push('/dashboard/profile')}
-            >
-              <Plus size={20} color={tokens.colors.textSecondary} />
-              <Text style={styles.subjectsEmptyText}>Añadir materias</Text>
-            </TouchableOpacity>
-          ) : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.subjectsRow}
-            >
-              {subjects.map((subject) => (
-                <SubjectChip
-                  key={subject.id}
-                  subject={subject}
-                  reason={reasonBySubject[subject.id]}
-                  selected={selectedSubject === subject.id}
-                  onPress={() => setSelectedSubject(subject.id)}
-                />
-              ))}
-            </ScrollView>
-          )}
-        </View>
+        {subjectsLoading ? (
+          <View style={styles.subjectsPlaceholder}>
+            <ActivityIndicator color={tokens.colors.accent} />
+          </View>
+        ) : subjects.length === 0 ? (
+          <TouchableOpacity
+            style={styles.subjectsEmpty}
+            activeOpacity={0.8}
+            onPress={() => router.push('/dashboard/profile')}
+          >
+            <Plus size={20} color={tokens.colors.textSecondary} />
+            <Text style={styles.subjectsEmptyText}>Añadir materias</Text>
+          </TouchableOpacity>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.subjectsRow}
+          >
+            {subjects.map((subject) => (
+              <SubjectChip
+                key={subject.id}
+                subject={subject}
+                reason={reasonBySubject[subject.id]}
+                selected={selectedSubject === subject.id}
+                onPress={() => setSelectedSubject(subject.id)}
+              />
+            ))}
+          </ScrollView>
+        )}
+      </View>
 
-        {/* Ritmo — "ritmo" and not "método", which to a student also means the
+      {/* Ritmo — "ritmo" and not "método", which to a student also means the
             technique itself, nor "plan", which is a screen. */}
-        <View style={styles.section}>
-          <SectionTitle>Ritmo de estudio</SectionTitle>
+      <View style={styles.section}>
+        <SectionTitle>Ritmo de estudio</SectionTitle>
 
-          <RhythmPicker
-            mode={rhythmMode}
-            rhythm={rhythm}
-            onModeChange={setStudyRhythmMode}
-            onRhythmChange={(patch) => setStudyRhythm(rhythmMode, patch)}
-            startOpen={!hasSeenRhythmPicker}
-          />
-        </View>
-
-        {/* Objetivos */}
-        <View style={styles.section}>
-          <SectionTitle>Objetivos de hoy</SectionTitle>
-
-          <Card padding={16}>
-            <AddObjectiveRow value={newGoalText} onChangeText={setNewGoalText} onAdd={addGoal} />
-            {goals.length > 0 ? (
-              <View style={{ marginTop: 8 }}>
-                {goals.map((g) => (
-                  <SwipeToDelete key={g.id} onDelete={() => removeGoal(g.id)}>
-                    <CheckRow
-                      label={g.text}
-                      checked={g.completed}
-                      onToggle={() => toggleGoal(g.id)}
-                    />
-                  </SwipeToDelete>
-                ))}
-                <Text style={styles.swipeHint}>
-                  Desliza un objetivo a la izquierda para borrarlo.
-                </Text>
-              </View>
-            ) : null}
-          </Card>
-        </View>
-
-        {/* Pushes the action to the bottom of the viewport when the content is
-          short, and keeps a clear gap when it isn't. */}
-        <View style={styles.bottomSpacer} />
-
-        <Button
-          title="Comenzar sesión"
-          onPress={handleStartPress}
-          disabled={!selectedSubject}
-          fullWidth
+        <RhythmPicker
+          mode={rhythmMode}
+          rhythm={rhythm}
+          onModeChange={setStudyRhythmMode}
+          onRhythmChange={(patch) => setStudyRhythm(rhythmMode, patch)}
+          startOpen={!hasSeenRhythmPicker}
         />
-      </ScrollView>
-    </KeyboardAvoidingView>
+      </View>
+
+      {/* Objetivos */}
+      <View style={styles.section}>
+        <SectionTitle>Objetivos de hoy</SectionTitle>
+
+        <Card padding={16}>
+          <AddObjectiveRow value={newGoalText} onChangeText={setNewGoalText} onAdd={addGoal} />
+          {goals.length > 0 ? (
+            <View style={{ marginTop: 8 }}>
+              {goals.map((g) => (
+                <SwipeToDelete key={g.id} onDelete={() => removeGoal(g.id)}>
+                  <CheckRow
+                    label={g.text}
+                    checked={g.completed}
+                    onToggle={() => toggleGoal(g.id)}
+                  />
+                </SwipeToDelete>
+              ))}
+              <Text style={styles.swipeHint}>
+                Desliza un objetivo a la izquierda para borrarlo.
+              </Text>
+            </View>
+          ) : null}
+        </Card>
+      </View>
+
+      {/* Pushes the action to the bottom of the viewport when the content is
+          short, and keeps a clear gap when it isn't. */}
+      <View style={styles.bottomSpacer} />
+
+      <Button
+        title="Comenzar sesión"
+        onPress={handleStartPress}
+        disabled={!selectedSubject}
+        fullWidth
+      />
+    </KeyboardAwareScrollView>
   );
 
   // ── Render: timer ──
@@ -1622,186 +1592,174 @@ export default function StudySessionScreen() {
         : tokens.colors.accent;
 
     return (
-      <GestureDetector gesture={dragToStop}>
-        <Animated.View
-          style={[styles.timerContainer, { paddingTop: insets.top + 24 }, surfaceStyle, dragStyle]}
-        >
-          <StatusBar hidden />
+      <Animated.View style={[styles.timerContainer, { paddingTop: insets.top + 24 }, surfaceStyle]}>
+        <StatusBar hidden />
 
-          <View style={styles.timerHeader}>
-            <Text style={styles.timerSubject}>{currentSubject?.name || 'Estudio'}</Text>
-            <Text style={styles.timerReason}>{reason || 'Sesión enfocada'}</Text>
-            {isPanicTask && (
-              <View style={styles.panicModeBadge}>
-                <Flame size={12} color={tokens.colors.danger} strokeWidth={2} />
-                <Text style={styles.panicModeBadgeText}>Modo pánico · repaso urgente</Text>
-              </View>
-            )}
-            {focusModeActive && (
-              <View style={styles.focusModeBadge}>
-                <BellOff size={12} color={tokens.colors.accent} strokeWidth={2} />
-                <Text style={styles.focusModeBadgeText}>Modo enfoque activo</Text>
-              </View>
-            )}
-          </View>
-
-          {blocks > 1 ? (
-            <View style={styles.blockDots}>
-              {Array.from({ length: blocks }, (_, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.blockDot,
-                    i + 1 < block && styles.blockDotDone,
-                    i + 1 === block && styles.blockDotNow,
-                  ]}
-                />
-              ))}
+        <View style={styles.timerHeader}>
+          <Text style={styles.timerSubject}>{currentSubject?.name || 'Estudio'}</Text>
+          <Text style={styles.timerReason}>{reason || 'Sesión enfocada'}</Text>
+          {isPanicTask && (
+            <View style={styles.panicModeBadge}>
+              <Flame size={12} color={tokens.colors.danger} strokeWidth={2} />
+              <Text style={styles.panicModeBadgeText}>Modo pánico · repaso urgente</Text>
             </View>
-          ) : null}
-
-          <View style={styles.ringWrap}>
-            <Svg width={RING_SIZE} height={RING_SIZE} style={styles.ringSvg}>
-              <SvgCircle
-                cx={RING_SIZE / 2}
-                cy={RING_SIZE / 2}
-                r={RING_RADIUS}
-                stroke={tokens.colors.borderDefault}
-                strokeWidth={RING_STROKE}
-                fill="none"
-              />
-              <SvgCircle
-                cx={RING_SIZE / 2}
-                cy={RING_SIZE / 2}
-                r={RING_RADIUS}
-                stroke={ringColor}
-                // Keeps its phase colour when paused but drops right back:
-                // it still says *what* is stopped without pretending anything
-                // is moving.
-                strokeOpacity={isPaused ? 0.35 : 1}
-                strokeWidth={RING_STROKE}
-                strokeLinecap="round"
-                fill="none"
-                strokeDasharray={RING_CIRCUMFERENCE}
-                strokeDashoffset={dashOffset}
-                rotation="-90"
-                origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
-              />
-            </Svg>
-            <View style={styles.ringCenter}>
-              <Text style={[styles.timeDisplay, isPaused && styles.timeDisplayPaused]}>
-                {formatTime(timeLeft)}
-              </Text>
-              <Text style={styles.timeState}>
-                {isPaused ? 'EN PAUSA' : onBreak ? 'DESCANSO' : isPanicTask ? 'PÁNICO' : 'ENFOQUE'}
-              </Text>
+          )}
+          {focusModeActive && (
+            <View style={styles.focusModeBadge}>
+              <BellOff size={12} color={tokens.colors.accent} strokeWidth={2} />
+              <Text style={styles.focusModeBadgeText}>Modo enfoque activo</Text>
             </View>
+          )}
+        </View>
+
+        {blocks > 1 ? (
+          <View style={styles.blockDots}>
+            {Array.from({ length: blocks }, (_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.blockDot,
+                  i + 1 < block && styles.blockDotDone,
+                  i + 1 === block && styles.blockDotNow,
+                ]}
+              />
+            ))}
           </View>
+        ) : null}
 
-          <View style={styles.controls}>
-            <TouchableOpacity
-              style={styles.controlButton}
-              activeOpacity={0.7}
-              onPress={togglePause}
-              accessibilityRole="button"
-              accessibilityLabel={isPaused ? 'Reanudar sesión' : 'Pausar sesión'}
-            >
-              {isPaused ? (
-                <Play
-                  size={24}
-                  color={tokens.colors.textPrimary}
-                  fill={tokens.colors.textPrimary}
-                />
-              ) : (
-                <Pause
-                  size={24}
-                  color={tokens.colors.textPrimary}
-                  fill={tokens.colors.textPrimary}
-                />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.controlButton}
-              activeOpacity={0.7}
-              onPress={() => {
-                pauseTimer();
-                setStopConfirmVisible(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Terminar sesión"
-            >
-              <X size={26} color={tokens.colors.textPrimary} />
-            </TouchableOpacity>
+        <View style={styles.ringWrap}>
+          <Svg width={RING_SIZE} height={RING_SIZE} style={styles.ringSvg}>
+            <SvgCircle
+              cx={RING_SIZE / 2}
+              cy={RING_SIZE / 2}
+              r={RING_RADIUS}
+              stroke={tokens.colors.borderDefault}
+              strokeWidth={RING_STROKE}
+              fill="none"
+            />
+            <SvgCircle
+              cx={RING_SIZE / 2}
+              cy={RING_SIZE / 2}
+              r={RING_RADIUS}
+              stroke={ringColor}
+              // Keeps its phase colour when paused but drops right back:
+              // it still says *what* is stopped without pretending anything
+              // is moving.
+              strokeOpacity={isPaused ? 0.35 : 1}
+              strokeWidth={RING_STROKE}
+              strokeLinecap="round"
+              fill="none"
+              strokeDasharray={RING_CIRCUMFERENCE}
+              strokeDashoffset={dashOffset}
+              rotation="-90"
+              origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
+            />
+          </Svg>
+          <View style={styles.ringCenter}>
+            <Text style={[styles.timeDisplay, isPaused && styles.timeDisplayPaused]}>
+              {formatTime(timeLeft)}
+            </Text>
+            <Text style={styles.timeState}>
+              {isPaused ? 'EN PAUSA' : onBreak ? 'DESCANSO' : isPanicTask ? 'PÁNICO' : 'ENFOQUE'}
+            </Text>
           </View>
+        </View>
 
-          {/* Each phase keeps only what belongs to it. Objectives during a
+        <View style={styles.controls}>
+          <TouchableOpacity
+            style={styles.controlButton}
+            activeOpacity={0.7}
+            onPress={togglePause}
+            accessibilityRole="button"
+            accessibilityLabel={isPaused ? 'Reanudar sesión' : 'Pausar sesión'}
+          >
+            {isPaused ? (
+              <Play size={24} color={tokens.colors.textPrimary} fill={tokens.colors.textPrimary} />
+            ) : (
+              <Pause size={24} color={tokens.colors.textPrimary} fill={tokens.colors.textPrimary} />
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.controlButton}
+            activeOpacity={0.7}
+            onPress={() => {
+              pauseTimer();
+              setStopConfirmVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Terminar sesión"
+          >
+            <X size={26} color={tokens.colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Each phase keeps only what belongs to it. Objectives during a
               break would be half-finished work asking for attention in the one
               stretch that exists for not giving it any. */}
-          {onBreak ? (
-            <Animated.View entering={FadeIn.duration(220)} style={styles.breakBlock}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={skipBreak}
-                accessibilityRole="button"
-                style={styles.skipBreak}
-              >
-                <Text style={styles.skipBreakText}>Saltar descanso</Text>
-              </TouchableOpacity>
-              <Text style={styles.breakTip}>{breakTipFor(block)}</Text>
-            </Animated.View>
-          ) : goals.length > 0 ? (
-            <View style={styles.timerGoals}>
-              <OverlineLabel>Objetivos</OverlineLabel>
-              <ScrollView style={styles.timerGoalsScroll} showsVerticalScrollIndicator={false}>
-                {goals.map((g) => (
-                  <CheckRow
-                    key={g.id}
-                    label={g.text}
-                    checked={g.completed}
-                    onToggle={() => toggleGoal(g.id)}
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
+        {onBreak ? (
+          <Animated.View entering={FadeIn.duration(220)} style={styles.breakBlock}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={skipBreak}
+              accessibilityRole="button"
+              style={styles.skipBreak}
+            >
+              <Text style={styles.skipBreakText}>Saltar descanso</Text>
+            </TouchableOpacity>
+            <Text style={styles.breakTip}>{breakTipFor(block)}</Text>
+          </Animated.View>
+        ) : goals.length > 0 ? (
+          <View style={styles.timerGoals}>
+            <OverlineLabel>Objetivos</OverlineLabel>
+            <ScrollView style={styles.timerGoalsScroll} showsVerticalScrollIndicator={false}>
+              {goals.map((g) => (
+                <CheckRow
+                  key={g.id}
+                  label={g.text}
+                  checked={g.completed}
+                  onToggle={() => toggleGoal(g.id)}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
 
-          {stopConfirmVisible ? (
-            <Animated.View entering={FadeIn.duration(160)} style={styles.stopOverlay}>
-              <Card padding={24} style={styles.stopCard}>
-                <View style={styles.stopIcon}>
-                  <X size={26} color={tokens.colors.danger} />
+        {stopConfirmVisible ? (
+          <Animated.View entering={FadeIn.duration(160)} style={styles.stopOverlay}>
+            <Card padding={24} style={styles.stopCard}>
+              <View style={styles.stopIcon}>
+                <X size={26} color={tokens.colors.danger} />
+              </View>
+              <Text style={styles.stopTitle}>¿Terminar sesión?</Text>
+              <Text style={styles.stopBody}>
+                Se guardará el tiempo que llevas, pero tu racha podría verse afectada.
+              </Text>
+              <View style={styles.stopActions}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Continuar"
+                    variant="secondary"
+                    fullWidth
+                    onPress={() => {
+                      setStopConfirmVisible(false);
+                      resumeTimer();
+                    }}
+                  />
                 </View>
-                <Text style={styles.stopTitle}>¿Terminar sesión?</Text>
-                <Text style={styles.stopBody}>
-                  Se guardará el tiempo que llevas, pero tu racha podría verse afectada.
-                </Text>
-                <View style={styles.stopActions}>
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      title="Continuar"
-                      variant="secondary"
-                      fullWidth
-                      onPress={() => {
-                        setStopConfirmVisible(false);
-                        resumeTimer();
-                      }}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      title="Terminar"
-                      variant="danger"
-                      fullWidth
-                      onPress={() => handleComplete(true)}
-                    />
-                  </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Terminar"
+                    variant="danger"
+                    fullWidth
+                    onPress={() => handleComplete(true)}
+                  />
                 </View>
-              </Card>
-            </Animated.View>
-          ) : null}
-        </Animated.View>
-      </GestureDetector>
+              </View>
+            </Card>
+          </Animated.View>
+        ) : null}
+      </Animated.View>
     );
   };
 
@@ -1851,11 +1809,10 @@ export default function StudySessionScreen() {
           </Svg>
         </Animated.View>
 
-        <ScrollView
+        <KeyboardAwareScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.endContent, { paddingTop: insets.top + 32 }]}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
           scrollEnabled={settled}
         >
           <SchedioLogoReveal size={140} onBurst={handleBurst} onSettled={handleSettled} />
@@ -1930,7 +1887,7 @@ export default function StudySessionScreen() {
               </Animated.View>
             </>
           ) : null}
-        </ScrollView>
+        </KeyboardAwareScrollView>
 
         {settled && celebrationQueue ? (
           <AchievementCelebration
