@@ -59,6 +59,7 @@ import { getSubjectColors } from '../../services/permissions';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import IconButton from '../../components/ui/IconButton';
+import Slider from '@react-native-community/slider';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle from '../../components/ui/SectionTitle';
 
@@ -70,6 +71,48 @@ const SWIPE_REVEAL = 88;
 const SWIPE_COMMIT = 56;
 
 const initialOf = (name) => (name || '?').charAt(0).toUpperCase();
+
+/** Una nota, con un decimal y coma — como se escribe en español. */
+const formatGrade = (value) => Number(value).toFixed(1).replace('.', ',');
+
+/**
+ * La nota objetivo, de 5 a 10 y sin decimales a propósito: un objetivo es una
+ * intención, no una predicción. La etiqueta es lo que hace que el número
+ * signifique algo — un 8 suelto no dice nada, "Notable" sí.
+ */
+const TARGET_MIN = 5;
+const TARGET_MAX = 10;
+const TARGET_LABELS = {
+  5: 'Aprobar',
+  6: 'Aprobar holgado',
+  7: 'Buena nota',
+  8: 'Notable',
+  9: 'Sobresaliente',
+  10: 'Matrícula',
+};
+
+/**
+ * Tres niveles en vez del campo numérico de antes, que no validaba nada (cabía
+ * un 99) y pedía distinguir un 6 de un 7 en tu propia asignatura, que nadie
+ * sabe hacer.
+ *
+ * Se siguen guardando como número dentro de la escala 1-10 que ya usa
+ * `normalizeDifficulty` en services/priority.js — así el algoritmo no se toca
+ * y las materias que ya tengan cualquier valor del 1 al 10 siguen valiendo:
+ * el selector solo marca el nivel más cercano.
+ */
+const DIFFICULTY_LEVELS = [
+  { label: 'Fácil', value: 3 },
+  { label: 'Normal', value: 5 },
+  { label: 'Difícil', value: 8 },
+];
+const difficultyLevelOf = (value) => {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return 5;
+  if (raw <= 4) return 3;
+  if (raw <= 6) return 5;
+  return 8;
+};
 
 const formatNoteDate = (value) => {
   const date = new Date(value);
@@ -97,27 +140,76 @@ function StatTile({ value, label, accent = false }) {
   );
 }
 
+/**
+ * Una materia en la cuadrícula.
+ *
+ * Antes enseñaba la media y nada más — un número suelto, que no dice si vas
+ * bien. Ahora enseña una **distancia**: dónde estás y dónde quieres llegar,
+ * con la barra entre las dos. Un 6,8 no significa lo mismo para quien va a por
+ * un 7 que para quien va a por matrícula.
+ *
+ * El tic de "objetivo alcanzado" es verde y va en la esquina, no en el color
+ * de la materia: Química ya es verde, así que el color no puede ser la señal.
+ */
 function SubjectTile({ subject, onPress, index = 0 }) {
+  const color = subject.color || SUBJECT_FALLBACK_COLOR;
+  const average = Number(subject.average);
+  const hasAverage = Number.isFinite(average) && average > 0;
+  const target = Number(subject.targetGrade);
+  const hasTarget = Number.isFinite(target) && target > 0;
+  const reached = hasTarget && hasAverage && average >= target;
+  const progress = hasTarget && hasAverage ? Math.min(100, (average / target) * 100) : 0;
+
   return (
     // Staggered rather than all at once: the grid used to appear as a single
     // block, which reads as a screenshot instead of a screen being built.
     // Capped at 6 so a student with twenty subjects isn't waiting on a queue.
     <Animated.View entering={FadeInDown.duration(320).delay(Math.min(index, 6) * 45)}>
       <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.subjectTile}>
-        <View
-          style={[
-            styles.subjectAvatar,
-            { backgroundColor: subject.color || SUBJECT_FALLBACK_COLOR },
-          ]}
-        >
+        {reached ? (
+          <View style={styles.subjectReached}>
+            <Check size={12} color={tokens.colors.background} strokeWidth={3} />
+          </View>
+        ) : null}
+
+        <View style={[styles.subjectAvatar, { backgroundColor: color }]}>
           <Text style={styles.subjectInitial}>{initialOf(subject.name)}</Text>
         </View>
-        <View style={styles.subjectBody}>
-          <Text style={styles.subjectName} numberOfLines={1}>
-            {subject.name}
-          </Text>
-          <Text style={styles.subjectGrade}>{subject.average || '—'}</Text>
-        </View>
+
+        <Text style={styles.subjectName} numberOfLines={2}>
+          {subject.name}
+        </Text>
+
+        {!hasAverage ? (
+          <>
+            <Text style={styles.subjectGrade}>—</Text>
+            <Text style={styles.subjectHint}>Sin notas todavía</Text>
+          </>
+        ) : hasTarget ? (
+          <>
+            <View style={styles.subjectGradeRow}>
+              <Text style={styles.subjectGrade}>{formatGrade(average)}</Text>
+              <Text style={styles.subjectArrow}>→</Text>
+              <Text style={styles.subjectTarget}>{target}</Text>
+            </View>
+            <View style={styles.subjectBar}>
+              <View
+                style={[
+                  styles.subjectBarFill,
+                  {
+                    width: `${progress}%`,
+                    backgroundColor: reached ? tokens.colors.success : color,
+                  },
+                ]}
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={styles.subjectGrade}>{formatGrade(average)}</Text>
+            <Text style={styles.subjectHint}>Sin objetivo</Text>
+          </>
+        )}
       </TouchableOpacity>
     </Animated.View>
   );
@@ -317,11 +409,20 @@ export default function ProfileScreen() {
   const [subjectLimitSheet, setSubjectLimitSheet] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState(null);
   const [editSubName, setEditSubName] = useState('');
-  const [editSubDifficulty, setEditSubDifficulty] = useState('5');
+  // Número dentro de la escala 1-10 de services/priority.js, no un índice de
+  // los tres niveles — ver DIFFICULTY_LEVELS.
+  const [editSubDifficulty, setEditSubDifficulty] = useState(5);
+  // `null` es un valor con significado: "sin objetivo puesto". El algoritmo
+  // distingue eso de un objetivo bajo (riskFactor cae a su rama de antes).
+  const [editSubTarget, setEditSubTarget] = useState(null);
   const [editSubColor, setEditSubColor] = useState(subjectPalette[0]);
   const [subjectExams, setSubjectExams] = useState([]);
   const [editingExamId, setEditingExamId] = useState(null);
   const [tempGrade, setTempGrade] = useState('');
+  // El peso se editaba solo al crear la nota (QuickActionsModal / GradeModal) y
+  // luego ya no se podía tocar, aunque es lo que decide cuánto pesa cada nota
+  // en la media que se enseña arriba.
+  const [tempWeight, setTempWeight] = useState('');
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -461,7 +562,12 @@ export default function ProfileScreen() {
   const openSubject = (subject) => {
     setSelectedSubject(subject);
     setEditSubName(subject?.name ?? '');
-    setEditSubDifficulty(String(subject?.difficulty ?? 5));
+    setEditSubDifficulty(difficultyLevelOf(subject?.difficulty));
+    setEditSubTarget(
+      Number.isFinite(Number(subject?.targetGrade)) && Number(subject?.targetGrade) > 0
+        ? Number(subject.targetGrade)
+        : null
+    );
     // A subject created before the palette existed keeps whatever colour it
     // has; the picker just doesn't show any of the swatches as selected.
     setEditSubColor(subject?.color ?? subjectPalette[0]);
@@ -472,9 +578,17 @@ export default function ProfileScreen() {
 
   const saveSubject = async () => {
     if (!editSubName.trim() || !user?.uid) return;
-    const difficulty = parseInt(editSubDifficulty, 10) || 5;
+    const difficulty = Number(editSubDifficulty) || 5;
     try {
-      const fields = { name: editSubName.trim(), difficulty, color: editSubColor };
+      const fields = {
+        name: editSubName.trim(),
+        difficulty,
+        color: editSubColor,
+        // `null` y no borrar el campo: es lo que lee `riskFactor` para decidir
+        // si mide la distancia al objetivo o vuelve a su comportamiento de
+        // antes, y quitar un objetivo tiene que poder deshacer eso.
+        targetGrade: editSubTarget,
+      };
       if (selectedSubject) {
         await useUserStore.getState().editSubject(user.uid, selectedSubject.id, fields);
       } else {
@@ -503,13 +617,17 @@ export default function ProfileScreen() {
 
   const saveExamGrade = async (examId) => {
     if (!user?.uid || !tempGrade.trim()) return;
+    // Un peso vacío no es cero: es "déjalo como estaba". Guardarlo como 0
+    // sacaría la nota de la media sin que nadie lo pidiera.
+    const parsedWeight = parseFloat(tempWeight.replace(',', '.'));
+    const weight = Number.isFinite(parsedWeight) && parsedWeight > 0 ? parsedWeight : null;
     try {
-      await useUserStore.getState().updateExam(user.uid, examId, { grade: tempGrade });
-      setSubjectExams((prev) =>
-        prev.map((e) => (e.id === examId ? { ...e, grade: tempGrade } : e))
-      );
+      const fields = weight === null ? { grade: tempGrade } : { grade: tempGrade, weight };
+      await useUserStore.getState().updateExam(user.uid, examId, fields);
+      setSubjectExams((prev) => prev.map((e) => (e.id === examId ? { ...e, ...fields } : e)));
       setEditingExamId(null);
       setTempGrade('');
+      setTempWeight('');
     } catch {
       Alert.alert('Error', 'No se pudo actualizar la nota.');
     }
@@ -1007,16 +1125,78 @@ export default function ProfileScreen() {
           placeholderTextColor={tokens.colors.textDisabled}
         />
 
-        <Text style={styles.fieldLabel}>Dificultad (1-10)</Text>
-        <TextInput
-          style={styles.input}
-          value={editSubDifficulty}
-          onChangeText={setEditSubDifficulty}
-          keyboardType="numeric"
-          maxLength={2}
-          placeholder="5"
-          placeholderTextColor={tokens.colors.textDisabled}
+        {/* La nota que quieres sacar. Un deslizador y no botones porque son
+            seis valores (5 a 10) y en una fila de botones no caben legibles.
+            Sin decimales: un objetivo es una intención, no una predicción. */}
+        <Text style={styles.fieldLabel}>Nota que quieres sacar</Text>
+        <View style={styles.targetHead}>
+          <Text style={styles.targetValue}>{editSubTarget ?? '—'}</Text>
+          <Text style={styles.targetLabel}>
+            {editSubTarget ? TARGET_LABELS[editSubTarget] : 'sin objetivo'}
+          </Text>
+          {editSubTarget ? (
+            <TouchableOpacity onPress={() => setEditSubTarget(null)} accessibilityRole="button">
+              <Text style={styles.targetClear}>quitar</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        <Slider
+          minimumValue={TARGET_MIN}
+          maximumValue={TARGET_MAX}
+          step={1}
+          value={editSubTarget ?? 7}
+          onValueChange={(value) => setEditSubTarget(Math.round(value))}
+          minimumTrackTintColor={tokens.colors.accent}
+          maximumTrackTintColor={tokens.colors.surfaceHover}
+          thumbTintColor={tokens.colors.accent}
+          accessibilityLabel="Nota que quieres sacar"
         />
+        <View style={styles.targetTicks}>
+          {[5, 6, 7, 8, 9, 10].map((n) => (
+            <Text key={n} style={styles.targetTick}>
+              {n}
+            </Text>
+          ))}
+        </View>
+        {selectedSubject && Number(selectedSubject.average) > 0 ? (
+          <Text style={styles.targetGap}>
+            {editSubTarget
+              ? Number(selectedSubject.average) >= editSubTarget
+                ? 'Ya estás en tu objetivo.'
+                : `Te faltan ${formatGrade(editSubTarget - Number(selectedSubject.average))} para llegar al ${editSubTarget}.`
+              : `Tu media es ${formatGrade(selectedSubject.average)}, sin objetivo puesto.`}
+          </Text>
+        ) : null}
+        <Text style={styles.targetHelp}>
+          Cámbialo cuando quieras: en octubre nadie sabe lo que le va a costar una asignatura.
+        </Text>
+
+        {/* Tres niveles y no un 1-10: el campo numérico no validaba nada (cabía
+            un 99) y nadie distingue un 6 de un 7 en su propia asignatura. Se
+            guarda igual como número en la escala que ya usa el algoritmo. */}
+        <Text style={styles.fieldLabel}>Dificultad</Text>
+        <View style={styles.difficultyRow}>
+          {DIFFICULTY_LEVELS.map((level) => {
+            const active = editSubDifficulty === level.value;
+            return (
+              <TouchableOpacity
+                key={level.value}
+                onPress={() => setEditSubDifficulty(level.value)}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={[styles.difficultyOption, active && styles.difficultyOptionOn]}
+              >
+                <Text style={[styles.difficultyText, active && styles.difficultyTextOn]}>
+                  {level.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <Text style={styles.targetHelp}>
+          Ajusta cuántas sesiones te prepara el plan para sus exámenes.
+        </Text>
 
         {/* A closed palette on purpose: these colours categorise subjects
             across the whole app, so a free colour wheel would let two subjects
@@ -1079,6 +1259,16 @@ export default function ProfileScreen() {
                               onChangeText={setTempGrade}
                               keyboardType="numeric"
                               autoFocus
+                              accessibilityLabel="Nota"
+                            />
+                            <TextInput
+                              style={styles.weightInput}
+                              value={tempWeight}
+                              onChangeText={setTempWeight}
+                              keyboardType="numeric"
+                              placeholder="%"
+                              placeholderTextColor={tokens.colors.textDisabled}
+                              accessibilityLabel="Peso de la nota, en porcentaje"
                             />
                             <TouchableOpacity
                               onPress={() => saveExamGrade(exam.id)}
@@ -1099,8 +1289,12 @@ export default function ProfileScreen() {
                             onPress={() => {
                               setEditingExamId(exam.id);
                               setTempGrade(String(exam.grade || ''));
+                              setTempWeight(exam.weight ? String(exam.weight) : '');
                             }}
                           >
+                            {exam.weight ? (
+                              <Text style={styles.examWeight}>{exam.weight}%</Text>
+                            ) : null}
                             <Text style={styles.examGradeText}>{exam.grade || '—'}</Text>
                             <Pencil size={12} color={tokens.colors.textSecondary} />
                           </TouchableOpacity>
@@ -1559,48 +1753,172 @@ const styles = StyleSheet.create({
   },
 
   // Subjects
+  // Objetivo y dificultad, dentro de la hoja de materia
+  targetHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+  },
+  targetValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 32,
+    lineHeight: 32,
+    color: tokens.colors.accent,
+  },
+  targetLabel: {
+    flex: 1,
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  targetClear: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+    textDecorationLine: 'underline',
+  },
+  targetTicks: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 6,
+    marginTop: -4,
+  },
+  targetTick: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    color: tokens.colors.textDisabled,
+  },
+  targetGap: {
+    fontFamily: font.medium,
+    fontSize: 12.5,
+    color: tokens.colors.textPrimary,
+    marginTop: 10,
+  },
+  targetHelp: {
+    fontFamily: font.regular,
+    fontSize: 11.5,
+    lineHeight: 17,
+    color: tokens.colors.textDisabled,
+    marginTop: 8,
+  },
+  difficultyRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  difficultyOption: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: tokens.radius.button,
+    backgroundColor: tokens.colors.surfaceHover,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    alignItems: 'center',
+  },
+  difficultyOptionOn: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  difficultyText: {
+    fontFamily: font.medium,
+    fontSize: 12.5,
+    color: tokens.colors.textSecondary,
+  },
+  difficultyTextOn: {
+    fontFamily: font.semibold,
+    color: tokens.colors.accent,
+  },
+
   subjectsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
   },
+  // Vertical, no en fila: la ficha ya no lleva solo un número, lleva la media,
+  // el objetivo y la barra entre los dos, y en fila no caben sin apretarse.
   subjectTile: {
     width: '48%',
     flexGrow: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
+    padding: 14,
     backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
     borderColor: tokens.colors.borderDefault,
     borderRadius: tokens.radius.card,
   },
-  subjectAvatar: {
-    width: 38,
-    height: 38,
+  // El tic va en la esquina y es verde siempre: el color de la materia no
+  // puede ser la señal de "objetivo alcanzado" porque hay materias verdes.
+  subjectReached: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    width: 20,
+    height: 20,
     borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.success,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  subjectAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
   subjectInitial: {
     fontFamily: font.bold,
-    fontSize: 15,
+    fontSize: 14,
     color: '#FFFFFF',
-  },
-  subjectBody: {
-    flex: 1,
-    minWidth: 0,
   },
   subjectName: {
     fontFamily: font.medium,
-    fontSize: 14,
+    fontSize: 13.5,
+    lineHeight: 18,
     color: tokens.colors.textPrimary,
+    marginBottom: 8,
+    // Dos líneas fijas para que las fichas de una fila queden a la misma
+    // altura tenga la materia un nombre corto o largo.
+    minHeight: 36,
+  },
+  subjectGradeRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 5,
   },
   subjectGrade: {
-    fontFamily: font.bold,
-    fontSize: 15,
-    color: tokens.colors.accent,
+    fontFamily: tokens.typography.families.display,
+    fontSize: 24,
+    lineHeight: 24,
+    color: tokens.colors.textPrimary,
+  },
+  subjectArrow: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+  },
+  subjectTarget: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+  },
+  subjectBar: {
+    height: 3,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceHover,
+    marginTop: 9,
+    overflow: 'hidden',
+  },
+  subjectBarFill: {
+    height: '100%',
+    borderRadius: tokens.radius.pill,
+  },
+  // Dorado, no gris: "sin objetivo" es algo que se puede arreglar, no un
+  // estado neutro. Es lo que le da destino al paso 5 del onboarding.
+  subjectHint: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: tokens.colors.premiumText,
+    marginTop: 7,
   },
 
   // Notes
@@ -1845,6 +2163,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: tokens.colors.textPrimary,
     textAlign: 'center',
+  },
+  // Más estrecho que el de la nota a propósito: es un dato secundario, y así
+  // los dos campos caben en la fila sin empujar los botones fuera.
+  weightInput: {
+    width: 40,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    borderRadius: tokens.radius.btn,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    textAlign: 'center',
+  },
+  examWeight: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    color: tokens.colors.textDisabled,
+    backgroundColor: tokens.colors.surfaceHover,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 5,
+    overflow: 'hidden',
   },
   examBtn: {
     padding: 4,
