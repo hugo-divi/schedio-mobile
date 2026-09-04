@@ -23,6 +23,8 @@ import {
   FileText,
   AlertCircle,
   CloudUpload,
+  CalendarDays,
+  Target,
 } from 'lucide-react-native';
 import Animated, { LinearTransition, FadeIn, FadeOut } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
@@ -30,7 +32,9 @@ import { startOfWeek, addDays, isSameDay, isToday, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 import { tokens } from '../../theme/tokens';
-import { planReasonsFor } from '../../services/microplanService';
+import { planReasonsFor, DEFAULT_REST_DAYS, STUDY_PHASES } from '../../services/microplanService';
+import { getUpcomingExams } from '../../services/exams';
+import { dayLoadWidth, examProgressFor } from '../../services/planPresentation';
 import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
@@ -156,9 +160,13 @@ function Segmented({ value, onChange, options }) {
 
 function TaskRow({ task, highlighted, onPress, onEdit, onToggle }) {
   const color = task.subjectColor || SUBJECT_FALLBACK_COLOR;
-  const meta = [task.subjectName, task.type === 'manual' ? 'suelta' : task.phase]
-    .filter(Boolean)
-    .join(' · ');
+  // `reason` es la frase que ya explica el porqué de la tarea (services/
+  // microplanService.js `explain()`) — es la misma que se ve al mantener
+  // pulsada la tarjeta. Sin ella (tareas sueltas, restos antiguos), se cae a
+  // la materia y la fase, que es lo que había antes.
+  const meta =
+    task.reason ||
+    [task.subjectName, task.type === 'manual' ? 'suelta' : task.phase].filter(Boolean).join(' · ');
 
   return (
     <TouchableOpacity
@@ -177,9 +185,16 @@ function TaskRow({ task, highlighted, onPress, onEdit, onToggle }) {
       </View>
 
       <View style={styles.taskBody}>
-        <Text style={[styles.taskText, task.completed && styles.taskTextDone]} numberOfLines={2}>
-          {task.text}
-        </Text>
+        <View style={styles.taskTitleRow}>
+          <Text style={[styles.taskText, task.completed && styles.taskTextDone]} numberOfLines={2}>
+            {task.text}
+          </Text>
+          {task.isOptional ? (
+            <View style={styles.optionalBadge}>
+              <Text style={styles.optionalBadgeText}>Opcional</Text>
+            </View>
+          ) : null}
+        </View>
         <View style={styles.taskMetaRow}>
           {task.isPanicMode ? (
             <AlertCircle size={11} color={tokens.colors.danger} strokeWidth={2} />
@@ -213,49 +228,271 @@ function TaskRow({ task, highlighted, onPress, onEdit, onToggle }) {
   );
 }
 
-function DayBlock({ day, tasks, highlightId, onPressTask, onEditTask, onToggleTask }) {
-  const total = minutesOf(tasks);
-  const today = isToday(day);
+/**
+ * La tira de siete días de la semana visible. Sustituye a la lista vertical
+ * de días: se elige uno y todo lo demás (ahora / hoy / esta semana) gira en
+ * torno a él. Paginar de semana sigue siendo cosa del `NavArrow` del
+ * encabezado — esta tira solo elige un día *dentro* de la semana ya visible,
+ * por eso no lleva sus propias flechas como en la maqueta: hubiese sido un
+ * segundo mecanismo de navegación haciendo el mismo trabajo que el de arriba.
+ */
+function DayStrip({ days, tasksByDay, selectedIndex, onSelect }) {
+  return (
+    <View style={styles.dayStrip}>
+      {days.map((day, index) => {
+        const active = index === selectedIndex;
+        const minutes = minutesOf(tasksByDay[index]);
+        const width = dayLoadWidth(minutes);
+        return (
+          <TouchableOpacity
+            key={day.toISOString()}
+            onPress={() => onSelect(index)}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            style={[styles.dayCell, active && styles.dayCellActive]}
+          >
+            <Text style={[styles.dayCellDow, active && styles.dayCellTextActive]}>
+              {format(day, 'EEEEEE', { locale: es })}
+            </Text>
+            <Text style={[styles.dayCellNum, active && styles.dayCellTextActive]}>
+              {format(day, 'd')}
+            </Text>
+            <View
+              style={[
+                styles.dayCellLoad,
+                { width: width || 7 },
+                width === 0 && styles.dayCellLoadEmpty,
+                active && styles.dayCellLoadActive,
+              ]}
+            />
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Alternador Día/Examen. Dos botones con icono, sin texto — igual que en la
+ * maqueta: el icono ya dice qué vista es cada uno una vez que se ha tocado
+ * una vez. */
+function ViewToggle({ value, onChange }) {
+  return (
+    <View style={styles.viewToggle}>
+      <TouchableOpacity
+        onPress={() => onChange('day')}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Ver por día"
+        accessibilityState={{ selected: value === 'day' }}
+        style={[styles.viewToggleBtn, value === 'day' && styles.viewToggleBtnActive]}
+      >
+        <CalendarDays
+          size={15}
+          strokeWidth={2}
+          color={value === 'day' ? tokens.colors.textPrimary : tokens.colors.textSecondary}
+        />
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={() => onChange('exam')}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel="Ver por examen"
+        accessibilityState={{ selected: value === 'exam' }}
+        style={[styles.viewToggleBtn, value === 'exam' && styles.viewToggleBtnActive]}
+      >
+        <Target
+          size={15}
+          strokeWidth={2}
+          color={value === 'exam' ? tokens.colors.textPrimary : tokens.colors.textSecondary}
+        />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/**
+ * La sección "ahora": lo único que hay que decidir para arrancar. Tres
+ * estados — día libre, día ya completado, o la siguiente tarea pendiente con
+ * su botón Empezar. El CTA nunca desaparece: en los dos primeros casos ofrece
+ * adelantar la próxima sesión pendiente de la semana en vez de dejar la
+ * pantalla sin un siguiente paso.
+ */
+function NowCard({ state, task, onStart, onPull, canPull }) {
+  if (state === 'rest') {
+    return (
+      <View style={styles.nowCard}>
+        <Text style={styles.nowTitle}>Día de descanso</Text>
+        <Text style={styles.nowWhy}>
+          Te lo has ganado. Si te apetece, puedes adelantar trabajo.
+        </Text>
+        {canPull ? (
+          <TouchableOpacity
+            onPress={onPull}
+            activeOpacity={0.85}
+            style={styles.ctaGhost}
+            accessibilityRole="button"
+          >
+            <Text style={styles.ctaGhostText}>Adelantar una sesión</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
+  if (state === 'empty') {
+    return (
+      <View style={styles.nowCard}>
+        <Text style={styles.nowTitle}>Sin tareas este día</Text>
+        <Text style={styles.nowWhy}>
+          No hay nada planificado. Puedes adelantar trabajo si quieres.
+        </Text>
+        {canPull ? (
+          <TouchableOpacity
+            onPress={onPull}
+            activeOpacity={0.85}
+            style={styles.ctaGhost}
+            accessibilityRole="button"
+          >
+            <Text style={styles.ctaGhostText}>Adelantar una sesión</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
+  if (state === 'done') {
+    return (
+      <View style={styles.nowCard}>
+        <Text style={styles.nowTitle}>Día completado</Text>
+        <Text style={styles.nowWhy}>Puedes parar aquí.</Text>
+        {canPull ? (
+          <TouchableOpacity
+            onPress={onPull}
+            activeOpacity={0.85}
+            style={styles.ctaGhost}
+            accessibilityRole="button"
+          >
+            <Text style={styles.ctaGhostText}>Adelantar la siguiente</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
+  const color = task.subjectColor || SUBJECT_FALLBACK_COLOR;
+  return (
+    <View style={[styles.nowCard, styles.nowCardActive]}>
+      <View style={styles.nowHead}>
+        <View style={[styles.nowDot, { backgroundColor: color }]} />
+        <Text style={styles.nowSubject} numberOfLines={1}>
+          {task.subjectName}
+        </Text>
+        <Text style={styles.nowMinutes}>{task.duration} min</Text>
+      </View>
+      <Text style={styles.nowTitle}>{task.text}</Text>
+      {task.reason ? <Text style={styles.nowWhy}>{task.reason}</Text> : null}
+      <TouchableOpacity
+        onPress={onStart}
+        activeOpacity={0.9}
+        style={styles.ctaPrimary}
+        accessibilityRole="button"
+      >
+        <Text style={styles.ctaPrimaryText}>Empezar · {task.duration} min</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** Una fila de "esta semana": otro día que no es el seleccionado, resumido en
+ * una línea — materias, no puntos, y sus minutos. Tocarla salta a ese día. */
+function WeekRow({ label, isRest, isToday: dayIsToday, allDone, subjectNames, minutes, onPress }) {
+  if (isRest) {
+    return (
+      <View style={[styles.weekRow, styles.weekRowRest]}>
+        <Text style={styles.weekRowDay}>{label}</Text>
+        <Text style={styles.weekRowRestText}>descanso</Text>
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.8}
+      style={[styles.weekRow, dayIsToday && styles.weekRowToday]}
+    >
+      <Text style={[styles.weekRowDay, dayIsToday && styles.weekRowDayToday]}>{label}</Text>
+      <Text style={[styles.weekRowNames, allDone && styles.weekRowNamesDone]} numberOfLines={1}>
+        {subjectNames}
+        {allDone ? ' · hecho' : ''}
+      </Text>
+      <Text style={styles.weekRowMinutes}>{minutes}′</Text>
+    </TouchableOpacity>
+  );
+}
+
+/** Una tarjeta de examen, para la vista "por examen": sesiones hechas/totales,
+ * la barra de progreso, la pista de las cuatro fases y, debajo, en qué fase
+ * está y qué le queda. */
+function ExamCard({ exam }) {
+  const color = exam.subjectColor || SUBJECT_FALLBACK_COLOR;
+  const pct =
+    exam.totalSessions > 0 ? Math.round((exam.doneSessions / exam.totalSessions) * 100) : 0;
 
   return (
-    <Animated.View layout={LIST_TRANSITION} style={styles.dayBlock}>
-      <View style={[styles.dayPill, today && styles.dayPillToday]}>
-        <Text style={[styles.dayLabel, today && { color: tokens.colors.accent }]}>
-          {format(day, 'EEEE d', { locale: es })}
+    <View
+      style={[styles.examCard, exam.ready && styles.examCardReady, exam.hot && styles.examCardHot]}
+    >
+      <View style={styles.examHead}>
+        <View style={[styles.examDot, { backgroundColor: color }]} />
+        <Text style={styles.examName} numberOfLines={1}>
+          {exam.name}
         </Text>
-        {today ? <Text style={styles.dayToday}>Hoy</Text> : null}
-        {total > 0 ? (
-          <Text style={[styles.dayTotal, today && { color: tokens.colors.accent }]}>
-            {total} min
-          </Text>
+        <Text style={[styles.examDate, exam.hot && styles.examDateHot]}>{exam.dateLabel}</Text>
+      </View>
+
+      <View style={styles.examSessionsRow}>
+        <Text style={styles.examSessionsValue}>
+          {exam.notStarted ? 'Sin empezar' : `${exam.doneSessions} de ${exam.totalSessions}`}
+        </Text>
+        {exam.ready ? (
+          <Text style={styles.examReadyTag}>preparado</Text>
+        ) : !exam.notStarted ? (
+          <Text style={styles.examSessionsLabel}>sesiones hechas</Text>
         ) : null}
       </View>
 
-      {tasks.length === 0 ? (
-        <Text style={styles.dayEmpty}>Día libre — sin tareas asignadas</Text>
-      ) : (
-        <View style={styles.dayTasks}>
-          {tasks.map((task) => (
-            <Animated.View
-              key={task.id}
-              layout={LIST_TRANSITION}
-              entering={FadeIn.duration(180)}
-              exiting={FadeOut.duration(150)}
-            >
-              <TaskRow
-                task={task}
-                highlighted={
-                  !!highlightId && (task.examId === highlightId || task.id === highlightId)
-                }
-                onPress={() => onPressTask(task)}
-                onEdit={() => onEditTask(task)}
-                onToggle={() => onToggleTask(task)}
-              />
-            </Animated.View>
-          ))}
-        </View>
-      )}
-    </Animated.View>
+      <View style={styles.examTrack}>
+        <View
+          style={[
+            styles.examTrackFill,
+            { width: `${exam.notStarted ? 2 : pct}%`, backgroundColor: color },
+          ]}
+        />
+      </View>
+
+      <View style={styles.examPhaseTrack}>
+        {STUDY_PHASES.map((phase, index) => (
+          <View
+            key={phase}
+            style={[
+              styles.examPhaseDot,
+              index < exam.phaseIndex && styles.examPhaseDotDone,
+              index === exam.phaseIndex && styles.examPhaseDotAt,
+            ]}
+          />
+        ))}
+      </View>
+
+      <View style={styles.examFooter}>
+        <Text style={styles.examFooterLeft} numberOfLines={1}>
+          {exam.phaseLabel}
+        </Text>
+        <Text style={styles.examFooterRight} numberOfLines={1}>
+          {exam.footerRight}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -466,6 +703,10 @@ export default function PlansScreen() {
   const subjects = useUserStore((state) => state.subjects);
   const planDiagnostics = useUserStore((state) => state.planDiagnostics);
   const profile = useUserStore((state) => state.profile);
+  // No hay una lista de exámenes compartida en el store (cada pantalla la pide
+  // por su cuenta, igual que hace Inicio o Perfil); este contador es la señal
+  // para volver a pedirla cuando algo la cambia en otro sitio.
+  const examRefreshTrigger = useUserStore((state) => state.examRefreshTrigger);
 
   const params = useLocalSearchParams();
   const highlightId = params.highlightId;
@@ -496,6 +737,13 @@ export default function PlansScreen() {
   const [uploadSubjectId, setUploadSubjectId] = useState(null);
   const [openFolder, setOpenFolder] = useState(null);
   const [planInfoSheet, setPlanInfoSheet] = useState(false);
+
+  // Día / examen — qué se ve dentro de la pestaña Planes.
+  const [view, setView] = useState('day');
+  // Qué día de la semana visible está abierto. Se recoloca cuando cambia la
+  // semana (ver el efecto más abajo), así que no hace falta sincronizarlo a
+  // mano en cada sitio que cambia `weekOffset`.
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
 
   const planReasons = useMemo(
     () =>
@@ -530,17 +778,159 @@ export default function PlansScreen() {
     [tasksByDay]
   );
 
-  // Arriving from the home screen's "ver en el plan": jump to whichever week
-  // actually holds the task, otherwise the highlight lands off-screen.
+  // Los días libres del alumno. Mismo valor por defecto que ya usa el
+  // planificador (services/microplanService.js) cuando el perfil no trae
+  // ninguno — así "es descanso" significa lo mismo aquí que en el algoritmo
+  // que decidió no ponerle tareas ese día.
+  const restDaySet = useMemo(() => {
+    const restDays = profile?.restDays?.length ? profile.restDays : DEFAULT_REST_DAYS;
+    return new Set(restDays);
+  }, [profile?.restDays]);
+
+  const selectedDay = days[selectedDayIndex] || days[0];
+  const selectedDayTasks = tasksByDay[selectedDayIndex] || [];
+  const selectedDayIsRest = restDaySet.has(selectedDay.getDay());
+  const pendingToday = useMemo(
+    () => selectedDayTasks.filter((task) => !task.completed),
+    [selectedDayTasks]
+  );
+  const doneCountToday = selectedDayTasks.length - pendingToday.length;
+  const remainingMinutesToday = minutesOf(pendingToday);
+
+  // Estado de la tarjeta "ahora": descanso, sin tareas, completado, o la
+  // siguiente pendiente.
+  const nowState = selectedDayIsRest
+    ? 'rest'
+    : selectedDayTasks.length === 0
+      ? 'empty'
+      : pendingToday.length === 0
+        ? 'done'
+        : 'active';
+
+  // El día más próximo (dentro de la semana visible) con algo pendiente, para
+  // "adelantar". Solo busca en los días ya cargados: la paginación de semana
+  // sigue siendo el mecanismo para ir más lejos, así que no hace falta un
+  // salto que cruce semanas.
+  const pullTargetIndex = useMemo(() => {
+    for (let i = selectedDayIndex + 1; i < tasksByDay.length; i += 1) {
+      if (tasksByDay[i].some((task) => !task.completed)) return i;
+    }
+    return -1;
+  }, [tasksByDay, selectedDayIndex]);
+
+  const weekDoneMinutes = useMemo(
+    () =>
+      tasksByDay.reduce(
+        (sum, tasks) =>
+          sum + tasks.filter((t) => t.completed).reduce((s, t) => s + (t.duration || 0), 0),
+        0
+      ),
+    [tasksByDay]
+  );
+
+  // Una fila por cada día que no es el seleccionado: materias (sin repetir),
+  // si es descanso, si ya está todo hecho.
+  const weekRows = useMemo(
+    () =>
+      days
+        .map((day, index) => {
+          if (index === selectedDayIndex) return null;
+          const isRest = restDaySet.has(day.getDay());
+          const tasks = tasksByDay[index];
+          const label = format(day, 'EEEE', { locale: es });
+          if (isRest) return { key: day.toISOString(), index, label, isRest: true };
+          if (tasks.length === 0) return null;
+          const names = Array.from(new Set(tasks.map((t) => t.subjectName).filter(Boolean))).join(
+            ', '
+          );
+          return {
+            key: day.toISOString(),
+            index,
+            label,
+            isRest: false,
+            isToday: isToday(day),
+            allDone: tasks.every((t) => t.completed),
+            subjectNames: names,
+            minutes: minutesOf(tasks),
+          };
+        })
+        .filter(Boolean),
+    [days, tasksByDay, selectedDayIndex, restDaySet]
+  );
+
+  /**
+   * Qué día abrir: por un enlace desde Inicio ("ver en el plan") o, si no hay
+   * ninguno, hoy — y si hoy no cae en la semana visible, el primer día.
+   *
+   * Un único efecto en vez de dos separados. Tenerlos aparte producía una
+   * carrera real: el salto del enlace fijaba el día correcto y, un render
+   * después, el efecto que recolocaba el día al cambiar de semana lo pisaba
+   * con "hoy" — porque cambiar de semana es exactamente lo que ese mismo
+   * salto también hace. Aquí, cuando el objetivo no está en la semana visible
+   * el efecto cambia de semana y se vuelve a ejecutar solo (depende de
+   * `days`), esta vez encontrándolo.
+   */
   useEffect(() => {
-    if (!highlightId) return;
-    const target = (microplans || []).find(
-      (task) => task.examId === highlightId || task.id === highlightId
+    if (highlightId) {
+      const target = (microplans || []).find(
+        (task) => task.examId === highlightId || task.id === highlightId
+      );
+      if (target?.date) {
+        const targetDate = new Date(target.date);
+        const index = days.findIndex((day) => isSameDay(day, targetDate));
+        if (index !== -1) {
+          setView('day');
+          setSelectedDayIndex(index);
+          return;
+        }
+        // Todavía no es la semana correcta: saltar y dejar que este mismo
+        // efecto se repita con `days` ya actualizado.
+        if (weekOffset === 0) {
+          const nextWeek = weekDays(1);
+          if (nextWeek.some((day) => isSameDay(day, targetDate))) {
+            setWeekOffset(1);
+            return;
+          }
+        }
+      }
+    }
+    const todayIndex = days.findIndex((day) => isToday(day));
+    setSelectedDayIndex(todayIndex === -1 ? 0 : todayIndex);
+  }, [days, highlightId, microplans, weekOffset]);
+
+  // ── Vista por examen ──
+  //
+  // No hay una lista de exámenes en el store: se pide igual que en Inicio o
+  // Perfil, y se vuelve a pedir cuando `examRefreshTrigger` cambia (un examen
+  // creado, editado o calificado en cualquier otra pantalla).
+  const [examsList, setExamsList] = useState([]);
+  useEffect(() => {
+    if (!user || view !== 'exam') return;
+    let cancelled = false;
+    getUpcomingExams(user.uid, 20)
+      .then((list) => {
+        if (!cancelled) setExamsList(list);
+      })
+      .catch((error) => console.warn('No se pudieron cargar los exámenes', error));
+    return () => {
+      cancelled = true;
+    };
+  }, [user, view, examRefreshTrigger]);
+
+  const todaysExamIds = useMemo(() => {
+    const todayIndex = days.findIndex((day) => isToday(day));
+    if (todayIndex === -1) return new Set();
+    return new Set(
+      tasksByDay[todayIndex].filter((t) => !t.completed && t.examId).map((t) => t.examId)
     );
-    if (!target?.date) return;
-    const nextWeek = weekDays(1);
-    if (nextWeek.some((day) => isSameDay(day, new Date(target.date)))) setWeekOffset(1);
-  }, [highlightId, microplans]);
+  }, [days, tasksByDay]);
+
+  // El cálculo en sí vive en services/planPresentation.js — pura función,
+  // sin React Native, verificable con Node en scripts/check-plan-screen.mjs.
+  const examsWithProgress = useMemo(
+    () => examsList.map((exam) => examProgressFor({ exam, subjects, microplans, todaysExamIds })),
+    [examsList, subjects, microplans, todaysExamIds]
+  );
 
   // Se cuenta sobre los materiales vivos, igual que `canUpload` en el store:
   // borrar un archivo devuelve la subida de esa semana.
@@ -655,6 +1045,12 @@ export default function PlansScreen() {
     if (task) useUserStore.getState().deleteMicroTask(user?.uid, task.id);
   };
 
+  const pullForward = () => {
+    if (pullTargetIndex === -1) return;
+    if (Platform.OS !== 'web') Haptics.selectionAsync();
+    setSelectedDayIndex(pullTargetIndex);
+  };
+
   // ── Mochila handlers ──
 
   const handleUploadSuccess = async (fileData) => {
@@ -676,80 +1072,177 @@ export default function PlansScreen() {
 
   // ── Render ──
 
-  const renderPlanes = () => (
-    <View style={styles.tabBody}>
-      {/* AiTeaser retirado para la revisión de Play Store: era un control con
-          badge Prime y botón GENERAR sin `onPress` — una función de pago
-          anunciada dentro de la app que todavía no existe. Vuelve el 6 de
-          septiembre, con el coach ya funcionando detrás. El componente está
-          en el commit anterior a este. */}
-      <View>
-        <SectionTitle>Planes automáticos</SectionTitle>
-        <Text style={styles.sectionNote}>
-          Repartidos por prioridad según tus exámenes y entregas. Mantén pulsada una tarea para
-          editarla.
-        </Text>
+  const renderPlanes = () => {
+    if (storeLoading) {
+      return (
+        <View style={styles.tabBody}>
+          <View style={styles.centered}>
+            <ActivityIndicator size="large" color={tokens.colors.accent} />
+            <Text style={styles.centeredText}>Generando tu plan…</Text>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.tabBody}>
+        <View style={styles.planesHeadRow}>
+          <View style={{ flex: 1 }}>
+            <SectionTitle>Planes automáticos</SectionTitle>
+            <Text style={styles.sectionNote}>
+              Repartidos por prioridad según tus exámenes y entregas.
+            </Text>
+          </View>
+          <ViewToggle value={view} onChange={setView} />
+        </View>
+
+        {view === 'day' ? (
+          weekTaskCount === 0 ? (
+            <View style={styles.centered}>
+              <Text style={styles.emptyTitle}>Semana sin tareas</Text>
+              <Text style={styles.centeredText}>
+                Añade exámenes desde el calendario y el plan se genera solo, o crea una tarea
+                suelta.
+              </Text>
+            </View>
+          ) : (
+            <>
+              <DayStrip
+                days={days}
+                tasksByDay={tasksByDay}
+                selectedIndex={selectedDayIndex}
+                onSelect={setSelectedDayIndex}
+              />
+
+              {/* 1 · el paso accionable, primero — antes de cualquier lista. */}
+              <NowCard
+                state={nowState}
+                task={pendingToday[0]}
+                onStart={() => openSession(pendingToday[0])}
+                onPull={pullForward}
+                canPull={pullTargetIndex !== -1}
+              />
+
+              {!selectedDayIsRest ? (
+                <View>
+                  <View style={styles.capRow}>
+                    <Text style={styles.cap}>
+                      {isToday(selectedDay)
+                        ? 'todo el día'
+                        : format(selectedDay, 'EEEE d', { locale: es })}
+                    </Text>
+                    <Text style={styles.capEm}>
+                      {doneCountToday} de {selectedDayTasks.length} ·{' '}
+                      {formatTotal(remainingMinutesToday)} restantes
+                    </Text>
+                  </View>
+
+                  {selectedDayTasks.length > 0 ? (
+                    <View style={styles.dayTasksCard}>
+                      {selectedDayTasks.map((task, index) => (
+                        <Animated.View
+                          key={task.id}
+                          layout={LIST_TRANSITION}
+                          entering={FadeIn.duration(180)}
+                          exiting={FadeOut.duration(150)}
+                          style={index > 0 && styles.taskDivider}
+                        >
+                          <TaskRow
+                            task={task}
+                            highlighted={
+                              !!highlightId &&
+                              (task.examId === highlightId || task.id === highlightId)
+                            }
+                            onPress={() => openSession(task)}
+                            onEdit={() => openEditor(task)}
+                            onToggle={() => toggleTask(task)}
+                          />
+                        </Animated.View>
+                      ))}
+                    </View>
+                  ) : null}
+
+                  <View style={{ marginTop: 10 }}>
+                    <Button
+                      title="Añadir tarea suelta"
+                      variant="secondary"
+                      fullWidth
+                      icon={<Plus size={17} color={tokens.colors.textPrimary} />}
+                      onPress={() => {
+                        setEditingTask(null);
+                        setSheetOpen(true);
+                      }}
+                    />
+                  </View>
+                </View>
+              ) : null}
+
+              {/* 2 · la semana, sin cambiar de vista. */}
+              <View>
+                {/* "esta semana" es literal solo en weekOffset 0. Con Prime se
+                    puede mirar hasta 4 semanas por delante (MAX_WEEK_OFFSET_PRIME),
+                    así que llamarlo siempre "esta semana" habría sido falso para
+                    cualquiera que pagina hacia delante — el código anterior ya
+                    distinguía esto para el total, y aquí hace falta lo mismo. */}
+                <Text style={styles.cap}>
+                  {weekOffset === 0 ? 'esta semana' : `semana del ${weekRangeLabel(days)}`}
+                </Text>
+                <View style={styles.weeklyRow}>
+                  <Text style={styles.weeklyValue}>{formatTotal(weekTotal)}</Text>
+                  <Text style={styles.weeklyLabel}>planificados</Text>
+                  <Text style={styles.weeklyDone}>{formatTotal(weekDoneMinutes)} hechos</Text>
+                </View>
+                {planDiagnostics?.unscheduled?.length > 0 ? (
+                  <Text style={styles.diagnosticsNote}>
+                    {shortfallNote(planDiagnostics.unscheduled)}
+                  </Text>
+                ) : null}
+                <TouchableOpacity onPress={() => setPlanInfoSheet(true)} style={{ marginTop: 8 }}>
+                  <Text style={styles.link}>¿Por qué mi plan es así?</Text>
+                </TouchableOpacity>
+
+                {weekRows.length > 0 ? (
+                  <View style={{ marginTop: 10, gap: 6 }}>
+                    {weekRows.map((row) => (
+                      <WeekRow
+                        key={row.key}
+                        label={row.label}
+                        isRest={row.isRest}
+                        isToday={row.isToday}
+                        allDone={row.allDone}
+                        subjectNames={row.subjectNames}
+                        minutes={row.minutes}
+                        onPress={() => setSelectedDayIndex(row.index)}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            </>
+          )
+        ) : (
+          // 3 · los exámenes, siempre visibles — su propia vista, ninguno
+          // escondido detrás de nada.
+          <View>
+            {examsWithProgress.length === 0 ? (
+              <View style={styles.centered}>
+                <Text style={styles.emptyTitle}>Sin exámenes por delante</Text>
+                <Text style={styles.centeredText}>
+                  En cuanto añadas uno, aparecerá aquí con sus sesiones.
+                </Text>
+              </View>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {examsWithProgress.map((exam) => (
+                  <ExamCard key={exam.id} exam={exam} />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
       </View>
-
-      <Card padding={16}>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalValue}>{formatTotal(weekTotal)}</Text>
-          <Text style={styles.totalLabel}>
-            {weekOffset === 0
-              ? 'de estudio planificado esta semana'
-              : 'planificado la semana que viene'}
-          </Text>
-        </View>
-        {/* The scheduler is work-conserving, so leftovers are a real finding
-            about the week rather than noise. It was only ever logged. */}
-        {weekOffset === 0 && planDiagnostics?.unscheduled?.length > 0 ? (
-          <Text style={styles.diagnosticsNote}>{shortfallNote(planDiagnostics.unscheduled)}</Text>
-        ) : null}
-        <TouchableOpacity onPress={() => setPlanInfoSheet(true)} style={{ marginTop: 12 }}>
-          <Text style={styles.link}>¿Por qué mi plan es así?</Text>
-        </TouchableOpacity>
-      </Card>
-
-      {storeLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={tokens.colors.accent} />
-          <Text style={styles.centeredText}>Generando tu plan…</Text>
-        </View>
-      ) : weekTaskCount === 0 ? (
-        <View style={styles.centered}>
-          <Text style={styles.emptyTitle}>Semana sin tareas</Text>
-          <Text style={styles.centeredText}>
-            Añade exámenes desde el calendario y el plan se genera solo, o crea una tarea suelta.
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.days}>
-          {days.map((day, index) => (
-            <DayBlock
-              key={day.toISOString()}
-              day={day}
-              tasks={tasksByDay[index]}
-              highlightId={highlightId}
-              onPressTask={openSession}
-              onEditTask={openEditor}
-              onToggleTask={toggleTask}
-            />
-          ))}
-        </View>
-      )}
-
-      <Button
-        title="Añadir tarea suelta"
-        variant="secondary"
-        fullWidth
-        icon={<Plus size={17} color={tokens.colors.textPrimary} />}
-        onPress={() => {
-          setEditingTask(null);
-          setSheetOpen(true);
-        }}
-      />
-    </View>
-  );
+    );
+  };
 
   const renderMochila = () => (
     <View style={styles.tabBody}>
@@ -1044,25 +1537,6 @@ const styles = StyleSheet.create({
     color: tokens.colors.textDisabled,
   },
 
-  // Weekly total
-  totalRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
-  },
-  totalValue: {
-    fontFamily: tokens.typography.families.display,
-    fontSize: 40,
-    letterSpacing: 0.5,
-    color: tokens.colors.textPrimary,
-    flexShrink: 0,
-  },
-  totalLabel: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: 13,
-    color: tokens.colors.textSecondary,
-  },
   diagnosticsNote: {
     fontFamily: font.medium,
     fontSize: 13,
@@ -1078,74 +1552,391 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
 
-  // Days
-  days: {
-    gap: 24,
-  },
-  dayBlock: {
-    gap: 10,
-  },
-  dayPill: {
+  // Cabecera de la pestaña Planes: título + alternador Día/Examen
+  planesHeadRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  viewToggle: {
+    flexDirection: 'row',
+    gap: 3,
+    padding: 3,
+    backgroundColor: tokens.colors.surfaceCard,
     borderRadius: tokens.radius.pill,
+  },
+  viewToggleBtn: {
+    width: 30,
+    height: 26,
+    borderRadius: tokens.radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewToggleBtnActive: {
+    backgroundColor: tokens.colors.surfaceHover,
+  },
+
+  // Tira de los 7 días de la semana
+  dayStrip: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  dayCell: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 7,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  dayCellActive: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  dayCellDow: {
+    fontFamily: font.medium,
+    fontSize: 9,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    color: tokens.colors.textDisabled,
+  },
+  dayCellNum: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.textPrimary,
+    marginTop: 1,
+    marginBottom: 5,
+  },
+  dayCellTextActive: {
+    color: tokens.colors.accent,
+  },
+  dayCellLoad: {
+    height: 3,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.textDisabled,
+  },
+  dayCellLoadEmpty: {
+    backgroundColor: tokens.colors.surfaceHover,
+  },
+  dayCellLoadActive: {
+    backgroundColor: tokens.colors.accent,
+  },
+
+  // Tarjeta "ahora"
+  nowCard: {
+    padding: 14,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
     borderWidth: 1,
     borderColor: tokens.colors.borderDefault,
   },
-  dayPillToday: {
+  nowCardActive: {
     borderColor: tokens.colors.accentSoftBorder,
-    backgroundColor: tokens.colors.accentSoftBg,
   },
-  dayLabel: {
-    fontFamily: font.semibold,
-    fontSize: 14,
-    color: tokens.colors.textPrimary,
-    textTransform: 'capitalize',
+  nowHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginBottom: 9,
   },
-  dayToday: {
-    fontFamily: font.semibold,
-    fontSize: 11,
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    color: tokens.colors.accent,
+  nowDot: {
+    width: 9,
+    height: 9,
+    borderRadius: tokens.radius.pill,
   },
-  dayTotal: {
+  nowSubject: {
+    flex: 1,
     fontFamily: font.medium,
     fontSize: 12,
     color: tokens.colors.textSecondary,
   },
-  dayEmpty: {
-    fontFamily: font.regular,
-    fontSize: 13,
-    color: tokens.colors.textDisabled,
-    paddingLeft: 2,
+  nowMinutes: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    fontVariant: ['tabular-nums'],
   },
-  dayTasks: {
+  nowTitle: {
+    fontFamily: font.semibold,
+    fontSize: 15,
+    lineHeight: 20,
+    color: tokens.colors.textPrimary,
+  },
+  nowWhy: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    color: tokens.colors.textDisabled,
+    marginTop: 5,
+  },
+  ctaPrimary: {
+    marginTop: 13,
+    paddingVertical: 13,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.accent,
+    alignItems: 'center',
+  },
+  ctaPrimaryText: {
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: '#FFFFFF',
+  },
+  ctaGhost: {
+    marginTop: 13,
+    paddingVertical: 11,
+    borderRadius: tokens.radius.btn,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    alignItems: 'center',
+  },
+  ctaGhostText: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+
+  // Cabeceras de sección tipo "cap" (etiqueta pequeña en mayúsculas + extra)
+  capRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  cap: {
+    fontFamily: font.semibold,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: tokens.colors.textDisabled,
+    marginBottom: 10,
+  },
+  capEm: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    textTransform: 'none',
+    letterSpacing: 0,
+  },
+
+  // Tarjeta de tareas del día seleccionado — una sola tarjeta con divisores,
+  // como la maqueta, en vez de una tarjeta por tarea.
+  dayTasksCard: {
+    paddingHorizontal: 14,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    overflow: 'hidden',
+  },
+  // `surfaceHover` en vez de `background`: la maqueta usa un divisor más claro
+  // que el fondo de la pantalla (#2E2E2E sobre una tarjeta #242424) — con el
+  // fondo puro (#191919) la línea salía demasiado dura contra la tarjeta.
+  taskDivider: {
+    borderTopWidth: 1,
+    borderTopColor: tokens.colors.surfaceHover,
+  },
+
+  // Total semanal + filas de "esta semana"
+  weeklyRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
     gap: 8,
+    padding: 14,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderRadius: tokens.radius.card,
+  },
+  weeklyValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 26,
+    color: tokens.colors.textPrimary,
+  },
+  weeklyLabel: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+  },
+  weeklyDone: {
+    marginLeft: 'auto',
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: tokens.colors.textDisabled,
+  },
+  weekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: tokens.colors.surfaceCard,
+    borderRadius: tokens.radius.btn,
+  },
+  weekRowRest: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  weekRowToday: {
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  weekRowDay: {
+    width: 62,
+    fontFamily: font.medium,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    textTransform: 'capitalize',
+  },
+  weekRowDayToday: {
+    color: tokens.colors.accent,
+  },
+  weekRowRestText: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textDisabled,
+  },
+  weekRowNames: {
+    flex: 1,
+    fontFamily: font.medium,
+    fontSize: 12.5,
+    color: tokens.colors.textPrimary,
+  },
+  weekRowNamesDone: {
+    color: tokens.colors.textDisabled,
+  },
+  weekRowMinutes: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: tokens.colors.textDisabled,
+    fontVariant: ['tabular-nums'],
+  },
+
+  // Vista por examen
+  examCard: {
+    padding: 13,
+    borderRadius: tokens.radius.card,
+    backgroundColor: tokens.colors.surfaceCard,
+  },
+  examCardReady: {
+    borderWidth: 1,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  examCardHot: {
+    borderWidth: 1,
+    borderColor: 'rgba(216, 96, 74, 0.4)',
+  },
+  examHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  examDot: {
+    width: 9,
+    height: 9,
+    borderRadius: tokens.radius.pill,
+  },
+  examName: {
+    flex: 1,
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textPrimary,
+  },
+  examDate: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    color: tokens.colors.textSecondary,
+  },
+  examDateHot: {
+    color: tokens.colors.danger,
+  },
+  examSessionsRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginTop: 9,
+    marginBottom: 7,
+  },
+  examSessionsValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 20,
+    color: tokens.colors.textPrimary,
+  },
+  examSessionsLabel: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    color: tokens.colors.textDisabled,
+  },
+  examReadyTag: {
+    fontFamily: font.medium,
+    fontSize: 10.5,
+    color: tokens.colors.accent,
+  },
+  examTrack: {
+    height: 4,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceHover,
+    overflow: 'hidden',
+  },
+  examTrackFill: {
+    height: '100%',
+    borderRadius: tokens.radius.pill,
+  },
+  examPhaseTrack: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 9,
+  },
+  examPhaseDot: {
+    flex: 1,
+    height: 3,
+    borderRadius: tokens.radius.pill,
+    backgroundColor: tokens.colors.surfaceHover,
+  },
+  examPhaseDotDone: {
+    backgroundColor: tokens.colors.textDisabled,
+  },
+  examPhaseDotAt: {
+    backgroundColor: tokens.colors.accent,
+  },
+  examFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginTop: 8,
+  },
+  examFooterLeft: {
+    flexShrink: 1,
+    fontFamily: font.medium,
+    fontSize: 10.5,
+    color: tokens.colors.textDisabled,
+  },
+  examFooterRight: {
+    fontFamily: font.medium,
+    fontSize: 10.5,
+    color: tokens.colors.textDisabled,
   },
 
   // Task row
+  // Filas planas dentro de una única tarjeta agrupada (dayTasksCard) — como en
+  // la maqueta, un divisor entre tareas en vez de una tarjeta por tarea. Antes
+  // cada fila llevaba su propio fondo y borde; se quitó al pasar a la tarjeta
+  // agrupada, porque una tarjeta dentro de otra tarjeta se veía como un error
+  // de doble borde, no como una lista.
   taskRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 14,
-    backgroundColor: tokens.colors.surfaceCard,
-    borderWidth: 1,
-    borderColor: tokens.colors.borderDefault,
-    borderRadius: tokens.radius.card,
+    paddingVertical: 12,
   },
   // Deep link from the home screen ("ver en el plan") lands on a task.
   taskRowHighlighted: {
-    borderColor: tokens.colors.accent,
+    marginHorizontal: -14,
+    paddingHorizontal: 14,
     backgroundColor: tokens.colors.accentSoftBg,
   },
   taskRowPanic: {
-    borderColor: tokens.colors.danger,
+    marginHorizontal: -14,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(216, 96, 74, 0.1)',
   },
   taskAvatar: {
     width: 30,
@@ -1164,7 +1955,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
     gap: 2,
   },
+  taskTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
   taskText: {
+    flex: 1,
     fontFamily: font.medium,
     fontSize: 14,
     lineHeight: 19,
@@ -1173,6 +1970,18 @@ const styles = StyleSheet.create({
   taskTextDone: {
     color: tokens.colors.textSecondary,
     textDecorationLine: 'line-through',
+  },
+  optionalBadge: {
+    marginTop: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: tokens.radius.btn,
+    backgroundColor: tokens.colors.surfaceHover,
+  },
+  optionalBadgeText: {
+    fontFamily: font.medium,
+    fontSize: 9.5,
+    color: tokens.colors.textSecondary,
   },
   taskMetaRow: {
     flexDirection: 'row',

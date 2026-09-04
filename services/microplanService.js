@@ -317,6 +317,13 @@ const PHASES = [
   { until: Infinity, phase: 'REPASO FINAL', type: 'review' },
 ];
 
+/**
+ * Los cuatro nombres de fase, en orden, para pantallas que necesitan dibujar
+ * el arco (p. ej. la pista de puntos de la vista "por examen" en Planes) sin
+ * duplicar estos literales a mano ni arriesgarse a que se desincronicen.
+ */
+export const STUDY_PHASES = PHASES.map((band) => band.phase);
+
 const PANIC_PHASE = { phase: 'MODO PÁNICO 🔥', type: 'review' };
 
 /**
