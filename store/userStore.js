@@ -133,6 +133,10 @@ const initialState = {
   loading: false,
   error: null,
   examRefreshTrigger: 0,
+  // Valor de `examRefreshTrigger` la ultima vez que se regenero el plan. Solo
+  // de sesion, no se persiste: al arrancar la app el plan se regenera igual
+  // porque `microplans` viene vacio.
+  lastPlanExamTrigger: 0,
   hasSeenTour: false,
 };
 
@@ -586,12 +590,27 @@ const useUserStore = create((set, get) => ({
   },
 
   initDailyMicroplans: async (uid, force = false) => {
-    const { subjects, microplans, stats, profile, sessionHistory, manualTasks, planOverrides } =
-      get();
+    const {
+      subjects,
+      microplans,
+      stats,
+      profile,
+      sessionHistory,
+      manualTasks,
+      planOverrides,
+      examRefreshTrigger,
+      lastPlanExamTrigger,
+    } = get();
     const today = new Date().toDateString();
 
+    // `examRefreshTrigger` sube cada vez que se crea, edita o califica un
+    // examen. Sin esta condición el plan solo se regeneraba una vez al día, así
+    // que un examen añadido esta tarde no tenía ninguna tarea hasta mañana —
+    // que es justo cuando el alumno lo apunta: al enterarse de que lo tiene.
+    // El aviso ya existía; solo lo escuchaba la lista de la vista "por examen".
+    const examsChanged = examRefreshTrigger !== lastPlanExamTrigger;
     const shouldGenerate =
-      force || microplans.length === 0 || stats.lastPlanGenerationDate !== today;
+      force || microplans.length === 0 || stats.lastPlanGenerationDate !== today || examsChanged;
 
     if (shouldGenerate) {
       try {
@@ -627,7 +646,6 @@ const useUserStore = create((set, get) => ({
           sessions: currentSessions,
           completions,
           profile,
-          restDays: profile?.restDays,
         });
 
         // Generation is only half of it: the fresh plan then has to absorb
@@ -663,6 +681,9 @@ const useUserStore = create((set, get) => ({
           planOverrides: keptOverrides,
           planDiagnostics: diagnostics,
           stats: newStats,
+          // Se anota el aviso ya atendido, para no regenerar en bucle en cada
+          // vuelta a la pestana.
+          lastPlanExamTrigger: examRefreshTrigger,
         });
 
         const userRef = doc(db, 'users', uid);

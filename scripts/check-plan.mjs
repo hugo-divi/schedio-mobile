@@ -264,7 +264,11 @@ check('sin objetivo, se mantiene el comportamiento de antes', riskFactor({ avera
 check('un 4,2 que solo quiere aprobar arriesga poco', riskFactor({ averageGrade: 4.2, targetGrade: 5 }) < 0.3, true);
 check('el mismo 4,2 yendo a por un 9 arriesga mucho', riskFactor({ averageGrade: 4.2, targetGrade: 9 }) > 0.9, true);
 check('ya por encima del objetivo: riesgo cero', riskFactor({ averageGrade: 8.1, targetGrade: 7 }), 0);
-check('el fin de semana libre por defecto', DEFAULT_REST_DAYS.join(), '0,6');
+// El planificador ya no trata ningun dia como inhabil: el fin de semana se
+// propone como cualquier otro dia, y "descansar" es ahora cosa de la racha
+// (dias libres en services/streakRules.js), donde lo unico que hace es que no
+// pase nada si ese dia no cumples. Ver check-streak-rules.mjs.
+check('ningun dia se salta por calendario', DEFAULT_REST_DAYS.length, 0);
 
 // Misma fecha en los dos: así lo único que puede desempatar es el objetivo.
 // Con fechas distintas manda la urgencia (peso 40 contra 20), que es lo correcto.

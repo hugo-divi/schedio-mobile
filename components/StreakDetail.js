@@ -27,7 +27,7 @@ const getMotivation = (streak) => {
  * ahora se ven las tres por separado — la regla que las une es que **un día
  * solo cuenta si el plan te pidió algo**:
  *
- *  · los días que marcas libres, que el plan respeta y no cuentan;
+ *  · los días que marcas libres, con tareas igual pero sin consecuencias;
  *  · los comodines, dos por semana, que ahora gastas tú a propósito;
  *  · la racha congelada, cuando no hay exámenes y por tanto no hay plan.
  *
@@ -174,13 +174,10 @@ export default function StreakDetail({
           })}
         </View>
         <Text style={styles.boxBody}>
-          Esos días el plan no te pide nada, así que no cuentan para la racha. Si un examen cae
-          encima, el plan sí los usa y ese día vuelve a contar.
+          El plan te sigue proponiendo tareas esos días, por si te apetece adelantar. La diferencia
+          es que no pasa nada si no las haces: no cuentan ni a favor ni en contra de la racha.
         </Text>
-        <Text style={styles.boxWarn}>
-          Puedes marcar hasta {MAX_FREE_DAYS}. El plan no te genera sesiones en los días que marques
-          libres.
-        </Text>
+        <Text style={styles.boxWarn}>Puedes marcar hasta {MAX_FREE_DAYS}.</Text>
       </View>
 
       {/* ── Comodines ───────────────────────────────────────────────────── */}

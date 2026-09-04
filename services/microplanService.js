@@ -241,17 +241,23 @@ export const pressureFactor = (daysToNearestExam) => {
 export const MIN_SESSIONS_FOR_HISTORY = 3;
 
 /**
- * Weekdays with no plan by default, 0 = Sunday.
+ * Días de la semana que el plan trata distinto: **ninguno**.
  *
- * The weekend, not just Sunday. Two rest days a week is what a student expects;
- * one was an arbitrary leftover. The student picks their own two — someone who
- * studies weekends and rests on Wednesday changes them — and `restDays` comes
- * in from their profile.
+ * El planificador saltaba el fin de semana salvo que hubiera un examen a menos
+ * de una semana. La idea era no agobiar, pero el efecto era el contrario: el
+ * plan decidía por el alumno que el sábado no se estudia, y quien sí quería
+ * aprovecharlo se encontraba la pantalla vacía y sin nada que proponerle.
+ *
+ * Ahora el sábado y el domingo son días normales y el plan propone en ellos
+ * como en cualquier otro. Descansar sigue siendo gratis, pero es una decisión
+ * del alumno, no del algoritmo: **los días libres ya no viven aquí, viven en la
+ * racha** (`freeDays` en services/streakRules.js), donde hacen lo único que
+ * tienen que hacer — que no hacer las tareas de ese día no rompa nada.
+ *
+ * Se deja el array vacío en vez de borrar el concepto para que quien lo importe
+ * siga compilando y para dejar dicho aquí por qué está vacío.
  */
-export const DEFAULT_REST_DAYS = [0, 6];
-/** Rest days stop applying once an exam is this close — matching the old rule,
- *  which only skipped Sundays when the exam was more than a week away. */
-export const REST_OVERRIDE_DAYS = 7;
+export const DEFAULT_REST_DAYS = [];
 
 /**
  * An exam whose entire study window is this short is an emergency: it was entered
@@ -449,7 +455,6 @@ const explain = (detail, subjectName) => {
  * @param {Date}   [options.now]
  * @param {Array}  [options.sessions] - session history, for capacity + coverage
  * @param {Object} [options.profile]  - for `organizationLevel`
- * @param {number[]} [options.restDays] - weekday indices with no capacity
  * @returns {{ tasks: Array, diagnostics: Object }}
  */
 export const generateStudyPlan = (exams, subjects, options = {}) => {
@@ -459,7 +464,6 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     // Ticked tasks: `[{ date, minutes }]`. Drives the daily budget.
     completions = [],
     profile = null,
-    restDays = DEFAULT_REST_DAYS,
   } = options;
 
   const today = startOfDay(now);
@@ -550,7 +554,6 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
   if (items.length === 0) return { tasks: [], diagnostics };
 
-  const restDaySet = new Set(restDays || []);
   const horizon = Math.min(HORIZON_DAYS, Math.max(...items.map((item) => item.daysUntil)));
 
   /**
@@ -585,12 +588,15 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       continue;
     }
 
+    // Aquí se saltaba el día si caía en fin de semana y no había examen a menos
+    // de una semana. Ya no: todos los días son planificables. Lo que evita el
+    // agobio sigue estando —el techo diario, el modelo de fatiga y la curva de
+    // quemado— pero reparte sobre siete días en vez de sobre cinco, así que
+    // cada día pide menos, no más.
+    //
+    // `nearestExamDays` sobrevive al recorte porque no era del descanso: es lo
+    // que mide la presión del día más abajo.
     const nearestExamDays = Math.min(...active.map((item) => item.daysUntil - day));
-    const isRestDay = restDaySet.has(date.getDay()) && nearestExamDays > REST_OVERRIDE_DAYS;
-    if (isRestDay) {
-      consecutiveStudyDays = 0;
-      continue;
-    }
 
     // Re-score for *this* day, not for today: urgency is what changes as the
     // calendar advances, and it's the reason an exam that got crowded out early
@@ -651,12 +657,8 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         // then ran out of room because a day only takes one block per exam, and
         // reported 30 minutes as an overload while the week still had 500 minutes
         // free. A false shortfall is worse than a plan that starts a day early.
-        let schedulableLeft = 0;
-        for (let d = day; d <= item.daysUntil; d++) {
-          const at = addDays(today, d);
-          const rest = restDaySet.has(at.getDay());
-          if (!rest || item.daysUntil - d <= REST_OVERRIDE_DAYS) schedulableLeft++;
-        }
+        // Todos los dias que quedan cuentan: ya no hay ninguno inhabil.
+        const schedulableLeft = item.daysUntil - day + 1;
         const sessionsNeeded = Math.ceil(item.remaining / preferredBlock);
         const mustStartNow = sessionsNeeded >= schedulableLeft;
 

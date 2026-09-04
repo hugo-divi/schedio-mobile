@@ -11,8 +11,9 @@
  * algo.** De ahí salen las tres situaciones que antes estaban mezcladas en
  * "días de descanso":
  *
- *  · Días libres — los eliges tú, son fijos y el plan no te programa nada en
- *    ellos. No cuentan ni a favor ni en contra.
+ *  · Días libres — los eliges tú y son fijos. El plan SÍ propone tareas en
+ *    ellos (el planificador ya no trata ningún día como inhábil), pero no
+ *    cuentan ni a favor ni en contra de la racha: si no las haces, no pasa nada.
  *  · Comodines — dos por semana, para lo imprevisto, y los gastas TÚ. Que sea
  *    una decisión y no un consumo silencioso es el punto: convierte "he
  *    perdido un día" en "me he tomado un día".

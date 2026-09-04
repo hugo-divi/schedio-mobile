@@ -167,7 +167,7 @@ export default function StreakScreen() {
           icon={<Moon size={15} color={tokens.colors.accent} />}
           style={styles.iconAccent}
           title="Tu día libre"
-          body="Sábado y domingo por defecto, y los cambias cuando quieras. El plan no te pide nada, así que no cuentan ni a favor ni en contra."
+          body="Sábado y domingo por defecto, y los cambias cuando quieras. El plan te sigue proponiendo tareas por si quieres adelantar, pero no cuentan ni a favor ni en contra."
         />
         <InfoRow
           icon={<LifeBuoy size={15} color={tokens.colors.premiumText} />}

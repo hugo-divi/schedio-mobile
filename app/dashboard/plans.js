@@ -32,7 +32,7 @@ import { startOfWeek, addDays, isSameDay, isToday, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
 import { tokens } from '../../theme/tokens';
-import { planReasonsFor, DEFAULT_REST_DAYS, STUDY_PHASES } from '../../services/microplanService';
+import { planReasonsFor, STUDY_PHASES } from '../../services/microplanService';
 import { getUpcomingExams } from '../../services/exams';
 import { dayLoadWidth, examProgressFor } from '../../services/planPresentation';
 import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
@@ -782,14 +782,13 @@ export default function PlansScreen() {
   // planificador (services/microplanService.js) cuando el perfil no trae
   // ninguno — así "es descanso" significa lo mismo aquí que en el algoritmo
   // que decidió no ponerle tareas ese día.
-  const restDaySet = useMemo(() => {
-    const restDays = profile?.restDays?.length ? profile.restDays : DEFAULT_REST_DAYS;
-    return new Set(restDays);
-  }, [profile?.restDays]);
+  // El planificador ya no trata ningun dia como inhabil: el fin de semana se
+  // planifica como cualquier otro dia. Lo que antes se llamaba "descanso" vive
+  // ahora en la racha (dias libres), donde lo unico que hace es que no pase
+  // nada si ese dia no cumples. Por eso aqui ya no hay estado de descanso.
 
   const selectedDay = days[selectedDayIndex] || days[0];
   const selectedDayTasks = tasksByDay[selectedDayIndex] || [];
-  const selectedDayIsRest = restDaySet.has(selectedDay.getDay());
   const pendingToday = useMemo(
     () => selectedDayTasks.filter((task) => !task.completed),
     [selectedDayTasks]
@@ -799,13 +798,8 @@ export default function PlansScreen() {
 
   // Estado de la tarjeta "ahora": descanso, sin tareas, completado, o la
   // siguiente pendiente.
-  const nowState = selectedDayIsRest
-    ? 'rest'
-    : selectedDayTasks.length === 0
-      ? 'empty'
-      : pendingToday.length === 0
-        ? 'done'
-        : 'active';
+  const nowState =
+    selectedDayTasks.length === 0 ? 'empty' : pendingToday.length === 0 ? 'done' : 'active';
 
   // El día más próximo (dentro de la semana visible) con algo pendiente, para
   // "adelantar". Solo busca en los días ya cargados: la paginación de semana
@@ -835,10 +829,8 @@ export default function PlansScreen() {
       days
         .map((day, index) => {
           if (index === selectedDayIndex) return null;
-          const isRest = restDaySet.has(day.getDay());
           const tasks = tasksByDay[index];
           const label = format(day, 'EEEE', { locale: es });
-          if (isRest) return { key: day.toISOString(), index, label, isRest: true };
           if (tasks.length === 0) return null;
           const names = Array.from(new Set(tasks.map((t) => t.subjectName).filter(Boolean))).join(
             ', '
@@ -855,7 +847,7 @@ export default function PlansScreen() {
           };
         })
         .filter(Boolean),
-    [days, tasksByDay, selectedDayIndex, restDaySet]
+    [days, tasksByDay, selectedDayIndex]
   );
 
   /**
@@ -1089,9 +1081,6 @@ export default function PlansScreen() {
         <View style={styles.planesHeadRow}>
           <View style={{ flex: 1 }}>
             <SectionTitle>Planes automáticos</SectionTitle>
-            <Text style={styles.sectionNote}>
-              Repartidos por prioridad según tus exámenes y entregas.
-            </Text>
           </View>
           <ViewToggle value={view} onChange={setView} />
         </View>
@@ -1123,59 +1112,57 @@ export default function PlansScreen() {
                 canPull={pullTargetIndex !== -1}
               />
 
-              {!selectedDayIsRest ? (
-                <View>
-                  <View style={styles.capRow}>
-                    <Text style={styles.cap}>
-                      {isToday(selectedDay)
-                        ? 'todo el día'
-                        : format(selectedDay, 'EEEE d', { locale: es })}
-                    </Text>
-                    <Text style={styles.capEm}>
-                      {doneCountToday} de {selectedDayTasks.length} ·{' '}
-                      {formatTotal(remainingMinutesToday)} restantes
-                    </Text>
-                  </View>
-
-                  {selectedDayTasks.length > 0 ? (
-                    <View style={styles.dayTasksCard}>
-                      {selectedDayTasks.map((task, index) => (
-                        <Animated.View
-                          key={task.id}
-                          layout={LIST_TRANSITION}
-                          entering={FadeIn.duration(180)}
-                          exiting={FadeOut.duration(150)}
-                          style={index > 0 && styles.taskDivider}
-                        >
-                          <TaskRow
-                            task={task}
-                            highlighted={
-                              !!highlightId &&
-                              (task.examId === highlightId || task.id === highlightId)
-                            }
-                            onPress={() => openSession(task)}
-                            onEdit={() => openEditor(task)}
-                            onToggle={() => toggleTask(task)}
-                          />
-                        </Animated.View>
-                      ))}
-                    </View>
-                  ) : null}
-
-                  <View style={{ marginTop: 10 }}>
-                    <Button
-                      title="Añadir tarea suelta"
-                      variant="secondary"
-                      fullWidth
-                      icon={<Plus size={17} color={tokens.colors.textPrimary} />}
-                      onPress={() => {
-                        setEditingTask(null);
-                        setSheetOpen(true);
-                      }}
-                    />
-                  </View>
+              <View>
+                <View style={styles.capRow}>
+                  <Text style={styles.cap}>
+                    {isToday(selectedDay)
+                      ? 'todo el día'
+                      : format(selectedDay, 'EEEE d', { locale: es })}
+                  </Text>
+                  <Text style={styles.capEm}>
+                    {doneCountToday} de {selectedDayTasks.length} ·{' '}
+                    {formatTotal(remainingMinutesToday)} restantes
+                  </Text>
                 </View>
-              ) : null}
+
+                {selectedDayTasks.length > 0 ? (
+                  <View style={styles.dayTasksCard}>
+                    {selectedDayTasks.map((task, index) => (
+                      <Animated.View
+                        key={task.id}
+                        layout={LIST_TRANSITION}
+                        entering={FadeIn.duration(180)}
+                        exiting={FadeOut.duration(150)}
+                        style={index > 0 && styles.taskDivider}
+                      >
+                        <TaskRow
+                          task={task}
+                          highlighted={
+                            !!highlightId &&
+                            (task.examId === highlightId || task.id === highlightId)
+                          }
+                          onPress={() => openSession(task)}
+                          onEdit={() => openEditor(task)}
+                          onToggle={() => toggleTask(task)}
+                        />
+                      </Animated.View>
+                    ))}
+                  </View>
+                ) : null}
+
+                <View style={{ marginTop: 10 }}>
+                  <Button
+                    title="Añadir tarea suelta"
+                    variant="secondary"
+                    fullWidth
+                    icon={<Plus size={17} color={tokens.colors.textPrimary} />}
+                    onPress={() => {
+                      setEditingTask(null);
+                      setSheetOpen(true);
+                    }}
+                  />
+                </View>
+              </View>
 
               {/* 2 · la semana, sin cambiar de vista. */}
               <View>
