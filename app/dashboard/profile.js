@@ -829,13 +829,6 @@ export default function ProfileScreen() {
             onPress={() => router.push('/dashboard/ranks')}
           />
 
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <StatTile value={profile?.averageGrade || '—'} label="Promedio" />
-            <StatTile value={String(level)} label="Nivel" />
-            <StatTile value={String(xp)} label="XP Total" />
-          </View>
-
           {/* Potential — the estimate given at the end of onboarding, brought
               back here instead of being shown once and forgotten. Only
               accounts onboarded after this shipped have it. */}
