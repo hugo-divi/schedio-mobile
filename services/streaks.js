@@ -1,97 +1,85 @@
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 
-/**
- * Local civil date (YYYY-MM-DD).
- *
- * Deliberately not `toISOString()`: that converts to UTC first, so east of
- * Greenwich every date built at local midnight slid back a day — and a session
- * studied between 00:00 and 02:00 was filed under yesterday. A streak is about
- * the user's own day, so it has to be computed in local time.
- */
-const formatDate = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+import {
+  DAILY_GOAL_MINUTES,
+  MAX_REST_PER_WEEK,
+  DEFAULT_FREE_DAYS,
+  MAX_FREE_DAYS,
+  formatDate,
+  isFreeDay,
+  sanitizeFreeDays,
+  daysBetweenExclusive,
+  gapIsCovered,
+  canSpendJokerOn,
+  pruneRestDays,
+  restDaysRemaining,
+} from './streakRules';
+
+// Reexportadas porque StreakDetail y la pantalla de racha ya las importaban de
+// aqui; las reglas en si viven en streakRules.js para poder ejecutarse en Node.
+export {
+  DAILY_GOAL_MINUTES,
+  MAX_REST_PER_WEEK,
+  DEFAULT_FREE_DAYS,
+  MAX_FREE_DAYS,
+  sanitizeFreeDays,
+  restDaysRemaining,
 };
 
 const isToday = (dateString) => {
   if (!dateString) return false;
-  const today = formatDate(new Date());
-  // Handle both Date object and string
   const d = typeof dateString === 'string' ? dateString : formatDate(dateString);
-  return d === today;
+  return d === formatDate(new Date());
 };
 
 const isYesterday = (dateString) => {
   if (!dateString) return false;
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  const yStr = formatDate(yesterday);
   const d = typeof dateString === 'string' ? dateString : formatDate(dateString);
-  return d === yStr;
+  return d === formatDate(yesterday);
 };
 
 /**
- * Rest days: a student doesn't study every day, and a streak that punishes that
- * stops being motivating. Each week grants a couple of skips that don't break
- * the run — spent automatically on the days actually missed, so nobody has to
- * declare which days they rest.
+ * "Hoy no puedo": gasta un comodín en el día de hoy.
+ *
+ * Esta es la pieza que antes no existía. El alumno decide, y por eso el día
+ * deja de ser un fallo — la diferencia entre "he perdido un día" y "me he
+ * tomado un día" es entera de aquí.
+ *
+ * Devuelve los comodines que quedan, o `null` si no se podía gastar: sin
+ * comodines esa semana, o en un día que ya está cubierto (libre o gastado),
+ * donde gastarlo sería tirarlo.
  */
-export const MAX_REST_PER_WEEK = 2;
+export const spendJoker = async (userId) => {
+  const streakRef = doc(db, 'streaks', userId);
+  const streakDoc = await getDoc(streakRef);
+  if (!streakDoc.exists()) return null;
 
-/** Monday-based week key, e.g. "2026-07-27". Weeks reset the allowance. */
-const weekKeyOf = (dateString) => {
-  const d = new Date(`${dateString}T00:00:00`);
-  const dayOfWeek = (d.getDay() + 6) % 7; // 0 = Monday
-  d.setDate(d.getDate() - dayOfWeek);
-  return formatDate(d);
-};
+  const data = streakDoc.data();
+  const today = formatDate(new Date());
+  const freeDays = sanitizeFreeDays(data.freeDays);
+  const restDays = pruneRestDays(data.restDays || []);
 
-const restUsedInWeekOf = (restDays, dateString) => {
-  const key = weekKeyOf(dateString);
-  return restDays.filter((d) => weekKeyOf(d) === key).length;
-};
+  // La misma regla que comprueba la pantalla para habilitar el botón, no una
+  // copia — si se separan, el botón se enciende y la escritura falla.
+  if (!canSpendJokerOn(today, { restDays, freeDays }).allowed) return null;
 
-/** Dates strictly between two days, as YYYY-MM-DD. */
-const daysBetweenExclusive = (fromString, toString) => {
-  const out = [];
-  const cursor = new Date(`${fromString}T00:00:00`);
-  const end = new Date(`${toString}T00:00:00`);
-  cursor.setDate(cursor.getDate() + 1);
-  while (cursor < end) {
-    out.push(formatDate(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return out;
+  const updated = [...restDays, today];
+  await updateDoc(streakRef, { restDays: updated, updatedAt: new Date() });
+  return { restDays: updated, restRemaining: restDaysRemaining(updated) };
 };
 
 /**
- * Try to absorb a gap in study days using the weekly rest allowance.
- * Returns the updated rest-day list, or null when the gap is too wide.
+ * Los días de la semana que marcas libres. El plan no te programa nada en
+ * ellos, así que no cuentan para la racha ni a favor ni en contra.
  */
-const spendRestDays = (missedDates, restDays) => {
-  const updated = [...restDays];
-  for (const day of missedDates) {
-    if (updated.includes(day)) continue; // already counted as rest
-    if (restUsedInWeekOf(updated, day) >= MAX_REST_PER_WEEK) return null;
-    updated.push(day);
-  }
-  return updated;
+export const setFreeDays = async (userId, days) => {
+  const freeDays = sanitizeFreeDays(days);
+  await updateDoc(doc(db, 'streaks', userId), { freeDays, updatedAt: new Date() });
+  return freeDays;
 };
-
-/** Keeps the stored list from growing without bound. */
-const pruneRestDays = (restDays, keepDays = 90) => {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - keepDays);
-  const cutoffStr = formatDate(cutoff);
-  return restDays.filter((d) => d >= cutoffStr);
-};
-
-/** How many skips are still available in the week containing `date`. */
-export const restDaysRemaining = (restDays = [], date = new Date()) =>
-  Math.max(0, MAX_REST_PER_WEEK - restUsedInWeekOf(restDays, formatDate(date)));
 
 /**
  * Get user streak data
@@ -123,7 +111,7 @@ export const getStreak = async (userId) => {
  * Check and update daily streak on app load
  * @param {string} userId
  */
-export const checkDailyStreak = async (userId) => {
+export const checkDailyStreak = async (userId, { hasPlan = true } = {}) => {
   try {
     const streakRef = doc(db, 'streaks', userId);
     const streakDoc = await getDoc(streakRef);
@@ -147,24 +135,34 @@ export const checkDailyStreak = async (userId) => {
         dailyActivity: 0,
         restDays: [],
         restRemaining: MAX_REST_PER_WEEK,
+        freeDays: DEFAULT_FREE_DAYS,
+        frozen: !hasPlan,
+        todayIsFree: isFreeDay(today, DEFAULT_FREE_DAYS),
       };
     }
 
     const streakData = streakDoc.data();
     const lastStudy = streakData.lastStudyDate;
     const lastCheckIn = streakData.lastCheckIn;
+    const freeDays = sanitizeFreeDays(streakData.freeDays);
+    const todayIsFree = isFreeDay(today, freeDays);
 
     // If already checked in today, return current status
     if (lastCheckIn === today) {
-      const needsActivity = (streakData.dailyActivity || 0) < 5;
       const restDays = streakData.restDays || [];
       return {
         currentStreak: streakData.currentStreak,
         maxStreak: streakData.maxStreak || 0,
-        needsActivity,
+        // Un día libre, o sin plan que cumplir, no pide nada — así que tampoco
+        // se queda "pendiente de actividad".
+        needsActivity:
+          !todayIsFree && hasPlan && (streakData.dailyActivity || 0) < DAILY_GOAL_MINUTES,
         dailyActivity: streakData.dailyActivity || 0,
         restDays,
         restRemaining: restDaysRemaining(restDays),
+        freeDays,
+        frozen: !hasPlan,
+        todayIsFree,
       };
     }
 
@@ -175,16 +173,15 @@ export const checkDailyStreak = async (userId) => {
     if (lastStudy && isYesterday(lastStudy)) {
       // Streak continues (but needs activity today)
       // Don't increment yet, wait for activity
-    } else if (lastStudy && !isToday(lastStudy)) {
-      // There's a gap. Spend the weekly rest allowance on the missed days
-      // before giving up on the streak; today doesn't count yet, it's still
-      // in progress.
+    } else if (lastStudy && !isToday(lastStudy) && hasPlan) {
+      // Hay un hueco. Solo sobrevive si cada día estaba cubierto: libre por
+      // calendario, o con un comodín ya gastado a mano ese día. Antes se
+      // gastaban comodines aquí en silencio; ahora un día descubierto rompe.
+      //
+      // Con `hasPlan` en falso ni se mira: sin exámenes no hay plan, y sin
+      // plan no hay nada que hayas dejado de hacer.
       const missed = daysBetweenExclusive(lastStudy, today);
-      const afterRest = spendRestDays(missed, restDays);
-
-      if (afterRest) {
-        restDays = afterRest;
-      } else {
+      if (!gapIsCovered(missed, restDays, freeDays)) {
         newStreak = 0;
         restDays = [];
       }
@@ -196,16 +193,20 @@ export const checkDailyStreak = async (userId) => {
       dailyActivity: 0,
       currentStreak: newStreak,
       restDays,
+      freeDays,
       updatedAt: new Date(),
     });
 
     return {
       currentStreak: newStreak,
       maxStreak: streakData.maxStreak || 0,
-      needsActivity: true,
+      needsActivity: !todayIsFree && hasPlan,
       dailyActivity: 0,
       restDays,
       restRemaining: restDaysRemaining(restDays),
+      freeDays,
+      frozen: !hasPlan,
+      todayIsFree,
     };
   } catch (error) {
     console.error('Error checking daily streak:', error);
@@ -235,8 +236,8 @@ export const recordActivity = async (userId, activityDuration) => {
     const newDailyActivity = currentDailyActivity + activityDuration;
 
     // Check if this completes the daily requirement
-    const wasComplete = currentDailyActivity >= 5;
-    const isNowComplete = newDailyActivity >= 5;
+    const wasComplete = currentDailyActivity >= DAILY_GOAL_MINUTES;
+    const isNowComplete = newDailyActivity >= DAILY_GOAL_MINUTES;
 
     let updates = {
       dailyActivity: newDailyActivity,

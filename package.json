@@ -17,7 +17,8 @@
     "check:tab-bar": "node scripts/check-tab-bar.mjs",
     "check:fab-springs": "node scripts/check-fab-springs.mjs",
     "check:widgets": "node scripts/check-widgets.mjs",
-    "prepare": "husky"
+    "prepare": "husky",
+    "check:streak-rules": "node scripts/check-streak-rules.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

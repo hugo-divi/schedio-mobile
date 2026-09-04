@@ -181,16 +181,24 @@ export default function Dashboard() {
       // placeholders while it does read as the tab being slow.
       if (!refreshing && !lastFetchRef.current) setLoading(true);
 
-      // One wave instead of two: the profile document, the streak and the two
-      // exam views all go out together. `checkDailyStreak` writes only to
-      // streaks/{uid}, so nothing here reads a document another of these calls
-      // is writing, and the order they resolve in never mattered.
-      const [profileDoc, streakData, examsData, pendingExamsData] = await Promise.all([
+      // Una sola tanda para lo que no depende de nada: el documento de perfil y
+      // las dos vistas de exámenes.
+      const [profileDoc, examsData, pendingExamsData] = await Promise.all([
         getDoc(doc(db, 'users', user.uid)),
-        checkDailyStreak(user.uid),
         getUpcomingExams(user.uid, 20),
         getPendingExams(user.uid),
       ]);
+
+      // La racha va después y no dentro de la tanda, aunque cueste un viaje
+      // más. `checkDailyStreak` ESCRIBE: si el hueco de días no está cubierto,
+      // pone la racha a cero. Y desde que la racha se congela cuando no hay
+      // exámenes por delante, esa decisión necesita saber si hay plan — que es
+      // justo lo que devuelve la consulta de arriba. Lanzándolas en paralelo,
+      // Inicio rompía en vacaciones una racha que esta misma regla dice que
+      // hay que conservar, y encima antes de que el alumno pudiera verlo.
+      const streakData = await checkDailyStreak(user.uid, {
+        hasPlan: (examsData || []).length > 0,
+      });
       const profileData = profileDoc.exists() ? profileDoc.data() : null;
       setProfile(profileData);
 
