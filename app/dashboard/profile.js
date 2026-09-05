@@ -1828,7 +1828,11 @@ const styles = StyleSheet.create({
   difficultyOption: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: tokens.radius.btn,
+    // Pastilla, no `btn`: en esta app una opcion seleccionable se dibuja
+    // redonda -- lo hacen Chip, las pildoras de la barra y los chips de
+    // asignatura. A 8px sobre 40 de alto se leia como un rectangulo y
+    // desentonaba con todo lo demas.
+    borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.surfaceHover,
     borderWidth: 1,
     borderColor: 'transparent',

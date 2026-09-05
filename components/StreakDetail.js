@@ -437,7 +437,9 @@ const styles = StyleSheet.create({
   pick: {
     flex: 1,
     paddingVertical: 9,
-    borderRadius: tokens.radius.btn,
+    // Mismo criterio que la dificultad en Perfil: opcion seleccionable, forma
+    // de pastilla.
+    borderRadius: tokens.radius.pill,
     backgroundColor: tokens.colors.surfaceHover,
     borderWidth: 1,
     borderColor: 'transparent',

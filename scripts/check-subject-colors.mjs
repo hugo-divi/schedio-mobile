@@ -33,6 +33,28 @@ const blockOf = (key) => {
 };
 
 const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+
+/** Luminancia relativa de WCAG, para poder calcular contrastes de verdad. */
+const luminanceOf = (hex) => {
+  const [r, g, b] = hex2rgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+const contrast = (a, b) => {
+  const [hi, lo] = [luminanceOf(a), luminanceOf(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+const saturationOf = (hex) => {
+  const [r, g, b] = hex2rgb(hex).map((v) => v / 255);
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const l = (mx + mn) / 2;
+  return mx === mn ? 0 : ((mx - mn) / (1 - Math.abs(2 * l - 1))) * 100;
+};
 const hueOf = (hex) => {
   let [r, g, b] = hex2rgb(hex).map((v) => v / 255);
   const mx = Math.max(r, g, b);
@@ -55,8 +77,46 @@ const ACCENT = (source.match(/accent: '(#[0-9A-Fa-f]{6})'/) || [])[1];
 const ACCENT_HUE = hueOf(ACCENT.toUpperCase());
 /** Banda alrededor del acento donde no puede caer ninguna materia. */
 const GUARD = 32;
-/** Separación mínima entre dos materias para que se distingan en el punto. */
+/**
+ * Separación mínima **de matiz** entre dos materias vecinas.
+ *
+ * Con veinte colores en los ~296° que quedan fuera de la banda del acento, la
+ * media sale a 14,8°: exigir 12 a todas las parejas es apurado y, sobre todo,
+ * mide lo que no toca. Dos colores a 11° pero uno vivo y otro apagado se
+ * distinguen sin esfuerzo; dos a 14° con la misma saturación y la misma luz,
+ * no. Por eso la regla de abajo acepta cualquiera de las dos separaciones —
+ * matiz **o** tonalidad — en vez de exigir siempre la primera.
+ */
 const MIN_SEPARATION = 12;
+
+/**
+ * Diferencia de saturación que, por sí sola, ya distingue dos colores vecinos
+ * aunque su matiz esté cerca. La paleta alterna ~72% y ~30%, así que toda
+ * pareja consecutiva se lleva unos 42 puntos.
+ */
+const MIN_SATURATION_STEP = 20;
+
+/**
+ * La inicial de la materia se pinta en BLANCO dentro del círculo, a 14px en
+ * negrita. Eso no es "texto grande" para WCAG, así que pide 4,5:1 — y es la
+ * regla que faltaba aquí: la paleta anterior tenía **diez de veinte colores
+ * por debajo de 3:1**, con el cian en 1,99:1 y la letra casi ilegible. Ahora
+ * el contraste es lo que fija la luminosidad de cada tono, no algo que se
+ * mira después.
+ */
+const INITIAL_COLOR = '#FFFFFF';
+const MIN_INITIAL_CONTRAST = 4.5;
+
+/** El círculo va sobre la tarjeta, así que también tiene que despegarse de ella. */
+const CARD = '#242424';
+const MIN_CARD_CONTRAST = 3;
+
+/**
+ * Variedad de tonalidad, no solo de matiz. Con la saturación idéntica en las
+ * veinte (58% en todas, que es como estaba) la paleta se leía como una sola
+ * pared de color aunque los tonos estuvieran bien repartidos.
+ */
+const MIN_SATURATION_RANGE = 25;
 
 let failures = 0;
 const ok = (label, condition, detail = '') => {
@@ -85,6 +145,35 @@ all.forEach((c) => {
   );
 });
 
+console.log('\n── la inicial blanca se lee encima de todos ──');
+all.forEach((c) => {
+  const ratio = contrast(c.hex, INITIAL_COLOR);
+  ok(`${c.name.padEnd(11)} ${c.hex}`, ratio >= MIN_INITIAL_CONTRAST, `${ratio.toFixed(2)}:1`);
+});
+
+console.log('\n── y todos se despegan de la tarjeta ──');
+const worstCard = all.reduce(
+  (acc, c) => {
+    const ratio = contrast(c.hex, CARD);
+    return ratio < acc.ratio ? { ratio, name: c.name } : acc;
+  },
+  { ratio: Infinity, name: null }
+);
+ok(
+  `el que menos, sobre ${CARD}`,
+  worstCard.ratio >= MIN_CARD_CONTRAST,
+  `${worstCard.name} a ${worstCard.ratio.toFixed(2)}:1`
+);
+
+console.log('\n── distintas tonalidades, no solo distintos tonos ──');
+const sats = all.map((c) => saturationOf(c.hex));
+const satRange = Math.max(...sats) - Math.min(...sats);
+ok(
+  'la saturación varía entre los colores',
+  satRange >= MIN_SATURATION_RANGE,
+  `${satRange.toFixed(0)} puntos (de ${Math.min(...sats).toFixed(0)}% a ${Math.max(...sats).toFixed(0)}%)`
+);
+
 console.log('\n── ordenados por tono ──');
 const freeHues = free.map((c) => hueOf(c.hex));
 ok(
@@ -101,16 +190,22 @@ ok(
 
 console.log('\n── ninguna pareja se parece demasiado ──');
 const sorted = [...all].sort((a, b) => a.hue - b.hue);
-let worst = { gap: 360 };
+const tooClose = [];
 sorted.forEach((c, i) => {
   if (i === 0) return;
-  const gap = hueGap(c.hue, sorted[i - 1].hue);
-  if (gap < worst.gap) worst = { gap, a: sorted[i - 1].name, b: c.name };
+  const prev = sorted[i - 1];
+  const gap = hueGap(c.hue, prev.hue);
+  const satStep = Math.abs(saturationOf(c.hex) - saturationOf(prev.hex));
+  // Vale con una de las dos: o se separan de matiz, o uno es vivo y el otro
+  // apagado. Lo que no puede pasar es que se parezcan en las dos cosas.
+  if (gap < MIN_SEPARATION && satStep < MIN_SATURATION_STEP) {
+    tooClose.push(`${prev.name}/${c.name} (${gap.toFixed(0)}° y ${satStep.toFixed(0)} pts)`);
+  }
 });
 ok(
-  `la pareja más parecida se separa al menos ${MIN_SEPARATION}°`,
-  worst.gap >= MIN_SEPARATION,
-  `${worst.a} y ${worst.b}, ${worst.gap.toFixed(1)}°`
+  'ninguna pareja vecina se parece a la vez en matiz y en tonalidad',
+  tooClose.length === 0,
+  tooClose.length ? tooClose.join(', ') : 'ninguna'
 );
 ok(
   'no hay dos colores repetidos',

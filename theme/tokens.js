@@ -40,37 +40,44 @@ const palette = {
   /**
    * Paleta cerrada para las materias, ordenada por tono.
    *
-   * Dos reglas, y las dos se comprueban en scripts/check-subject-colors.mjs:
+   * Cuatro reglas, y las cuatro las comprueba scripts/check-subject-colors.mjs:
    *
-   *  1. **Ningún tono cerca del acento.** El azul de Schedio (#2979FF, tono
-   *     218°) significa "seleccionado" en toda la app, así que una materia azul
-   *     compite con esa señal. La paleta anterior tenía `tic` a 10° del acento
-   *     — el mismo azul a efectos prácticos — y otros dos a 20°. Ahora hay una
-   *     banda prohibida de ±32° y no entra nadie.
-   *  2. **Ordenadas por tono**, no por asignatura. Antes las claves eran
-   *     materias (`mates`, `historia`) en orden arbitrario, así que el
-   *     selector salía revuelto y añadir un color obligaba a inventarse una
-   *     asignatura. Ahora son nombres de color y el selector se lee como una
-   *     rueda.
+   *  1. **Contraste con la inicial blanca.** La letra que va dentro del círculo
+   *     se pinta en blanco a 14px en negrita, que para WCAG no es "texto
+   *     grande": pide 4,5:1. La versión anterior no lo miraba y **diez de los
+   *     veinte colores bajaban de 3:1** — el cian se quedaba en 1,99:1, con la
+   *     letra casi ilegible. Ahora el contraste es la restricción que fija la
+   *     luminosidad de cada tono, no algo que se comprueba después.
+   *  2. **Contraste con la tarjeta.** El círculo vive sobre `surfaceCard`, así
+   *     que también tiene que despegarse de ella: 3:1 mínimo.
+   *  3. **Ningún tono cerca del acento.** El azul de Schedio (#2979FF, 218°)
+   *     significa "seleccionado" en toda la app; una materia azul compite con
+   *     esa señal. Banda prohibida de ±32°.
+   *  4. **Distintas tonalidades, no solo distintos tonos.** Antes las veinte
+   *     tenían la misma saturación (58%), así que se leían como una sola pared
+   *     de color. Ahora alternan intensa y apagada — 42 puntos de rango en
+   *     saturación y 33 en luminosidad — y así dos materias vecinas se
+   *     distinguen por algo más que el matiz.
    *
-   * Los veinte tonos (ocho aquí, doce en `subjectsExtra`) se reparten a 14,8°
-   * uno de otro saltando la banda del acento. La luz compensa el tono —los
-   * amarillo-verdes se perciben más claros que los violetas al mismo valor—
-   * con `52 + 9·cos(tono − 270°)`, que es la curva que ya seguía la paleta
-   * vieja a ojo.
+   * El reparto por el círculo cromático **no es uniforme**, y esa es la otra
+   * corrección: del amarillo al verde azulado hay 120° que el ojo distingue
+   * fatal, mientras que del violeta al carmín hay 110° llenos de tonos que no
+   * se confunden. Repartir a pasos iguales metía ocho verdes de veinte y dejaba
+   * fichas casi gemelas; por bandas quedan cinco.
    *
-   * Estas ocho son las gratuitas, repartidas entre las veinte para que sean lo
-   * más distintas posible entre sí.
+   * Estas ocho son las gratuitas, elegidas entre las veinte por estar lo más
+   * separadas posible entre sí (33° como mínimo): son las únicas que ve quien
+   * no paga y tienen que distinguirse sin ayuda.
    */
   subjects: {
-    rojo: '#CC3E3E',
-    ambar: '#B89531',
-    lima: '#91AF2E',
-    esmeralda: '#33B22F',
-    menta: '#33BE74',
-    indigo: '#8161D5',
-    purpura: '#BA60D5',
-    fucsia: '#D0508F',
+    rojo: '#DD2C2C',
+    ambar: '#8C704B',
+    oliva: '#5E7E14',
+    esmeralda: '#168526',
+    turquesa: '#158181',
+    indigo: '#796CB0',
+    orquidea: '#BB2ADC',
+    rosa: '#A85D88',
   },
   /**
    * Los doce que desbloquea Prime, cuyo tope de 20 materias
@@ -79,18 +86,18 @@ const palette = {
    * saliendo ordenada por tono.
    */
   subjectsExtra: {
-    coral: '#C85935',
-    naranja: '#C07833',
-    oro: '#B2B12F',
-    verde: '#70AD2E',
-    hoja: '#51AE2E',
-    jade: '#31B74E',
-    turquesa: '#35C79D',
-    cian: '#3CCBC5',
-    violeta: '#9E62D5',
-    orquidea: '#D45DD2',
-    magenta: '#D257B2',
-    frambuesa: '#CE4768',
+    coral: '#A26657',
+    naranja: '#B8591E',
+    oro: '#8B7017',
+    lima: '#797741',
+    verde: '#558045',
+    jade: '#458067',
+    violeta: '#8D52E3',
+    purpura: '#8F64AB',
+    magenta: '#A559A4',
+    fucsia: '#CF22A9',
+    frambuesa: '#DB2568',
+    carmin: '#A9606C',
   },
   // Semantic exceptions — restricted use, never decorative.
   trendUp: '#5AB98A',
