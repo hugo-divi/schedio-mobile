@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
 import { checkGoogleRedirectResult } from '../services/auth';
+import { syncViewportHeightToVisualViewport } from '../services/pwa';
 import { configureRevenueCat } from '../services/revenuecat';
 import { initCrashlytics } from '../services/crashlytics';
 // Side-effect only: registers notifee's foreground service handler at module
@@ -52,6 +53,12 @@ export default function Layout() {
   }, []);
 
   const ready = fontsLoaded || !!fontError || waitedLongEnough;
+
+  // Web only (no-ops on native, see the function itself). Runs once for the
+  // whole app's lifetime, independent of routing, so the keyboard never
+  // leaves a blank strip at the bottom of the screen the size of itself —
+  // see syncViewportHeightToVisualViewport for what's actually going on.
+  useEffect(() => syncViewportHeightToVisualViewport(), []);
 
   // The native splash stays up past this point on purpose — `app/index.js`
   // hides it once it knows where the student is actually headed (login,

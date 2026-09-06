@@ -19,9 +19,11 @@ module.exports = {
     clearInterval: 'readonly',
     Intl: 'readonly',
     // Browser-only, used from the web-specific paths in
-    // services/notificationService.js (Web Push registration).
+    // services/notificationService.js (Web Push registration) and
+    // services/pwa.js (keyboard/viewport handling).
     URLSearchParams: 'readonly',
     Notification: 'readonly',
+    document: 'readonly',
   },
   rules: {
     'no-console': 'warn',
