@@ -1,7 +1,8 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { db } from './firebase';
+import { db, firebaseConfig } from './firebase';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { canRequestWebPush } from './pwa';
 
 // Configure how notifications should be handled when the app is open.
 // `shouldShowAlert` was deprecated in favour of the banner/list pair.
@@ -36,8 +37,60 @@ export async function requestPermissions() {
 }
 
 /**
+ * Web equivalent of the native path below: registers the Messaging service
+ * worker, asks for Notification permission, and writes the resulting FCM
+ * web token to Firestore. `sendToUser` in functions/index.js just calls
+ * `messaging.send({ token, notification })` — FCM abstracts native push vs.
+ * Web Push, so nothing server-side needs to know this token came from a
+ * browser instead of a phone.
+ *
+ * Returns false without prompting anything when `canRequestWebPush()` is
+ * false (not supported, or iOS Safari not installed as a PWA yet) — callers
+ * that show the "add to home screen" UI in that case already skip calling
+ * this at all, but the dashboard's automatic first-run call doesn't know
+ * that, so this stays a safe no-op either way.
+ */
+async function registerForWebPush(uid) {
+  if (!canRequestWebPush()) return false;
+
+  const userRef = doc(db, 'users', uid);
+
+  try {
+    const { getMessaging, getToken } = await import('firebase/messaging');
+
+    const swParams = new URLSearchParams(firebaseConfig);
+    const registration = await navigator.serviceWorker.register(
+      `/firebase-messaging-sw.js?${swParams.toString()}`
+    );
+
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      await updateDoc(userRef, { notificationsConsent: false });
+      return false;
+    }
+
+    const messaging = getMessaging();
+    const token = await getToken(messaging, {
+      vapidKey: process.env.EXPO_PUBLIC__FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: registration,
+    });
+    if (!token) throw new Error('getToken returned no token');
+
+    await updateDoc(userRef, {
+      notificationsConsent: true,
+      fcmToken: token,
+      platform: 'web',
+    });
+    return true;
+  } catch (error) {
+    console.warn('[Notifications] Web push registration failed:', error?.message);
+    return false;
+  }
+}
+
+/**
  * Asks for notification permission and, if granted, registers this device's
- * native FCM token in Firestore so the exam-alert/re-engagement/weekly-summary
+ * FCM token in Firestore so the exam-alert/re-engagement/weekly-summary
  * Cloud Functions can reach it. Whether granted or not, `notificationsConsent`
  * is recorded either way — its presence is what tells the caller "already
  * asked", so this only needs to run once per account.
@@ -48,7 +101,11 @@ export async function requestPermissions() {
  * running two different systems.
  */
 export async function registerForPushNotifications(uid) {
-  if (Platform.OS === 'web' || !uid) return false;
+  if (!uid) return false;
+
+  if (Platform.OS === 'web') {
+    return registerForWebPush(uid);
+  }
 
   const granted = await requestPermissions();
   const userRef = doc(db, 'users', uid);

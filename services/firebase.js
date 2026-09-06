@@ -54,7 +54,7 @@ if (Platform.OS === 'web') {
   }
 }
 
-export { auth };
+export { auth, firebaseConfig };
 export const googleProvider = new GoogleAuthProvider();
 export const db = getFirestore(app);
 export const storage = getStorage(app);

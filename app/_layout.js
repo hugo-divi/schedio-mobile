@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
+import { checkGoogleRedirectResult } from '../services/auth';
 import { configureRevenueCat } from '../services/revenuecat';
 import { initCrashlytics } from '../services/crashlytics';
 // Side-effect only: registers notifee's foreground service handler at module
@@ -65,6 +66,15 @@ export default function Layout() {
       unsubscribe = initAuth();
     })();
     initCrashlytics();
+
+    // Web-only (no-ops on native): signInWithGoogle falls back to
+    // signInWithRedirect whenever the popup is blocked — common under
+    // Safari's cross-site tracking prevention — which navigates away and
+    // back instead of resolving in place. Nothing else ever called this, so
+    // that pending sign-in was never picked up: the student authenticated
+    // with Google, landed back on /login with no session, and nothing told
+    // them why.
+    checkGoogleRedirectResult().catch(() => {});
 
     // Notification setup
     requestPermissions();

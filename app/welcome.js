@@ -14,6 +14,8 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  runOnJS,
+  useAnimatedReaction,
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
@@ -401,6 +403,23 @@ export default function Welcome() {
     if (width > 0) progress.value = event.contentOffset.x / width;
   });
 
+  // Drives `index` off the same continuous value the stage animation already
+  // reads, instead of `onMomentumScrollEnd` — react-native-web approximates
+  // momentum-end with a debounce on the browser's own `scroll` event, and it
+  // doesn't reliably fire for a `scrollTo()` triggered by the "Siguiente"
+  // button (only for an actual swipe/trackpad gesture). Left to that alone,
+  // `index` stayed at 0 on web forever: the footer segments never filled in,
+  // and `goNext` kept thinking page 1 was still current, scrolling sideways
+  // instead of ever reaching the register/login step.
+  useAnimatedReaction(
+    () => Math.round(progress.value),
+    (current, previous) => {
+      if (current !== previous && current >= 0 && current < TOTAL) {
+        runOnJS(setIndex)(current);
+      }
+    }
+  );
+
   useEffect(() => {
     let cancelled = false;
     AccessibilityInfo.isReduceMotionEnabled()
@@ -606,7 +625,6 @@ export default function Welcome() {
         onLayout={initScroll}
         onScroll={onScroll}
         scrollEventThrottle={16}
-        onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
         style={styles.flex}
       >
         {COPY.map((Page, i) => (

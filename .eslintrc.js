@@ -5,7 +5,12 @@ module.exports = {
   // resolver here don't apply, and trying to lint it against this config
   // is exactly the kind of cross-project resolution mismatch that broke CI
   // once already (see the @expo/vector-icons fix).
-  ignorePatterns: ['functions/'],
+  // public/ is copied verbatim into the web export, never touched by Metro —
+  // firebase-messaging-sw.js in there is a service worker (its own global
+  // scope: `self`, `importScripts`, no `window`), not app code.
+  // dist/ is expo export's build output (a copy of public/ plus the
+  // minified app bundle) — regenerated on every deploy, never hand-edited.
+  ignorePatterns: ['functions/', 'public/', 'dist/'],
   extends: ['expo', 'prettier'],
   globals: {
     setTimeout: 'readonly',
@@ -13,6 +18,10 @@ module.exports = {
     setInterval: 'readonly',
     clearInterval: 'readonly',
     Intl: 'readonly',
+    // Browser-only, used from the web-specific paths in
+    // services/notificationService.js (Web Push registration).
+    URLSearchParams: 'readonly',
+    Notification: 'readonly',
   },
   rules: {
     'no-console': 'warn',

@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { getAllExams } from './exams';
@@ -160,6 +161,15 @@ const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGra
  * of its own, same split as the rest of the plan-limited features.
  */
 export const exportGradesAndExamsPdf = async ({ userId, studentName, subjects, averageGrade }) => {
+  // expo-print's web shim doesn't generate a file at all — printToFileAsync
+  // there just calls window.print() on the *current* page and returns
+  // nothing, so the `{ uri }` destructure below would throw on web before
+  // ever reaching Sharing. Opened here, before any `await`, so it's still
+  // tied to the click that started this call — a browser only allows
+  // window.open() without a popup-block prompt while it's within the same
+  // gesture, not after the Firestore round-trip below.
+  const printWindow = Platform.OS === 'web' ? window.open('', '_blank') : null;
+
   const exams = await getAllExams(userId);
   const html = buildReportHtml({
     studentName,
@@ -168,6 +178,17 @@ export const exportGradesAndExamsPdf = async ({ userId, studentName, subjects, a
     exams,
     averageGrade,
   });
+
+  if (Platform.OS === 'web') {
+    if (!printWindow) {
+      throw new Error('El navegador bloqueó la ventana de impresión.');
+    }
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+    return null;
+  }
 
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 

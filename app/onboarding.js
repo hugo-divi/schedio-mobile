@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, ChevronDown, Check, X, Plus, Bell } from 'lucide-react-native';
+import { ChevronLeft, ChevronDown, Check, X, Plus, Bell, Share2 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import Animated, {
   Easing,
@@ -36,6 +36,7 @@ import useAuthStore from '../store/authStore';
 import useUserStore from '../store/userStore';
 import usePreferencesStore from '../store/preferencesStore';
 import { registerForPushNotifications } from '../services/notificationService';
+import { canRequestWebPush } from '../services/pwa';
 import { createExam } from '../services/exams';
 import {
   ACQUISITION_SOURCES,
@@ -300,6 +301,22 @@ export default function Onboarding() {
   const [taskManagement, setTaskManagement] = useState(null);
   const [howSheet, setHowSheet] = useState(false);
   const [notificationsConsent, setNotificationsConsent] = useState(null);
+
+  // Step 6 replaces "Permitir notificaciones" with install instructions on
+  // web when the browser can't be asked (see canRequestWebPush) — there's no
+  // button there to set `notificationsConsent`, so `canAdvance()` would
+  // stay stuck on `null` forever and trap the student on this step.
+  useEffect(() => {
+    if (
+      step === 6 &&
+      Platform.OS === 'web' &&
+      !canRequestWebPush() &&
+      notificationsConsent === null
+    ) {
+      setNotificationsConsent(false);
+      setNotificationsEnabled(false);
+    }
+  }, [step, notificationsConsent, setNotificationsEnabled]);
   const [examName, setExamName] = useState('');
   const [examDate, setExamDate] = useState(addDays(new Date(), 7));
   const [examPriority, setExamPriority] = useState(5);
@@ -908,45 +925,66 @@ export default function Onboarding() {
               ))}
             </View>
 
-            <View style={{ marginTop: 24, gap: 10 }}>
-              <Button
-                title="Permitir notificaciones"
-                fullWidth
-                onPress={async () => {
-                  // registerForPushNotifications, not requestPermissions: the
-                  // latter only asks the OS. The FCM token used to be written
-                  // solely from the dashboard, which you reach by finishing
-                  // this flow — so an account that said yes here and then
-                  // stopped at step 7 had granted permission and still had no
-                  // token, leaving it unreachable by every Cloud Function we
-                  // run. That is the cohort worth recovering most.
-                  //
-                  // Guarded because this can throw where the dashboard's
-                  // fire-and-forget call could afford not to care: fetching
-                  // the token fails on a device with no Play Services, and an
-                  // unhandled rejection here would leave `notificationsConsent`
-                  // null — which `canAdvance` reads, trapping the student on
-                  // this step with no way forward.
-                  let granted = false;
-                  try {
-                    granted = await registerForPushNotifications(auth.currentUser?.uid);
-                  } catch (error) {
-                    console.warn('[Onboarding] Could not register for push:', error?.message);
-                  }
-                  setNotificationsConsent(granted);
-                  setNotificationsEnabled(granted);
-                }}
-              />
-              <Button
-                title="Más tarde"
-                variant="secondary"
-                fullWidth
-                onPress={() => {
-                  setNotificationsConsent(false);
-                  setNotificationsEnabled(false);
-                }}
-              />
-            </View>
+            {/* iOS Safari only grants notification permission to a PWA
+                already added to the home screen — asking here would just
+                fail silently. Point at that step instead of the button, and
+                let "Más tarde" carry the flow forward either way; the
+                dashboard picks up the ask automatically once the student
+                does install (see registerForWebPush). */}
+            {Platform.OS === 'web' && !canRequestWebPush() ? (
+              <View style={[styles.infoRow, { marginTop: 24 }]}>
+                <View style={styles.infoIcon}>
+                  <Share2 size={16} color={tokens.colors.accent} strokeWidth={1.75} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.choiceLabel}>Instala Schedio para activar esto</Text>
+                  <Text style={styles.choiceDesc}>
+                    En Safari, toca Compartir y luego "Añadir a pantalla de inicio". Podrás
+                    activarlas después desde Ajustes.
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={{ marginTop: 24, gap: 10 }}>
+                <Button
+                  title="Permitir notificaciones"
+                  fullWidth
+                  onPress={async () => {
+                    // registerForPushNotifications, not requestPermissions: the
+                    // latter only asks the OS. The FCM token used to be written
+                    // solely from the dashboard, which you reach by finishing
+                    // this flow — so an account that said yes here and then
+                    // stopped at step 7 had granted permission and still had no
+                    // token, leaving it unreachable by every Cloud Function we
+                    // run. That is the cohort worth recovering most.
+                    //
+                    // Guarded because this can throw where the dashboard's
+                    // fire-and-forget call could afford not to care: fetching
+                    // the token fails on a device with no Play Services, and an
+                    // unhandled rejection here would leave `notificationsConsent`
+                    // null — which `canAdvance` reads, trapping the student on
+                    // this step with no way forward.
+                    let granted = false;
+                    try {
+                      granted = await registerForPushNotifications(auth.currentUser?.uid);
+                    } catch (error) {
+                      console.warn('[Onboarding] Could not register for push:', error?.message);
+                    }
+                    setNotificationsConsent(granted);
+                    setNotificationsEnabled(granted);
+                  }}
+                />
+                <Button
+                  title="Más tarde"
+                  variant="secondary"
+                  fullWidth
+                  onPress={() => {
+                    setNotificationsConsent(false);
+                    setNotificationsEnabled(false);
+                  }}
+                />
+              </View>
+            )}
 
             {notificationsConsent === false ? (
               <Animated.Text entering={FadeIn.duration(200)} style={styles.warning}>

@@ -44,6 +44,7 @@ import { registerForPushNotifications } from '../services/notificationService';
 import { exportGradesAndExamsPdf } from '../services/export';
 import { restorePurchases } from '../services/revenuecat';
 import { hasDndPermission, openDndPermissionSettings } from '../services/focusMode';
+import { canRequestWebPush } from '../services/pwa';
 import { resetWelcomeState } from '../services/welcome';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
@@ -546,10 +547,21 @@ export default function SettingsScreen() {
           <Row
             icon={Bell}
             label="Notificaciones"
-            sub="Avisos de examen, vuelta al estudio y resumen semanal"
+            sub={
+              // Same reasoning as the Focus Mode row below: iOS Safari only
+              // grants notification permission to an installed PWA, so the
+              // toggle has nothing to ask for until then. The sheet this
+              // opens explains how to install instead of listing what gets
+              // sent.
+              Platform.OS === 'web' && !canRequestWebPush()
+                ? 'Instala Schedio en tu iPhone para activarlas'
+                : 'Avisos de examen, vuelta al estudio y resumen semanal'
+            }
             onPress={() => setNotificationsSheet(true)}
             control={
-              <Toggle value={notificationsEnabled} onValueChange={handleNotificationsToggle} />
+              Platform.OS === 'web' && !canRequestWebPush() ? undefined : (
+                <Toggle value={notificationsEnabled} onValueChange={handleNotificationsToggle} />
+              )
             }
           />
           <Row
@@ -558,12 +570,20 @@ export default function SettingsScreen() {
             sub="Preguntar nota al finalizar"
             control={<Toggle value={autoGradePrompt} onValueChange={setAutoGradePrompt} />}
           />
-          <Row
-            icon={BellOff}
-            label="Silenciar al estudiar"
-            sub="Activa No Molestar mientras dura la sesión"
-            control={<Toggle value={focusModeEnabled} onValueChange={handleFocusModeToggle} />}
-          />
+          {/* Web has no equivalent to Android's Notification Policy Access —
+              there's no system API a website can call to silence the phone,
+              so this toggle (and the Settings redirect it drives) has
+              nothing to control there. The reminder sheet at the start of a
+              session covers web instead, by asking the student to do it by
+              hand. */}
+          {Platform.OS !== 'web' && (
+            <Row
+              icon={BellOff}
+              label="Silenciar al estudiar"
+              sub="Activa No Molestar mientras dura la sesión"
+              control={<Toggle value={focusModeEnabled} onValueChange={handleFocusModeToggle} />}
+            />
+          )}
         </Group>
 
         {/* Checkpoint 1, item 4 — its other half: the policies have to be
@@ -581,12 +601,17 @@ export default function SettingsScreen() {
             onPress={() => router.push('/trayectoria')}
           />
           <Row icon={MessageSquare} label="Enviar feedback" onPress={() => openLegal('feedback')} />
-          <Row
-            icon={Star}
-            label="Valorar Schedio"
-            sub="Déjanos tu opinión en la Play Store"
-            onPress={handleRateApp}
-          />
+          {/* handleRateApp's only fallback is a hardcoded Play Store link —
+              there's no app store listing for the PWA to send an iPhone user
+              to, so the row would just be a broken promise on web. */}
+          {Platform.OS !== 'web' && (
+            <Row
+              icon={Star}
+              label="Valorar Schedio"
+              sub="Déjanos tu opinión en la Play Store"
+              onPress={handleRateApp}
+            />
+          )}
         </Group>
 
         <Group>
@@ -678,18 +703,34 @@ export default function SettingsScreen() {
         visible={notificationsSheet}
         onClose={() => setNotificationsSheet(false)}
         title="Notificaciones"
-        subtitle="Esto es todo lo que te podemos enviar. Nada más."
+        subtitle={
+          Platform.OS === 'web' && !canRequestWebPush()
+            ? 'Safari solo deja activar avisos desde una app instalada.'
+            : 'Esto es todo lo que te podemos enviar. Nada más.'
+        }
       >
-        {NOTIFICATION_KINDS.map((kind) => (
-          <View key={kind.title} style={styles.kind}>
-            <Text style={styles.kindTitle}>{kind.title}</Text>
-            <Text style={styles.kindBody}>{kind.body}</Text>
+        {Platform.OS === 'web' && !canRequestWebPush() ? (
+          <View style={styles.kind}>
+            <Text style={styles.kindTitle}>Añádela a tu pantalla de inicio</Text>
+            <Text style={styles.kindBody}>
+              Toca el icono de Compartir en Safari y elige "Añadir a pantalla de inicio". Al volver
+              a abrirla desde ahí, te pediremos permiso automáticamente.
+            </Text>
           </View>
-        ))}
-        <Text style={styles.kindFoot}>
-          El interruptor las activa o desactiva todas a la vez. Poder elegirlas por separado llegará
-          más adelante.
-        </Text>
+        ) : (
+          <>
+            {NOTIFICATION_KINDS.map((kind) => (
+              <View key={kind.title} style={styles.kind}>
+                <Text style={styles.kindTitle}>{kind.title}</Text>
+                <Text style={styles.kindBody}>{kind.body}</Text>
+              </View>
+            ))}
+            <Text style={styles.kindFoot}>
+              El interruptor las activa o desactiva todas a la vez. Poder elegirlas por separado
+              llegará más adelante.
+            </Text>
+          </>
+        )}
       </BottomSheet>
 
       <CustomAlert
