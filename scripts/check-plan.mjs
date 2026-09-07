@@ -330,5 +330,33 @@ console.log(`  semana de examenes: pico de ${peak} min en un dia`);
 check('ni con presion se pasa del techo de 5 h', peak <= HARD_DAILY_CAP_MINUTES, true);
 check('dos examenes seguidos se reparten', new Set(crunch.tasks.map((t) => t.examId)).size, 2);
 
+// ─── La huella de los examenes ───
+//
+// Es lo que decide si el plan guardado sigue valiendo. Si deja de detectar un
+// cambio, el plan se queda congelado con examenes que ya no existen y no hay
+// forma de que el alumno lo note hasta que le falle: es justo el fallo que
+// tenia el contador de sesion que sustituye.
+console.log('\n=== huella de los examenes ===');
+const { examsFingerprint } = await load('microplanService.mjs');
+const baseExams = [
+  { id: 'a', subjectId: 's1', date: '2026-09-10T09:00:00.000Z', completed: false, type: 'exam', name: 'Tema 1' },
+  { id: 'b', subjectId: 's2', date: '2026-09-15T09:00:00.000Z', completed: false, type: 'task', name: 'Trabajo' },
+];
+const baseFp = examsFingerprint(baseExams);
+const changed = (exams) => examsFingerprint(exams) !== baseFp;
+
+check('el orden en que vengan no importa', examsFingerprint([...baseExams].reverse()), baseFp);
+check('cambiar la fecha se detecta', changed([{ ...baseExams[0], date: '2026-09-11T09:00:00.000Z' }, baseExams[1]]), true);
+check('anadir un examen se detecta', changed([...baseExams, { id: 'c', subjectId: 's1', date: '2026-09-20T09:00:00.000Z', type: 'exam' }]), true);
+check('borrar un examen se detecta', changed([baseExams[0]]), true);
+check('marcarlo como hecho se detecta', changed([{ ...baseExams[0], completed: true }, baseExams[1]]), true);
+check('cambiar de asignatura se detecta', changed([{ ...baseExams[0], subjectId: 's9' }, baseExams[1]]), true);
+check('cambiar el tipo se detecta', changed([{ ...baseExams[0], type: 'task' }, baseExams[1]]), true);
+check('renombrarlo NO cuenta como cambio', changed([{ ...baseExams[0], name: 'Otro' }, baseExams[1]]), false);
+check('sin examenes, huella vacia', examsFingerprint([]), '');
+check('una lista vacia no se confunde con una llena', changed([]), true);
+check('null no revienta', examsFingerprint(null), '');
+check('una fecha invalida no revienta', typeof examsFingerprint([{ id: 'x', date: 'no soy fecha' }]), 'string');
+
 console.log(`\n${fail === 0 ? '✅ todo correcto' : `❌ ${fail} fallos`}`);
 process.exit(fail === 0 ? 0 : 1);

@@ -104,6 +104,42 @@ export const LEVEL_PROFILES = {
   Universidad: { exam: 300, task: 70, leadDays: 21, block: 45 },
 };
 
+/**
+ * Huella de los exámenes que alimentan el plan.
+ *
+ * Sirve para una sola pregunta: **¿ha cambiado algo que obligue a rehacer el
+ * plan?** Se compara con la que se guardó la última vez que se generó.
+ *
+ * Antes esa pregunta se contestaba con un contador de sesión que subía cuando
+ * alguna pantalla llamaba a `triggerExamRefresh()`, y eso fallaba de dos
+ * maneras a la vez: las pantallas que se olvidaban de llamarlo (Inicio crea,
+ * edita, califica y borra exámenes, y no avisaba en ninguno de los cuatro
+ * sitios) y el arranque en frío, donde el contador vuelve a cero y el plan
+ * guardado parece al día. Una huella de los datos no se puede olvidar de
+ * avisar: si el plan se genera de estos exámenes y estos exámenes ya no son
+ * los mismos, hay que rehacerlo, venga el cambio de donde venga.
+ *
+ * Entra todo lo que el planificador mira de un examen: cuándo es, si está
+ * hecho, de qué asignatura y de qué tipo. No entra el nombre, que no cambia
+ * ninguna tarea.
+ */
+export const examsFingerprint = (exams) =>
+  (Array.isArray(exams) ? exams : [])
+    .map((exam) => {
+      const date = toDate(exam?.date);
+      return [
+        exam?.id ?? '',
+        date ? date.getTime() : '',
+        exam?.completed ? 1 : 0,
+        exam?.subjectId ?? '',
+        exam?.type ?? '',
+      ].join(':');
+    })
+    // Ordenado para que el mismo conjunto dé la misma huella venga en el orden
+    // que venga de Firestore.
+    .sort()
+    .join('|');
+
 /** 'Otro' and anything unrecognised sit in the middle rather than at an extreme. */
 export const DEFAULT_LEVEL = 'Bachillerato';
 

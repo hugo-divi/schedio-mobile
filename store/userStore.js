@@ -123,6 +123,9 @@ const initialState = {
     streak: 0,
     lastStudyDate: null,
     lastPlanGenerationDate: null,
+    // Huella de los examenes con los que se genero el plan guardado. Si los de
+    // ahora no coinciden, hay que rehacerlo -- ver services/microplanService.js
+    lastPlanExamsFingerprint: null,
   },
   gamification: {
     xp: 0,
@@ -132,11 +135,10 @@ const initialState = {
   },
   loading: false,
   error: null,
+  // Sube cada vez que se toca un examen. Lo escuchan las pantallas que
+  // muestran la LISTA de examenes; el plan ya no depende de el (ver
+  // `initDailyMicroplans`, que compara la huella de los examenes).
   examRefreshTrigger: 0,
-  // Valor de `examRefreshTrigger` la ultima vez que se regenero el plan. Solo
-  // de sesion, no se persiste: al arrancar la app el plan se regenera igual
-  // porque `microplans` viene vacio.
-  lastPlanExamTrigger: 0,
   hasSeenTour: false,
 };
 
@@ -601,27 +603,32 @@ const useUserStore = create((set, get) => ({
   },
 
   initDailyMicroplans: async (uid, force = false) => {
-    const {
-      subjects,
-      microplans,
-      stats,
-      profile,
-      sessionHistory,
-      manualTasks,
-      planOverrides,
-      examRefreshTrigger,
-      lastPlanExamTrigger,
-    } = get();
+    const { subjects, microplans, stats, profile, sessionHistory, manualTasks, planOverrides } =
+      get();
     const today = new Date().toDateString();
 
-    // `examRefreshTrigger` sube cada vez que se crea, edita o califica un
-    // examen. Sin esta condición el plan solo se regeneraba una vez al día, así
-    // que un examen añadido esta tarde no tenía ninguna tarea hasta mañana —
-    // que es justo cuando el alumno lo apunta: al enterarse de que lo tiene.
-    // El aviso ya existía; solo lo escuchaba la lista de la vista "por examen".
-    const examsChanged = examRefreshTrigger !== lastPlanExamTrigger;
+    // Los exámenes se piden SIEMPRE, aunque luego no haya que regenerar: son la
+    // entrada del plan y, sobre todo, son lo único que permite saber si el plan
+    // guardado sigue valiendo.
+    //
+    // Esto costaba antes un contador de sesión que subía cuando una pantalla se
+    // acordaba de llamar a `triggerExamRefresh()`. Fallaba por los dos lados:
+    // Inicio crea, edita, califica y borra exámenes sin avisar en ninguno de
+    // los cuatro sitios, y al arrancar en frío el contador vuelve a cero
+    // mientras `microplans` se recupera lleno de Firestore con la fecha de hoy
+    // — así que el plan se quedaba congelado con exámenes que ya no existían y
+    // ni cerrando la app se arreglaba. Una consulta más por entrada a Planes es
+    // barata; que el plan mienta, no.
+    const { getUpcomingExams } = await import('../services/exams');
+    const exams = await getUpcomingExams(uid, 20);
+    const { examsFingerprint } = await import('../services/microplanService');
+    const fingerprint = examsFingerprint(exams);
+
     const shouldGenerate =
-      force || microplans.length === 0 || stats.lastPlanGenerationDate !== today || examsChanged;
+      force ||
+      microplans.length === 0 ||
+      stats.lastPlanGenerationDate !== today ||
+      fingerprint !== stats.lastPlanExamsFingerprint;
 
     if (shouldGenerate) {
       try {
@@ -631,9 +638,6 @@ const useUserStore = create((set, get) => ({
           currentSubjects = await getUserSubjects(uid);
           set({ subjects: currentSubjects });
         }
-
-        const { getUpcomingExams } = await import('../services/exams');
-        const exams = await getUpcomingExams(uid, 20);
 
         // History feeds two things now: the daily capacity the plan is budgeted
         // against, and the coverage factor that pushes neglected subjects up.
@@ -685,16 +689,19 @@ const useUserStore = create((set, get) => ({
           console.warn('Plan overloaded, work did not fit:', diagnostics.unscheduled);
         }
 
-        const newStats = { ...stats, lastPlanGenerationDate: today };
+        // La huella se guarda junto a la fecha: es lo que la proxima entrada
+        // comparara para saber si este plan sigue valiendo.
+        const newStats = {
+          ...stats,
+          lastPlanGenerationDate: today,
+          lastPlanExamsFingerprint: fingerprint,
+        };
 
         set({
           microplans: newPlans,
           planOverrides: keptOverrides,
           planDiagnostics: diagnostics,
           stats: newStats,
-          // Se anota el aviso ya atendido, para no regenerar en bucle en cada
-          // vuelta a la pestana.
-          lastPlanExamTrigger: examRefreshTrigger,
         });
 
         const userRef = doc(db, 'users', uid);
@@ -702,6 +709,7 @@ const useUserStore = create((set, get) => ({
           microplans: newPlans,
           planOverrides: keptOverrides,
           'stats.lastPlanGenerationDate': today,
+          'stats.lastPlanExamsFingerprint': fingerprint,
         });
       } catch (error) {
         console.error('Error generating microplans:', error);
