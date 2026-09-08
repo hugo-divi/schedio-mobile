@@ -117,3 +117,107 @@ export const formatMinutes = (minutes) => {
   if (h === 0) return `${m} min`;
   return `${h}h ${m}min`;
 };
+
+/**
+ * Las sesiones de un examen, en orden, para el detalle que se abre al pulsar
+ * su tarjeta.
+ *
+ * La tarjeta ya dice "3 de 8 sesiones"; lo que no dice —y no se puede
+ * averiguar en ninguna otra parte de la app— es *cuándo* son las otras cinco.
+ * El plan está organizado por día, así que ves el jueves entero pero nunca
+ * "tu examen de Historia".
+ *
+ * `overdue` es una sesión sin marcar que ya pasó: no desaparece del plan, y
+ * fingir que no está ahí es justo lo que haría que el resumen mintiera.
+ */
+export const examSessionsFor = ({ exam, microplans, now = new Date() }) => {
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  return (microplans || [])
+    .filter((task) => task.examId === exam.id)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map((task) => {
+      const date = new Date(task.date);
+      const day = new Date(date);
+      day.setHours(0, 0, 0, 0);
+      return {
+        id: task.id,
+        date: task.date,
+        dayLabel: dayLabelFor(date),
+        minutes: task.duration || 0,
+        phaseLabel: task.phase ? task.phase.charAt(0) + task.phase.slice(1).toLowerCase() : '',
+        text: task.text || '',
+        completed: Boolean(task.completed),
+        overdue: !task.completed && day < startOfToday,
+        isToday: day.getTime() === startOfToday.getTime(),
+      };
+    });
+};
+
+/** "jue 12" — el mismo formato corto que ya usa el resto de la app. */
+export const dayLabelFor = (date) => {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  const weekday = d.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '');
+  return `${weekday} ${d.getDate()}`;
+};
+
+/**
+ * ¿Llego a este examen? La pregunta que la pantalla se guardaba para sí.
+ *
+ * Cuatro respuestas, y el orden importa: primero lo que ya está hecho,
+ * después lo que va mal, y solo al final la tranquilizadora. Decir "vas
+ * cubierto" a alguien que arrastra tres sesiones sin hacer sería mentir.
+ *
+ * El déficit (`planDiagnostics.unscheduled`) es el caso más grave —el trabajo
+ * que directamente no cupo en los días que quedan— pero solo existe si el
+ * plan se ha generado en esta sesión: el store no lo persiste. Por eso el
+ * resto de veredictos se calculan sobre las sesiones mismas, que sí
+ * sobreviven a cerrar la app.
+ */
+export const examVerdictFor = ({ sessions, daysUntil, planDiagnostics = null, examId }) => {
+  const pending = sessions.filter((s) => !s.completed);
+  const overdue = pending.filter((s) => s.overdue);
+  const pendingMinutes = pending.reduce((sum, s) => sum + s.minutes, 0);
+
+  if (sessions.length === 0) {
+    return {
+      kind: 'none',
+      text:
+        daysUntil > 0
+          ? 'Todavía no hay sesiones para este examen. Aparecerán cuando se acerque.'
+          : 'No hay sesiones para este examen.',
+    };
+  }
+
+  if (pending.length === 0) {
+    return { kind: 'ready', text: 'Preparado: no queda nada por hacer.' };
+  }
+
+  const short = (planDiagnostics?.unscheduled || []).find((u) => u.examId === examId);
+  if (short && short.minutesShort > 0) {
+    return {
+      kind: 'short',
+      text: `No llegas: faltan ${formatMinutes(short.minutesShort)} que no han cabido en los días que quedan. Libera algún día de esta semana o baja el objetivo.`,
+    };
+  }
+
+  if (overdue.length > 0) {
+    return {
+      kind: 'behind',
+      text: `Vas con retraso: ${overdue.length} ${
+        overdue.length === 1
+          ? 'sesión pendiente de un día que ya pasó'
+          : 'sesiones pendientes de días que ya pasaron'
+      }. Todavía puedes recuperarlas antes del examen.`,
+    };
+  }
+
+  return {
+    kind: 'ontrack',
+    text: `Vas cubierto: quedan ${pending.length} ${
+      pending.length === 1 ? 'sesión' : 'sesiones'
+    } (${formatMinutes(pendingMinutes)}) repartidas hasta la víspera.`,
+  };
+};

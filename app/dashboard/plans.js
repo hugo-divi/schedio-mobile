@@ -35,7 +35,14 @@ import { es } from 'date-fns/locale';
 import { tokens } from '../../theme/tokens';
 import { planReasonsFor, STUDY_PHASES } from '../../services/microplanService';
 import { getUpcomingExams } from '../../services/exams';
-import { dayLoadWidth, examProgressFor } from '../../services/planPresentation';
+import {
+  dayLoadWidth,
+  examProgressFor,
+  examSessionsFor,
+  examVerdictFor,
+  daysUntilLabel,
+} from '../../services/planPresentation';
+import { daysBetween } from '../../services/priority';
 import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
@@ -435,13 +442,18 @@ function WeekRow({ label, isRest, isToday: dayIsToday, allDone, subjectNames, mi
 /** Una tarjeta de examen, para la vista "por examen": sesiones hechas/totales,
  * la barra de progreso, la pista de las cuatro fases y, debajo, en qué fase
  * está y qué le queda. */
-function ExamCard({ exam }) {
+function ExamCard({ exam, onPress }) {
   const color = exam.subjectColor || SUBJECT_FALLBACK_COLOR;
   const pct =
     exam.totalSessions > 0 ? Math.round((exam.doneSessions / exam.totalSessions) * 100) : 0;
 
+  // Era un `View`: tenía todo el aspecto de algo pulsable y no hacía nada.
   return (
-    <View
+    <TouchableOpacity
+      activeOpacity={0.85}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Ver las sesiones de ${exam.name}`}
       style={[styles.examCard, exam.ready && styles.examCardReady, exam.hot && styles.examCardHot]}
     >
       <View style={styles.examHead}>
@@ -493,7 +505,90 @@ function ExamCard({ exam }) {
           {exam.footerRight}
         </Text>
       </View>
-    </View>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * El detalle de un examen: las dos preguntas que la tarjeta no contesta.
+ *
+ * "3 de 8 sesiones" no dice *cuándo* son las otras cinco, y el plan está
+ * ordenado por día, así que esa lista no existe en ninguna otra pantalla. El
+ * veredicto de abajo es el otro dato que la app calculaba y se guardaba: si
+ * el trabajo cabe o no en los días que quedan.
+ */
+function ExamDetailSheet({ visible, onClose, detail }) {
+  if (!detail) return null;
+  const color = detail.subjectColor || SUBJECT_FALLBACK_COLOR;
+  const verdictStyle = {
+    ready: styles.verdictReady,
+    ontrack: styles.verdictOnTrack,
+    behind: styles.verdictBehind,
+    short: styles.verdictShort,
+    none: styles.verdictNone,
+  }[detail.verdict.kind];
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose}>
+      <View style={styles.detailHead}>
+        <View style={[styles.examDot, { backgroundColor: color }]} />
+        <Text style={styles.detailTitle} numberOfLines={2}>
+          {detail.name}
+        </Text>
+      </View>
+      <Text style={styles.detailSubtitle}>
+        {detail.subjectName ? `${detail.subjectName} · ` : ''}
+        {detail.dateLabel}
+      </Text>
+
+      <Text style={styles.detailSectionLabel}>Tus sesiones</Text>
+
+      {detail.sessions.length === 0 ? (
+        <Text style={styles.detailEmpty}>
+          Todavía no hay ninguna sesión colocada para este examen.
+        </Text>
+      ) : (
+        <View style={styles.detailList}>
+          {detail.sessions.map((session) => (
+            <View key={session.id} style={styles.detailRow}>
+              <Text
+                style={[
+                  styles.detailDay,
+                  session.isToday && styles.detailDayToday,
+                  session.overdue && styles.detailDayOverdue,
+                ]}
+              >
+                {session.dayLabel}
+              </Text>
+              <View style={styles.detailRowMain}>
+                <Text
+                  style={[styles.detailPhase, session.completed && styles.detailDone]}
+                  numberOfLines={1}
+                >
+                  {session.phaseLabel || 'Sesión'}
+                </Text>
+                {session.text ? (
+                  <Text style={styles.detailText} numberOfLines={2}>
+                    {session.text}
+                  </Text>
+                ) : null}
+              </View>
+              {session.completed ? (
+                <Check size={15} color={tokens.colors.success} strokeWidth={2.5} />
+              ) : (
+                <Text style={[styles.detailMinutes, session.overdue && styles.detailDayOverdue]}>
+                  {session.minutes}′
+                </Text>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={[styles.verdictBox, verdictStyle]}>
+        <Text style={styles.verdictText}>{detail.verdict.text}</Text>
+      </View>
+    </BottomSheet>
   );
 }
 
@@ -938,6 +1033,35 @@ export default function PlansScreen() {
     [examsList, subjects, microplans, todaysExamIds]
   );
 
+  // ── Detalle de un examen ──
+  //
+  // Se guarda el id, no el objeto: así el detalle se recalcula solo cuando el
+  // plan cambia (una sesión marcada desde otra pantalla, una regeneración) en
+  // vez de quedarse congelado con la foto del momento en que se abrió.
+  //
+  // `detailOpen` va aparte del id a propósito, igual que en TaskSheet: si al
+  // cerrar se borrara el id, el contenido desaparecería de golpe y el sheet no
+  // llegaría a animar su salida.
+  const [detailExamId, setDetailExamId] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  const examDetail = useMemo(() => {
+    if (!detailExamId) return null;
+    const exam = examsList.find((e) => e.id === detailExamId);
+    if (!exam) return null;
+    const sessions = examSessionsFor({ exam, microplans });
+    const daysUntil = daysBetween(new Date(), exam.date);
+    return {
+      id: exam.id,
+      name: exam.name,
+      subjectName: subjects.find((s) => s.id === exam.subjectId)?.name || '',
+      subjectColor: subjects.find((s) => s.id === exam.subjectId)?.color,
+      dateLabel: daysUntilLabel(daysUntil),
+      sessions,
+      verdict: examVerdictFor({ sessions, daysUntil, planDiagnostics, examId: exam.id }),
+    };
+  }, [detailExamId, examsList, microplans, subjects, planDiagnostics]);
+
   // Se cuenta sobre los materiales vivos, igual que `canUpload` en el store:
   // borrar un archivo devuelve la subida de esa semana.
   const uploadsUsed = useMemo(() => {
@@ -1235,7 +1359,14 @@ export default function PlansScreen() {
             ) : (
               <View style={{ gap: 8 }}>
                 {examsWithProgress.map((exam) => (
-                  <ExamCard key={exam.id} exam={exam} />
+                  <ExamCard
+                    key={exam.id}
+                    exam={exam}
+                    onPress={() => {
+                      setDetailExamId(exam.id);
+                      setDetailOpen(true);
+                    }}
+                  />
                 ))}
               </View>
             )}
@@ -1316,7 +1447,9 @@ export default function PlansScreen() {
         </View>
       </View>
 
-      {isPrime ? null : (
+      {/* Prime isn't sold on web yet — same reasoning as the settings.js
+          banner and PrimeLimitSheet's button. */}
+      {isPrime || Platform.OS === 'web' ? null : (
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => router.push('/plus')}
@@ -1406,6 +1539,12 @@ export default function PlansScreen() {
         editing={editingTask}
         onSave={saveTask}
         onDelete={deleteTask}
+      />
+
+      <ExamDetailSheet
+        visible={detailOpen && Boolean(examDetail)}
+        onClose={() => setDetailOpen(false)}
+        detail={examDetail}
       />
 
       <UploadModal
@@ -2072,6 +2211,108 @@ const styles = StyleSheet.create({
     color: tokens.colors.textSecondary,
   },
   reasons: { gap: 10 },
+
+  // ── Detalle de un examen ──
+  detailHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  detailTitle: {
+    flex: 1,
+    fontFamily: font.bold,
+    fontSize: 19,
+    color: tokens.colors.text,
+  },
+  detailSubtitle: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+    marginTop: 4,
+    marginBottom: 20,
+  },
+  detailSectionLabel: {
+    fontFamily: font.semibold,
+    fontSize: 12,
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+    color: tokens.colors.textSecondary,
+    marginBottom: 10,
+  },
+  detailEmpty: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.textSecondary,
+  },
+  detailList: { gap: 2 },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: tokens.colors.border,
+  },
+  // Ancho fijo para que los días queden en columna y la lista se lea de un
+  // vistazo, en vez de bailar según la longitud de "mié" o "jueves".
+  detailDay: {
+    width: 52,
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  detailDayToday: { color: tokens.colors.accent, fontFamily: font.semibold },
+  detailDayOverdue: { color: tokens.colors.danger },
+  detailRowMain: { flex: 1, gap: 1 },
+  detailPhase: {
+    fontFamily: font.semibold,
+    fontSize: 14,
+    color: tokens.colors.text,
+  },
+  detailDone: {
+    color: tokens.colors.textSecondary,
+    textDecorationLine: 'line-through',
+  },
+  detailText: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    lineHeight: 17,
+    color: tokens.colors.textSecondary,
+  },
+  detailMinutes: {
+    fontFamily: font.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  verdictBox: {
+    marginTop: 20,
+    padding: 12,
+    borderRadius: tokens.radius.card,
+    borderWidth: 1,
+  },
+  verdictText: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    color: tokens.colors.text,
+  },
+  verdictReady: {
+    backgroundColor: 'rgba(90, 185, 138, 0.12)',
+    borderColor: 'rgba(90, 185, 138, 0.3)',
+  },
+  verdictOnTrack: {
+    backgroundColor: tokens.colors.accentSoftBg,
+    borderColor: tokens.colors.accentSoftBorder,
+  },
+  verdictBehind: {
+    backgroundColor: tokens.colors.premiumBg,
+    borderColor: tokens.colors.premiumBorder,
+  },
+  verdictShort: {
+    backgroundColor: 'rgba(216, 96, 74, 0.12)',
+    borderColor: 'rgba(216, 96, 74, 0.32)',
+  },
+  verdictNone: {
+    backgroundColor: tokens.colors.surfaceHover,
+    borderColor: tokens.colors.border,
+  },
   reasonRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   reasonDot: {
     width: 6,

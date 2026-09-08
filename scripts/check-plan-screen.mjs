@@ -30,8 +30,16 @@ for (const name of ['priority', 'taskCopy', 'planProfile', 'microplanService', '
 }
 const load = (name) => import(`file://${join(here, name)}`);
 
-const { daysUntilLabel, phaseIndexFor, dayLoadWidth, examProgressFor, formatMinutes } =
-  await load('planPresentation.mjs');
+const {
+  daysUntilLabel,
+  phaseIndexFor,
+  dayLoadWidth,
+  examProgressFor,
+  formatMinutes,
+  examSessionsFor,
+  dayLabelFor,
+  examVerdictFor,
+} = await load('planPresentation.mjs');
 const { STUDY_PHASES } = await load('microplanService.mjs');
 
 let failures = 0;
@@ -162,6 +170,100 @@ const task = (overrides) => ({
   const p = examProgressFor({ exam, subjects, microplans, todaysExamIds: new Set(), now });
   ok('pánico → va al último punto de la pista de fases', p.phaseIndex === STUDY_PHASES.length - 1);
   ok('pánico → el texto sigue diciendo la verdad, no la esconde', p.phaseLabel.toLowerCase().includes('pánico'), p.phaseLabel);
+}
+
+// ── detalle de un examen: cuándo estudio esto ────────────────────────────────
+
+console.log('\n── examSessionsFor ──');
+{
+  const exam = { id: 'e1', name: 'Historia', subjectId: 's1', date: new Date(now.getTime() + 5 * DAY) };
+  const microplans = [
+    task({ id: 't3', date: iso(2), duration: 40, phase: 'PRÁCTICA', completed: false }),
+    task({ id: 't1', date: iso(-2), duration: 30, phase: 'INTRODUCCIÓN', completed: true }),
+    task({ id: 't2', date: iso(-1), duration: 35, phase: 'ESTUDIO PROFUNDO', completed: false }),
+    { id: 'otro', examId: 'e2', date: iso(1), duration: 25 },
+  ];
+  const sessions = examSessionsFor({ exam, microplans, now });
+
+  ok('solo las sesiones de ESTE examen', sessions.length === 3, String(sessions.length));
+  ok(
+    'vienen en orden de fecha',
+    sessions.map((s) => s.id).join(',') === 't1,t2,t3',
+    sessions.map((s) => s.id).join(',')
+  );
+  ok('la hecha va marcada', sessions[0].completed === true);
+  ok('la hecha de un día pasado NO es retraso', sessions[0].overdue === false);
+  ok('la sin marcar de un día pasado SÍ es retraso', sessions[1].overdue === true);
+  ok('la futura no es retraso', sessions[2].overdue === false);
+  ok('cada una lleva sus minutos', sessions[2].minutes === 40);
+  ok('la fase se escribe legible', sessions[0].phaseLabel === 'Introducción', sessions[0].phaseLabel);
+}
+
+{
+  const exam = { id: 'e1', name: 'X', subjectId: 's1', date: new Date(now.getTime() + 2 * DAY) };
+  ok('sin plan, ninguna sesión', examSessionsFor({ exam, microplans: [], now }).length === 0);
+  ok('microplans null no revienta', examSessionsFor({ exam, microplans: null, now }).length === 0);
+  const hoy = examSessionsFor({ exam, microplans: [task({ date: iso(0) })], now });
+  ok('la de hoy se marca como hoy', hoy[0].isToday === true);
+  ok('la de hoy no cuenta como retraso', hoy[0].overdue === false);
+}
+
+console.log('\n── dayLabelFor ──');
+{
+  const label = dayLabelFor(new Date(2026, 10, 12));
+  ok('etiqueta corta con día', /^[a-záéíóú]+ \d{1,2}$/.test(label), label);
+  ok('una fecha inválida no revienta', dayLabelFor('no-es-fecha') === '');
+}
+
+console.log('\n── examVerdictFor: ¿llego? ──');
+{
+  const s = (over, done) => ({ completed: done, overdue: over, minutes: 30 });
+
+  ok(
+    'sin sesiones y con días por delante: aún no hay nada, no es alarma',
+    examVerdictFor({ sessions: [], daysUntil: 9, examId: 'e1' }).kind === 'none'
+  );
+  ok(
+    'todo hecho: preparado',
+    examVerdictFor({ sessions: [s(false, true), s(false, true)], daysUntil: 3, examId: 'e1' })
+      .kind === 'ready'
+  );
+  ok(
+    'con sesiones atrasadas: retraso, no "vas cubierto"',
+    examVerdictFor({ sessions: [s(true, false), s(false, false)], daysUntil: 3, examId: 'e1' })
+      .kind === 'behind'
+  );
+  ok(
+    'sin atrasos ni déficit: cubierto',
+    examVerdictFor({ sessions: [s(false, false), s(false, false)], daysUntil: 6, examId: 'e1' })
+      .kind === 'ontrack'
+  );
+
+  const diag = { unscheduled: [{ examId: 'e1', minutesShort: 45 }] };
+  ok(
+    'el déficit gana al retraso: es lo más grave',
+    examVerdictFor({ sessions: [s(true, false)], daysUntil: 2, planDiagnostics: diag, examId: 'e1' })
+      .kind === 'short'
+  );
+  ok(
+    'el déficit de OTRO examen no contamina a este',
+    examVerdictFor({ sessions: [s(false, false)], daysUntil: 5, planDiagnostics: diag, examId: 'e2' })
+      .kind === 'ontrack'
+  );
+  ok(
+    'sin diagnóstico (app recién abierta) sigue habiendo veredicto',
+    examVerdictFor({ sessions: [s(false, false)], daysUntil: 5, planDiagnostics: null, examId: 'e1' })
+      .kind === 'ontrack'
+  );
+  ok(
+    'un examen preparado no se llama en déficit aunque el diagnóstico lo diga',
+    examVerdictFor({ sessions: [s(false, true)], daysUntil: 2, planDiagnostics: diag, examId: 'e1' })
+      .kind === 'ready'
+  );
+  ok(
+    'el veredicto siempre trae texto',
+    Boolean(examVerdictFor({ sessions: [s(true, false)], daysUntil: 1, examId: 'e1' }).text)
+  );
 }
 
 console.log(failures === 0 ? '\n✅ todo correcto' : `\n❌ ${failures} comprobación(es) fallan`);
