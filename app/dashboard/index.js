@@ -404,6 +404,14 @@ export default function Dashboard() {
     }
   };
 
+  // Borrar o editar un examen puede cambiar las notas que entran en la media,
+  // igual que calificarlo. Solo el calificar la recalculaba, asi que la media de
+  // la materia se quedaba con un examen que ya no existia.
+  const refreshAverages = async () => {
+    const user = auth.currentUser;
+    if (user) await useUserStore.getState().updateAverageGrade(user.uid);
+  };
+
   const handleDeleteEvent = async (eventId) => {
     if (!eventId) {
       console.error('No eventId provided for deletion');
@@ -411,6 +419,7 @@ export default function Dashboard() {
     }
     try {
       await deleteExam(eventId);
+      await refreshAverages();
       setEventModalVisible(false);
       setDayOptionsVisible(false);
       fetchData();
@@ -461,6 +470,7 @@ export default function Dashboard() {
 
       if (selectedEvent) {
         await updateExam(selectedEvent.id, newEvent);
+        await refreshAverages();
       } else {
         await createExam(newEvent);
       }
@@ -612,11 +622,16 @@ export default function Dashboard() {
 
           {/* Same pill either way; where it leads is the difference. Sending a
               paying student back to the paywall was the old behaviour's other
-              problem. */}
-          <PrimeBadge
-            active={isPrime}
-            onPress={() => (isPrime ? setPrimeSheetOpen(true) : router.push('/plus'))}
-          />
+              problem. Hidden on web: Prime isn't sold there yet, and isPrime
+              is always false on web (see services/revenuecat.web.js), so the
+              badge would only ever lead to the paywall this build bounces
+              back from anyway. */}
+          {Platform.OS !== 'web' && (
+            <PrimeBadge
+              active={isPrime}
+              onPress={() => (isPrime ? setPrimeSheetOpen(true) : router.push('/plus'))}
+            />
+          )}
         </View>
       </View>
 
@@ -972,6 +987,7 @@ export default function Dashboard() {
               setExamToDelete(null);
               try {
                 await deleteExam(exam.id);
+                await refreshAverages();
                 fetchData();
               } catch (error) {
                 console.error('Error deleting exam:', error);

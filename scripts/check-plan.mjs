@@ -179,10 +179,42 @@ const panic = generateStudyPlan(
   subjects,
   { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
 );
-check('examen hoy genera tarea', panic.tasks.length > 0, true);
-check('y es pánico', panic.tasks[0]?.isPanicMode, true);
-check('el pánico tiene texto', Boolean(panic.tasks[0]?.text), true);
-console.log(`  pánico: ${panic.tasks[0]?.text}`);
+// El dia del examen se examina, no se estudia: antes salia una tarea a "0 dias
+// del examen", que ademas nunca daba tiempo a hacer.
+check('examen hoy NO genera tarea', panic.tasks.length, 0);
+
+const manana = generateStudyPlan(
+  [{ id: 'm1', name: 'Examen mañana', subjectId: 'm', type: 'exam', date: day(1), manualPriority: 5 }],
+  subjects,
+  { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
+);
+check('examen mañana sí genera tarea', manana.tasks.length > 0, true);
+// `day()` devuelve un ISO con hora y las tareas van a medianoche local, asi que
+// se comparan por dia, no por cadena.
+const ymd = (v) => {
+  const d = new Date(v);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+check('y toda cae hoy, la víspera', manana.tasks.every((t) => ymd(t.date) === ymd(day(0))), true);
+check('sigue siendo pánico', manana.tasks[0]?.isPanicMode, true);
+check('el pánico tiene texto', Boolean(manana.tasks[0]?.text), true);
+console.log(`  pánico: ${manana.tasks[0]?.text}`);
+
+const enTres = generateStudyPlan(
+  [{ id: 't3', name: 'Examen en 3', subjectId: 'm', type: 'exam', date: day(3) }],
+  subjects,
+  { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
+);
+check('a 3 días sigue habiendo plan', enTres.tasks.length > 0, true);
+check('ninguna tarea el día del examen', enTres.tasks.every((t) => ymd(t.date) !== ymd(day(3))), true);
+check('la última es la víspera', ymd(enTres.tasks[enTres.tasks.length - 1].date), ymd(day(2)));
+
+const entregaHoy = generateStudyPlan(
+  [{ id: 'eh', name: 'Comentario', subjectId: 'm', type: 'task', date: day(0) }],
+  subjects,
+  { now: NOW, profile: { course: 'Bachillerato', organizationLevel: 3 } }
+);
+check('una entrega para hoy sí se planifica', entregaHoy.tasks.length > 0, true);
 
 const vencido = generateStudyPlan(
   [{ id: 'v', name: 'Pasado', subjectId: 'm', type: 'exam', date: day(-3) }],
@@ -192,9 +224,9 @@ const vencido = generateStudyPlan(
 check('examen vencido no genera plan', vencido.tasks.length, 0);
 check('sin exámenes -> []', generateStudyPlan([], subjects, { now: NOW }).tasks.length, 0);
 check('exams null no rompe', generateStudyPlan(null, null).tasks.length, 0);
-check('ninguna tarea después de su examen', hoy.tasks.every((t) => {
+check('ninguna tarea el día de su examen ni después', hoy.tasks.every((t) => {
   const e = exams.find((x) => x.id === t.examId);
-  return !e || new Date(t.date) <= new Date(e.date);
+  return !e || new Date(t.date) < new Date(e.date);
 }), true);
 
 console.log('\n=== capa neutra: asignaturas que no reconocemos ===');

@@ -582,7 +582,16 @@ const useUserStore = create((set, get) => ({
             }
             return { ...subject, average: avg };
           }
-          return subject;
+
+          // Sin ninguna nota, la media tiene que desaparecer, no quedarse
+          // congelada. Antes se devolvia la materia intacta, asi que al borrar
+          // el ultimo examen calificado la tarjeta seguia enseñando la media
+          // vieja para siempre.
+          if (subject.average !== null && subject.average !== undefined) {
+            const subjectRef = doc(db, 'subjects', subject.id);
+            await updateDoc(subjectRef, { average: null });
+          }
+          return { ...subject, average: null };
         })
       );
 

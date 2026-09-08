@@ -588,6 +588,15 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
     const daysUntil = detail.daysUntil;
     if (daysUntil > HORIZON_DAYS) return;
+    // El dia del examen no se estudia: se examina. `lastDay` es el ultimo dia en
+    // el que se puede colocar trabajo, y por eso un examen que es hoy
+    // (`daysUntil === 0`) sale del plan en vez de pedir una sesion a "0 dias del
+    // examen".
+    //
+    // Una entrega es lo contrario: el dia de la fecha es precisamente cuando se
+    // termina y se entrega, asi que ahi si cuenta.
+    const lastDay = exam.type === 'task' ? daysUntil : daysUntil - 1;
+    if (lastDay < 0) return;
 
     items.push({
       exam,
@@ -596,8 +605,10 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
       subjectName,
       subjectColor: subject?.color || (subject ? DEFAULT_SUBJECT_COLOR : FALLBACK_SUBJECT_COLOR),
       daysUntil,
-      // Study opens `leadDays` before the exam at the earliest.
-      startDay: Math.max(0, daysUntil - leadDays),
+      lastDay,
+      // Study opens `leadDays` before the exam at the earliest, y nunca despues
+      // del ultimo dia util.
+      startDay: Math.min(lastDay, Math.max(0, daysUntil - leadDays)),
       // How this subject is examined, which decides the wording of every task.
       format: inferExamFormat(subjectName),
       totalEffort: detail.effortMinutes,
@@ -609,7 +620,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
 
   if (items.length === 0) return { tasks: [], diagnostics };
 
-  const horizon = Math.min(HORIZON_DAYS, Math.max(...items.map((item) => item.daysUntil)));
+  const horizon = Math.min(HORIZON_DAYS, Math.max(...items.map((item) => item.lastDay)));
 
   /**
    * How much of an item's effort should still be owed at the end of day `day`.
@@ -621,7 +632,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
    * on the day study opens.
    */
   const targetRemaining = (item, day) => {
-    const windowLength = Math.max(1, item.daysUntil - item.startDay);
+    const windowLength = Math.max(1, item.lastDay - item.startDay);
     const progress = (day - item.startDay + 1) / (windowLength + 1);
     return item.totalEffort * (1 - Math.min(1, progress) ** gamma);
   };
@@ -636,7 +647,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
     const dateKey = formatDate(date);
 
     const active = items.filter(
-      (item) => item.remaining > 0 && day >= item.startDay && day <= item.daysUntil
+      (item) => item.remaining > 0 && day >= item.startDay && day <= item.lastDay
     );
     if (active.length === 0) {
       consecutiveStudyDays = 0;
@@ -713,7 +724,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         // reported 30 minutes as an overload while the week still had 500 minutes
         // free. A false shortfall is worse than a plan that starts a day early.
         // Todos los dias que quedan cuentan: ya no hay ninguno inhabil.
-        const schedulableLeft = item.daysUntil - day + 1;
+        const schedulableLeft = item.lastDay - day + 1;
         const sessionsNeeded = Math.ceil(item.remaining / preferredBlock);
         const mustStartNow = sessionsNeeded >= schedulableLeft;
 
@@ -757,7 +768,7 @@ export const generateStudyPlan = (exams, subjects, options = {}) => {
         // Too small to be worth a row, unless it's the last of this exam's work.
         if (block < MIN_BLOCK_MINUTES && block < item.remaining) return;
 
-        const windowLength = Math.max(1, item.daysUntil - item.startDay);
+        const windowLength = Math.max(1, item.lastDay - item.startDay);
         const progress = (day - item.startDay) / windowLength;
         const isTask = item.exam.type === 'task';
         // Final if nothing schedulable is left afterwards. Comparing `block` against
