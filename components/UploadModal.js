@@ -322,12 +322,23 @@ const UploadModal = ({
                 <View style={styles.primeBanner}>
                   <View style={styles.primeHeader}>
                     <Ionicons name="star" size={16} color="#FFD60A" />
-                    <Text style={styles.primeTitle}>Schedio Prime</Text>
+                    <Text style={styles.primeTitle}>
+                      {Platform.OS === 'web' ? 'Límite semanal' : 'Schedio Prime'}
+                    </Text>
                   </View>
                   <Text style={styles.primeText}>
-                    Te quedan {remaining} de {FREE_WEEKLY_UPLOADS} subidas esta semana. Con Prime,{' '}
-                    {PRIME_WEEKLY_UPLOADS}/semana. Máximo {formatBytes(MAX_UPLOAD_BYTES)} por
-                    archivo.
+                    {Platform.OS === 'web' ? (
+                      <>
+                        Te quedan {remaining} de {FREE_WEEKLY_UPLOADS} subidas esta semana. Máximo{' '}
+                        {formatBytes(MAX_UPLOAD_BYTES)} por archivo.
+                      </>
+                    ) : (
+                      <>
+                        Te quedan {remaining} de {FREE_WEEKLY_UPLOADS} subidas esta semana. Con
+                        Prime, {PRIME_WEEKLY_UPLOADS}/semana. Máximo {formatBytes(MAX_UPLOAD_BYTES)}{' '}
+                        por archivo.
+                      </>
+                    )}
                   </Text>
                 </View>
               )}

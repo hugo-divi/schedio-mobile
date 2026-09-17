@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Layers } from 'lucide-react-native';
 import { BottomSheet } from './ui/BottomSheet';
 import { Button } from './ui/Button';
@@ -30,7 +30,12 @@ export function PrimeLimitSheet({
       </View>
 
       <View style={styles.actions}>
-        <Button title="Ver planes Schedio Prime" onPress={onUpgrade} fullWidth />
+        {/* Prime isn't sold on web yet — the limit itself still applies
+            (this sheet still opens), but the only way past it right now is
+            the Android app, so there's nothing for this button to lead to. */}
+        {Platform.OS !== 'web' && (
+          <Button title="Ver planes Schedio Prime" onPress={onUpgrade} fullWidth />
+        )}
         <TouchableOpacity onPress={onClose} style={styles.dismiss}>
           <Text style={styles.dismissText}>Ahora no</Text>
         </TouchableOpacity>

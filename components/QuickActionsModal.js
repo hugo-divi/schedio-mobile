@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, Alert, StyleSheet, Platform } from 'react-native';
 import {
   CalendarPlus,
   Star,
@@ -270,7 +270,11 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
               <ActionRow
                 icon={Sparkles}
                 label="IA Schedio"
-                desc={isPrime ? 'Próximamente' : 'Próximamente · incluido en Prime'}
+                desc={
+                  isPrime || Platform.OS === 'web'
+                    ? 'Próximamente'
+                    : 'Próximamente · incluido en Prime'
+                }
                 locked
               />
             </View>

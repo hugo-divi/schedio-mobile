@@ -7,7 +7,7 @@ import {
   Keyboard,
   Platform,
   Pressable,
-  Dimensions,
+  useWindowDimensions,
 } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -27,11 +27,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { tokens } from '../../theme/tokens';
 
 const font = tokens.typography.families.inter;
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Tall sheets (the event form with its calendar open, the rank ladder) must
-// stay reachable without pushing the buttons off-screen.
-const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
 
 // Past this much drag (or a fast enough flick) the sheet commits to closing.
 const DISMISS_DISTANCE = 110;
@@ -61,6 +56,19 @@ const KEYBOARD_HIDE_EVENT = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboa
  */
 export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   const insets = useSafeAreaInsets();
+  // Was `Dimensions.get('window')` read once at module load — fine on
+  // native, where the screen doesn't resize mid-session, but wrong on web:
+  // a browser window can be resized, and the value read at import time (or
+  // during static prerendering, where there's no real window at all) can be
+  // completely stale by the time a sheet actually opens. A stale, too-large
+  // SCREEN_HEIGHT overstates MAX_SHEET_HEIGHT below, so the sheet tries to be
+  // taller than the real viewport — exactly the "can't scroll far enough to
+  // reach the buttons at the bottom" bug this was causing on the subject
+  // editor. useWindowDimensions() re-renders on every real resize instead.
+  const { height: SCREEN_HEIGHT } = useWindowDimensions();
+  // Tall sheets (the event form with its calendar open, the rank ladder) must
+  // stay reachable without pushing the buttons off-screen.
+  const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
   const translateY = useSharedValue(SCREEN_HEIGHT);
   const keyboardShift = useSharedValue(0);
   // Extra scroll room added under the content when the sheet is too tall to be
@@ -211,7 +219,7 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   const sheet = (
     <Pressable onPress={() => {}}>
       <Animated.View
-        style={[styles.sheet, sheetStyle]}
+        style={[styles.sheet, { maxHeight: MAX_SHEET_HEIGHT }, sheetStyle]}
         onLayout={(event) => {
           sheetHeightRef.current = event.nativeEvent.layout.height;
         }}
@@ -305,7 +313,8 @@ const styles = StyleSheet.create({
     borderTopColor: tokens.colors.borderDefault,
     borderTopLeftRadius: tokens.radius.sheet,
     borderTopRightRadius: tokens.radius.sheet,
-    maxHeight: MAX_SHEET_HEIGHT,
+    // maxHeight is applied inline (see the JSX) — it depends on
+    // useWindowDimensions(), which a module-level StyleSheet can't read.
   },
   scroll: {
     // Keeps the sheet as short as its content until it hits the cap.

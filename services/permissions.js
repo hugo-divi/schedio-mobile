@@ -5,6 +5,7 @@
  * entitlement status on the backend (e.g., via Cloud Functions).
  */
 
+import { Platform } from 'react-native';
 import { tokens } from '../theme/tokens';
 
 /**
@@ -43,24 +44,36 @@ export const getWeeklyUploadLimit = (userData) =>
 
 /** Materias: capped even for Prime, so a single account can't grow an unbounded subjects list. */
 export const MAX_SUBJECTS_FREE = 8;
+// Web has no Prime to sell (no Web Billing product, no VAT registration for
+// direct sales — see the web launch notes), so its free tier gets a slightly
+// higher ceiling instead of the native 8, as a stand-in for what Prime would
+// have unlocked there.
+export const MAX_SUBJECTS_WEB = 10;
 export const MAX_SUBJECTS_PRIME = 20;
 
-export const getMaxSubjects = (userData) =>
-  hasPrimeAccess(userData) ? MAX_SUBJECTS_PRIME : MAX_SUBJECTS_FREE;
+export const getMaxSubjects = (userData) => {
+  if (hasPrimeAccess(userData)) return MAX_SUBJECTS_PRIME;
+  return Platform.OS === 'web' ? MAX_SUBJECTS_WEB : MAX_SUBJECTS_FREE;
+};
 
 /**
  * Colores de materia: la paleta gratuita cubre justo MAX_SUBJECTS_FREE (8).
  * Prime sube el tope a 20, así que necesita los 12 tonos extra o dos materias
- * acabarían compartiendo color.
+ * acabarían compartiendo color. Web sube el tope a 10 (ver MAX_SUBJECTS_WEB) y
+ * necesita, por lo mismo, 2 de esos 12 tonos extra.
  */
 export const SUBJECT_COLORS_FREE = Object.values(tokens.colors.subjects);
-export const SUBJECT_COLORS_PRIME = [
+const SUBJECTS_EXTRA = Object.values(tokens.colors.subjectsExtra);
+export const SUBJECT_COLORS_WEB = [
   ...SUBJECT_COLORS_FREE,
-  ...Object.values(tokens.colors.subjectsExtra),
+  ...SUBJECTS_EXTRA.slice(0, MAX_SUBJECTS_WEB - SUBJECT_COLORS_FREE.length),
 ];
+export const SUBJECT_COLORS_PRIME = [...SUBJECT_COLORS_FREE, ...SUBJECTS_EXTRA];
 
-export const getSubjectColors = (userData) =>
-  hasPrimeAccess(userData) ? SUBJECT_COLORS_PRIME : SUBJECT_COLORS_FREE;
+export const getSubjectColors = (userData) => {
+  if (hasPrimeAccess(userData)) return SUBJECT_COLORS_PRIME;
+  return Platform.OS === 'web' ? SUBJECT_COLORS_WEB : SUBJECT_COLORS_FREE;
+};
 
 /*
  * El widget de pantalla de inicio no aparece aquí a propósito: sus tres

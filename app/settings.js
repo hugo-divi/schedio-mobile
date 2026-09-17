@@ -482,8 +482,12 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* No point selling Prime to somebody who already has it. */}
-        {isPrime ? null : (
+        {/* No point selling Prime to somebody who already has it — and on web,
+            no point selling it at all yet: no Web Billing product, no VAT
+            registration for direct sales. isPrime is always false there
+            (see services/revenuecat.web.js), so this would show to every
+            single web visitor with nowhere real for it to lead. */}
+        {isPrime || Platform.OS === 'web' ? null : (
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={() => router.push('/plus')}
@@ -503,13 +507,21 @@ export default function SettingsScreen() {
         <Group title="Cuenta">
           <Row icon={Mail} label="Correo electrónico" sub={user?.email || 'No disponible'} />
           <Row icon={KeyRound} label="Cambiar contraseña" onPress={handleResetPassword} />
-          <Row
-            icon={CreditCard}
-            label="Suscripción"
-            sub={isPrime ? 'Schedio Prime · Gestionar en Google Play' : 'Plan Gratuito'}
-            onPress={handleSubscriptionPress}
-          />
-          {isPrime ? null : (
+          {/* Suscripción, Restaurar compra and Exportar (Prime-only) all
+              assume a Prime plan that can't exist on web yet — isPrime is
+              always false there, so each of these would be a dead end with
+              nothing behind it: "Plan Gratuito" with nowhere to upgrade to,
+              a restore that can never find anything, an export permanently
+              locked behind a feature nobody on web can unlock. */}
+          {Platform.OS !== 'web' && (
+            <Row
+              icon={CreditCard}
+              label="Suscripción"
+              sub={isPrime ? 'Schedio Prime · Gestionar en Google Play' : 'Plan Gratuito'}
+              onPress={handleSubscriptionPress}
+            />
+          )}
+          {isPrime || Platform.OS === 'web' ? null : (
             <Row
               icon={RotateCcw}
               label="Restaurar compra"
@@ -522,23 +534,25 @@ export default function SettingsScreen() {
               onPress={restoring ? undefined : handleRestore}
             />
           )}
-          <Row
-            icon={Download}
-            label="Exportar notas y exámenes"
-            sub={
-              exporting
-                ? 'Generando PDF…'
-                : isPrime
-                  ? 'Descarga un PDF con tus notas y exámenes'
-                  : 'Función Prime'
-            }
-            control={
-              exporting ? (
-                <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
-              ) : undefined
-            }
-            onPress={exporting ? undefined : handleExport}
-          />
+          {Platform.OS !== 'web' && (
+            <Row
+              icon={Download}
+              label="Exportar notas y exámenes"
+              sub={
+                exporting
+                  ? 'Generando PDF…'
+                  : isPrime
+                    ? 'Descarga un PDF con tus notas y exámenes'
+                    : 'Función Prime'
+              }
+              control={
+                exporting ? (
+                  <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
+                ) : undefined
+              }
+              onPress={exporting ? undefined : handleExport}
+            />
+          )}
         </Group>
 
         <Group title="Preferencias">

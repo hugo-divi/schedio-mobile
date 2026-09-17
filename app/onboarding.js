@@ -504,7 +504,10 @@ export default function Onboarding() {
       setCalculating(true);
       return;
     }
-    if (step === 5) {
+    // Prime isn't sold on web — same reasoning as app/plus.js. Falling
+    // through to the normal transition below skips straight to step 6, same
+    // as tapping "Continuar con la versión gratuita" would.
+    if (step === 5 && Platform.OS !== 'web') {
       setPaywall(true);
       return;
     }

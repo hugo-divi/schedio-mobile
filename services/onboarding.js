@@ -1,14 +1,21 @@
+import { Platform } from 'react-native';
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { MAX_SUBJECTS_FREE, SUBJECT_COLORS_FREE } from './permissions';
+import {
+  MAX_SUBJECTS_FREE,
+  MAX_SUBJECTS_WEB,
+  SUBJECT_COLORS_FREE,
+  SUBJECT_COLORS_WEB,
+} from './permissions';
 
 // Subjects are picked on step 2, and the Prime offer does not appear until
 // after step 5, so nobody choosing subjects can be Prime yet: this always
-// hands out the free eight, never the Prime-only extras. The one seam is a
+// hands out the free eight (ten on web, which has no Prime to offer at all —
+// see permissions.js), never the Prime-only extras. The one seam is a
 // student who buys Prime at the paywall and then walks all the way back to
 // step 2 — they keep the free cap here and get the rest from their profile,
 // which is a fair trade for not making this screen watch the entitlement.
-export const SUBJECT_COLORS = SUBJECT_COLORS_FREE;
+export const SUBJECT_COLORS = Platform.OS === 'web' ? SUBJECT_COLORS_WEB : SUBJECT_COLORS_FREE;
 
 export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
 
@@ -79,8 +86,9 @@ export const ACQUISITION_SOURCES = [
 ];
 
 export const MIN_SUBJECTS = 3;
-// Free cap, for the reason spelled out above SUBJECT_COLORS.
-export const MAX_SUBJECTS = MAX_SUBJECTS_FREE;
+// Free cap (web's slightly higher one included), for the reason spelled out
+// above SUBJECT_COLORS.
+export const MAX_SUBJECTS = Platform.OS === 'web' ? MAX_SUBJECTS_WEB : MAX_SUBJECTS_FREE;
 export const MIN_SUBJECT_NAME = 2;
 
 /**

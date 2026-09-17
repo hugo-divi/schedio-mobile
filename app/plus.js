@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -144,6 +145,14 @@ export default function SchedioPlusScreen() {
   const [offeringsLoading, setOfferingsLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
 
+  // Prime isn't sold on web yet (no RevenueCat Web Billing product, no VAT
+  // registration for direct sales) — this screen exists to sell a
+  // subscription, so on web there's nothing here for it to do. Bounce back
+  // rather than show a price and a "Suscríbete" button that can't complete.
+  useEffect(() => {
+    if (Platform.OS === 'web') router.back();
+  }, [router]);
+
   // Flagged on the way out rather than at purchase time on purpose: the screen
   // that was interrupted reopens its sheet as soon as the intent is fulfilled,
   // and doing that at purchase time would stack it under a paywall the student
@@ -180,6 +189,8 @@ export default function SchedioPlusScreen() {
       cancelled = true;
     };
   }, []);
+
+  if (Platform.OS === 'web') return null;
 
   const price =
     offerings?.monthly?.product?.priceString ||
