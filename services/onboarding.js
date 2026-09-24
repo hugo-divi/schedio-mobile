@@ -19,7 +19,55 @@ export const SUBJECT_COLORS = Platform.OS === 'web' ? SUBJECT_COLORS_WEB : SUBJE
 
 export const EDUCATION_LEVELS = ['ESO', 'Bachillerato', 'Universidad', 'Otro'];
 
-export const BACHILLERATO_BRANCHES = ['Ciencias', 'Ciencias Sociales', 'Humanidades', 'Técnico'];
+/**
+ * The four modalidades of Bachillerato as the law defines them (Real Decreto
+ * 243/2022, art. 8). The stored value is the label itself, as before.
+ *
+ * The list this replaces — Ciencias, Ciencias Sociales, Humanidades, Técnico —
+ * was the pre-LOMLOE split and matched nothing a student is actually enrolled
+ * in: "Técnico" no longer exists, Humanidades and Ciencias Sociales are one
+ * modalidad (a student picks Latín II or Matemáticas Aplicadas II inside it),
+ * and Artes and General were missing. It matters beyond the label: the subject
+ * a student sits in the PAU as their modalidad exam depends on it.
+ *
+ * Artes has two vías by law (Plásticas and Música y Artes Escénicas). They are
+ * one option here on purpose: the vía decides which obligatory subject they
+ * take, and the subject list below already offers both — whichever they add is
+ * the one they study. A fifth pill would ask them for something their subject
+ * list already says.
+ */
+export const BACHILLERATO_BRANCHES = [
+  'Ciencias y Tecnología',
+  'Humanidades y Ciencias Sociales',
+  'Artes',
+  'General',
+];
+
+/** 1º or 2º. Only asked for Bachillerato, and required there: everything built
+ *  around the PAU is for second-year students, and a first-year one being told
+ *  their exam is in 260 days is noise, not motivation. */
+export const BACHILLERATO_YEARS = [1, 2];
+
+/**
+ * Old modalidad values → the legal ones. Applied on read rather than through a
+ * migration: nothing but the onboarding resume reads `branch` today, so there
+ * is no stored data that has to agree with itself, only values to interpret.
+ *
+ * One value cannot be recovered. Before September 2026 `completeOnboarding`
+ * wrote 'General' for anyone who skipped the question — every non-Bachillerato
+ * account, and Bachillerato students who left it blank. 'General' is now a real
+ * modalidad, so on those older documents it means "not answered" rather than
+ * the modalidad. Anything that ever reads `branch` for a decision should treat
+ * an old 'General' with that suspicion.
+ */
+const LEGACY_BRANCHES = {
+  Ciencias: 'Ciencias y Tecnología',
+  Técnico: 'Ciencias y Tecnología',
+  'Ciencias Sociales': 'Humanidades y Ciencias Sociales',
+  Humanidades: 'Humanidades y Ciencias Sociales',
+};
+
+export const normalizeBranch = (branch) => LEGACY_BRANCHES[branch] || branch || null;
 
 /**
  * Autonomous communities, keyed by their ISO 3166-2:ES code.
@@ -107,46 +155,103 @@ const TEMPLATES = {
     'Educación Física',
     'Tecnología',
   ],
-  'Bachillerato:Ciencias': [
-    'Matemáticas II',
-    'Física',
-    'Química',
-    'Biología',
-    'Lengua Castellana',
-    'Inglés',
-    'Historia de España',
-  ],
-  'Bachillerato:Ciencias Sociales': [
-    'Matemáticas CCSS',
-    'Economía',
-    'Historia del Mundo',
-    'Geografía',
-    'Lengua Castellana',
-    'Inglés',
-    'Historia de España',
-  ],
-  'Bachillerato:Humanidades': [
-    'Latín',
-    'Griego',
-    'Historia del Arte',
-    'Filosofía',
-    'Lengua Castellana',
-    'Inglés',
-    'Historia de España',
-  ],
-  'Bachillerato:Técnico': [
-    'Dibujo Técnico',
-    'Tecnología Industrial',
-    'Física',
-    'Matemáticas II',
-    'Lengua Castellana',
-    'Inglés',
-    'Historia de España',
-  ],
 };
 
-export const templateFor = (educationLevel, branch) => {
-  if (educationLevel === 'Bachillerato') return TEMPLATES[`Bachillerato:${branch}`] || [];
+/**
+ * Bachillerato suggestions, by year and modalidad, following the subjects Real
+ * Decreto 243/2022 sets for each (arts. 9-13). Names are the ones students
+ * actually use rather than the full legal ones — "Matemáticas CCSS II" for
+ * "Matemáticas Aplicadas a las Ciencias Sociales II" — because they end up on
+ * chips, plan rows and notifications, where the legal name would be truncated
+ * everywhere it appears.
+ *
+ * The modalidad's own subjects come first and the common ones last: the common
+ * four are the same for everyone and the student scans past them, while the
+ * modalidad list is the part that makes the suggestion feel like it knows them.
+ * Communities can add optional subjects of their own; anything missing here is
+ * one line in the text box away.
+ */
+const BACH_COMMON = {
+  1: ['Lengua Castellana I', 'Inglés I', 'Filosofía', 'Educación Física'],
+  // All four are also PAU subjects (the student sits one of the two Historias).
+  2: ['Lengua Castellana II', 'Inglés II', 'Historia de España', 'Historia de la Filosofía'],
+};
+
+const BACH_MODALITY = {
+  'Ciencias y Tecnología': {
+    1: [
+      'Matemáticas I',
+      'Física y Química',
+      'Biología y Geología',
+      'Dibujo Técnico I',
+      'Tecnología e Ingeniería I',
+    ],
+    2: [
+      'Matemáticas II',
+      'Física',
+      'Química',
+      'Biología',
+      'Dibujo Técnico II',
+      'Tecnología e Ingeniería II',
+      'Geología',
+    ],
+  },
+  'Humanidades y Ciencias Sociales': {
+    1: [
+      'Latín I',
+      'Matemáticas CCSS I',
+      'Economía',
+      'Griego I',
+      'Historia del Mundo Contemporáneo',
+      'Literatura Universal',
+    ],
+    2: [
+      'Latín II',
+      'Matemáticas CCSS II',
+      'Empresa y Modelos de Negocio',
+      'Geografía',
+      'Griego II',
+      'Historia del Arte',
+    ],
+  },
+  // Both vías together — see BACHILLERATO_BRANCHES.
+  Artes: {
+    1: [
+      'Dibujo Artístico I',
+      'Cultura Audiovisual',
+      'Proyectos Artísticos',
+      'Volumen',
+      'Análisis Musical I',
+      'Artes Escénicas I',
+    ],
+    2: [
+      'Dibujo Artístico II',
+      'Diseño',
+      'Fundamentos Artísticos',
+      'Técnicas Gráfico-Plásticas',
+      'Análisis Musical II',
+      'Artes Escénicas II',
+      'Historia de la Música y la Danza',
+    ],
+  },
+  General: {
+    1: ['Matemáticas Generales', 'Economía y Emprendimiento'],
+    2: ['Ciencias Generales', 'Movimientos Culturales y Artísticos'],
+  },
+};
+
+/**
+ * Suggestions for the subject step. For Bachillerato they need the year: 1º and
+ * 2º share almost no subject names, and a second-year student offered
+ * "Matemáticas I" learns the app does not know what course they are in. With a
+ * year but no modalidad they still get the four common subjects.
+ */
+export const templateFor = (educationLevel, branch, courseYear) => {
+  if (educationLevel === 'Bachillerato') {
+    if (!courseYear) return [];
+    const modality = BACH_MODALITY[normalizeBranch(branch)]?.[courseYear] || [];
+    return [...modality, ...BACH_COMMON[courseYear]];
+  }
   return TEMPLATES[educationLevel] || [];
 };
 
@@ -363,6 +468,8 @@ export const completeOnboarding = async (uid, data) => {
   const {
     educationLevel,
     branch,
+    courseYear,
+    takesPau,
     currentGrade,
     region,
     subjects = [],
@@ -389,7 +496,17 @@ export const completeOnboarding = async (uid, data) => {
 
   await updateDoc(doc(db, 'users', uid), {
     course: educationLevel,
-    branch: branch || 'General',
+    // Null outside Bachillerato, and null when skipped. This used to fall back
+    // to 'General', which was harmless while no modalidad had that name and is
+    // wrong now that one does — see LEGACY_BRANCHES.
+    branch: educationLevel === 'Bachillerato' ? normalizeBranch(branch) : null,
+    // 1 or 2. What decides whether this student sees anything about the PAU.
+    courseYear: educationLevel === 'Bachillerato' ? courseYear || null : null,
+    // The switch for everything PAU-shaped: countdown, grade calculator, the
+    // exam-period plan. Only ever true for 2º de Bachillerato; `!== false` so a
+    // 2º student who never saw the box (a flow resumed from before it existed)
+    // lands on the same default as one who left it ticked.
+    takesPau: educationLevel === 'Bachillerato' && courseYear === 2 ? takesPau !== false : false,
     grade: currentGrade,
     // Promoted to a top-level field so it can be queried directly — this is
     // the one that answers "where are our students" without unpacking

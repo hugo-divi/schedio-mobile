@@ -42,6 +42,8 @@ import {
   ACQUISITION_SOURCES,
   EDUCATION_LEVELS,
   BACHILLERATO_BRANCHES,
+  BACHILLERATO_YEARS,
+  normalizeBranch,
   REGIONS,
   regionLabelFor,
   SUBJECT_COLORS,
@@ -292,6 +294,12 @@ export default function Onboarding() {
   const [region, setRegion] = useState(null);
   const [regionSheet, setRegionSheet] = useState(false);
   const [branch, setBranch] = useState(null);
+  const [courseYear, setCourseYear] = useState(null);
+  /** Whether this 2º de Bachillerato student sits the PAU this year. On by
+   *  default the moment they pick 2º — nearly all of them do, so the common
+   *  case costs no tap, and seeing it already ticked is how they learn the app
+   *  is about to shape itself around the exam. Null outside 2º. */
+  const [takesPau, setTakesPau] = useState(null);
   const [subjects, setSubjects] = useState([]);
   const [newSubject, setNewSubject] = useState('');
   const [subjectError, setSubjectError] = useState('');
@@ -338,7 +346,12 @@ export default function Onboarding() {
         if (saved.educationLevel) setEducationLevel(saved.educationLevel);
         if (saved.currentGrade != null) setCurrentGrade(String(saved.currentGrade));
         if (saved.region) setRegion(saved.region);
-        if (saved.branch) setBranch(saved.branch);
+        // Translated on the way in: a flow saved before the modalidades were
+        // corrected comes back as "Técnico" or "Ciencias Sociales", which no
+        // longer match any pill and would leave the question looking unanswered.
+        if (saved.branch) setBranch(normalizeBranch(saved.branch));
+        if (saved.courseYear) setCourseYear(saved.courseYear);
+        if (saved.takesPau != null) setTakesPau(saved.takesPau);
         if (Array.isArray(saved.subjects)) setSubjects(saved.subjects);
         if (saved.reviewFrequency) setReviewFrequency(saved.reviewFrequency);
         if (saved.acquisitionSource) setAcquisitionSource(saved.acquisitionSource);
@@ -364,8 +377,11 @@ export default function Onboarding() {
         : '';
 
   const templates = useMemo(
-    () => templateFor(educationLevel, branch).filter((n) => !subjects.some((s) => s.name === n)),
-    [educationLevel, branch, subjects]
+    () =>
+      templateFor(educationLevel, branch, courseYear).filter(
+        (n) => !subjects.some((s) => s.name === n)
+      ),
+    [educationLevel, branch, courseYear, subjects]
   );
 
   const canAdvance = () => {
@@ -373,7 +389,12 @@ export default function Onboarding() {
       case 1:
         return !!educationLevel && !!region && currentGrade.trim() !== '' && !gradeError;
       case 2:
-        return subjects.length >= MIN_SUBJECTS;
+        // The year is required for Bachillerato and the modalidad is not: one
+        // tap, and without it nothing about the PAU can be shown to the right
+        // students. The modalidad only sharpens the suggestions.
+        return (
+          subjects.length >= MIN_SUBJECTS && (educationLevel !== 'Bachillerato' || !!courseYear)
+        );
       case 3:
         return !!reviewFrequency;
       case 4:
@@ -452,6 +473,8 @@ export default function Onboarding() {
       currentGrade: Number.isNaN(gradeValue) ? null : gradeValue,
       region,
       branch,
+      courseYear,
+      takesPau,
       subjects,
       reviewFrequency,
       taskManagement,
@@ -463,6 +486,8 @@ export default function Onboarding() {
       gradeValue,
       region,
       branch,
+      courseYear,
+      takesPau,
       subjects,
       reviewFrequency,
       taskManagement,
@@ -551,6 +576,8 @@ export default function Onboarding() {
       const created = await completeOnboarding(uid, {
         educationLevel,
         branch,
+        courseYear,
+        takesPau,
         currentGrade: Number.isNaN(gradeValue) ? null : gradeValue,
         region,
         subjects,
@@ -654,7 +681,11 @@ export default function Onboarding() {
                   selected={educationLevel === level}
                   onPress={() => {
                     setEducationLevel(level);
-                    if (level !== 'Bachillerato') setBranch(null);
+                    if (level !== 'Bachillerato') {
+                      setBranch(null);
+                      setCourseYear(null);
+                      setTakesPau(null);
+                    }
                   }}
                 />
               ))}
@@ -717,12 +748,71 @@ export default function Onboarding() {
               cuando quieras desde tu perfil.
             </Text>
 
+            {/* Here rather than in step 1, next to "¿Dónde estudias?": both
+                answers exist to pick the subjects, and here the suggestions
+                below change the moment they tap — the question pays for itself
+                on the same screen. Step 1 was already asking four things. */}
             {educationLevel === 'Bachillerato' ? (
               <>
-                <Text style={styles.fieldLabel}>Itinerario</Text>
+                <Text style={styles.fieldLabel}>Curso</Text>
+                <View style={styles.pillWrap}>
+                  {BACHILLERATO_YEARS.map((year) => (
+                    <Pill
+                      key={year}
+                      label={`${year}º de Bachillerato`}
+                      selected={courseYear === year}
+                      onPress={() => {
+                        setCourseYear(year);
+                        // Ticked on arrival at 2º, but a choice they already
+                        // made survives a detour through 1º and back.
+                        if (year === 2) setTakesPau((prev) => prev ?? true);
+                        else setTakesPau(null);
+                      }}
+                    />
+                  ))}
+                </View>
+
+                {courseYear === 2 ? (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setTakesPau(!takesPau);
+                      if (Platform.OS !== 'web') Haptics.selectionAsync();
+                    }}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: !!takesPau }}
+                    style={[styles.choice, styles.pauToggle, takesPau && styles.choiceOn]}
+                  >
+                    {/* Square, unlike the round radios elsewhere in the flow:
+                        this one is ticked on and off, not picked from a set. */}
+                    <View style={[styles.radio, styles.checkbox, takesPau && styles.radioOn]}>
+                      {takesPau ? <Check size={12} color="#FFFFFF" strokeWidth={3} /> : null}
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.choiceLabel}>Tengo la PAU este año</Text>
+                      {/* Says what the tick buys, and on the way out says only
+                          what is true — no promise of a setting to undo it that
+                          does not exist yet. */}
+                      <Text style={styles.choiceDesc}>
+                        {takesPau
+                          ? 'Adaptaremos Schedio a tu PAU: cuenta atrás, calculadora de nota y plan de repaso.'
+                          : 'Sin PAU: no verás la cuenta atrás ni nada relacionado con el examen.'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
+
+                <Text style={styles.fieldLabel}>Modalidad</Text>
                 <View style={styles.pillWrap}>
                   {BACHILLERATO_BRANCHES.map((b) => (
-                    <Pill key={b} label={b} selected={branch === b} onPress={() => setBranch(b)} />
+                    <Pill
+                      key={b}
+                      label={b}
+                      selected={branch === b}
+                      // Tapping the chosen one again clears it — it is optional,
+                      // and there is no other way back to "not answered".
+                      onPress={() => setBranch(branch === b ? null : b)}
+                    />
                   ))}
                 </View>
               </>
@@ -1266,7 +1356,11 @@ export default function Onboarding() {
           subjectCount={subjects.length}
           // "Bachillerato · Ciencias" rather than either half alone: the branch
           // is what makes the line specific to them.
-          levelLabel={branch ? `${educationLevel} · ${branch}` : educationLevel}
+          levelLabel={
+            educationLevel === 'Bachillerato' && courseYear
+              ? `${courseYear}º de Bachillerato`
+              : educationLevel
+          }
         />
       ) : null}
 
@@ -1485,6 +1579,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   radioOn: { backgroundColor: tokens.colors.accent, borderColor: tokens.colors.accent },
+  checkbox: { borderRadius: 5 },
+  pauToggle: { marginTop: 12 },
   choiceLabel: { fontFamily: font.medium, fontSize: 15, color: tokens.colors.textPrimary },
   choiceDesc: {
     fontFamily: font.regular,
