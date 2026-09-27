@@ -58,6 +58,8 @@ import { getUpcomingExams } from '../../services/exams';
 import { EDUCATION_LEVELS, REGIONS, regionLabelFor } from '../../services/onboarding';
 import { getSubjectColors } from '../../services/permissions';
 import Card from '../../components/ui/Card';
+import { showsPau } from '../../services/pau';
+import { buildExamRows, computeMarks } from '../../services/pauGrades';
 import Button from '../../components/ui/Button';
 import IconButton from '../../components/ui/IconButton';
 import Slider from '@react-native-community/slider';
@@ -488,6 +490,21 @@ export default function ProfileScreen() {
    */
   // Only `headline` is read here now — the rest is rendered by
   // app/dashboard/analysis.js, off this same shared builder.
+  // La nota de admisión con lo que la app ya sabe: la del onboarding, la media
+  // actual y los objetivos de las materias. La calculadora abre con estos
+  // mismos valores, así que el número de la tarjeta y el de dentro coinciden.
+  const pauApplies = showsPau(profile);
+  const pauEstimate = useMemo(() => {
+    if (!pauApplies) return null;
+    const fallback = profile?.averageGrade > 0 ? profile.averageGrade : 6;
+    const rows = buildExamRows({ subjects, region: profile?.region, fallback });
+    return computeMarks({
+      first: Number(profile?.grade) || fallback,
+      second: fallback,
+      rows,
+    });
+  }, [pauApplies, profile, subjects]);
+
   const analysis = useMemo(
     () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams }),
     [sessionHistory, subjects, exams]
@@ -888,6 +905,35 @@ export default function ProfileScreen() {
                   ))}
                 </View>
               ) : null}
+            </View>
+          ) : null}
+
+          {/* La PAU, solo para 2º de Bachillerato con la casilla marcada. Va
+              justo debajo de "Tu potencial" porque las dos hablan de la misma
+              pregunta —hasta dónde puede llegar— y una es la versión con
+              fórmula de la otra. */}
+          {pauApplies && pauEstimate ? (
+            <View>
+              <SectionTitle>Tu nota PAU</SectionTitle>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => router.push('/dashboard/pau')}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir la calculadora de la nota de la PAU"
+              >
+                <Card padding={16}>
+                  <View style={styles.pauEntry}>
+                    <View style={styles.pauEntryMain}>
+                      <Text style={styles.pauEntryValue}>
+                        {pauEstimate.admission.toFixed(3).replace('.', ',')}
+                      </Text>
+                      <Text style={styles.pauEntryLabel}>nota de admisión estimada</Text>
+                    </View>
+                    <Text style={styles.pauEntryGo}>Calcular</Text>
+                    <ChevronRight size={18} color={tokens.colors.accent} strokeWidth={1.75} />
+                  </View>
+                </Card>
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -1715,6 +1761,25 @@ const styles = StyleSheet.create({
   },
 
   // Projection
+  pauEntry: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  pauEntryMain: { flex: 1, minWidth: 0 },
+  pauEntryValue: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 32,
+    lineHeight: 34,
+    color: tokens.colors.textPrimary,
+  },
+  pauEntryLabel: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    color: tokens.colors.textSecondary,
+    marginTop: 2,
+  },
+  pauEntryGo: {
+    fontFamily: font.semibold,
+    fontSize: 13,
+    color: tokens.colors.accent,
+  },
   projectionHead: {
     flexDirection: 'row',
     alignItems: 'center',

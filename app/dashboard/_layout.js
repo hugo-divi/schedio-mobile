@@ -453,6 +453,7 @@ export default function DashboardLayout() {
             simplemente no aparece en la barra. */}
         {/* Hidden screens */}
         <Tabs.Screen name="ranks" options={{ href: null }} />
+        <Tabs.Screen name="pau" options={{ href: null }} />
         <Tabs.Screen name="analysis" options={{ href: null }} />
         <Tabs.Screen name="streak" options={{ href: null }} />
         <Tabs.Screen name="history" options={{ href: null }} />
