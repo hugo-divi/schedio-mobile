@@ -61,6 +61,18 @@ import { BottomSheet, sheetStyles } from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import PrimeBadge, { StatsStrip } from '../../components/ui/PrimeBadge';
 import { Emoji } from '../../components/ui/Emoji';
+import PauDateSheet from '../../components/PauDateSheet';
+import { regionLabelFor } from '../../services/onboarding';
+import {
+  PROMOTE_AT_DAYS,
+  daysUntil,
+  pauYearFor,
+  resolvePauDate,
+  showsPau,
+} from '../../services/pau';
+import { fetchOfficialPauDate } from '../../services/pauConfig';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 
 /**
  * Rows that fade up as the list paints, instead of the whole block appearing
@@ -111,6 +123,52 @@ export default function Dashboard() {
   const manualTasks = useUserStore((state) => state.manualTasks);
   // Already normalised by the store (raw doc keeps it under `profile.averageGrade`).
   const averageGrade = useUserStore((state) => state.profile?.averageGrade) ?? 0;
+
+  // ── La PAU ──
+  // Todo lo que sigue está apagado salvo para 2º de Bachillerato con la
+  // casilla marcada: `showsPau` exige los tres campos y una cuenta anterior
+  // no tiene ninguno, así que para el resto Inicio es exactamente el de antes.
+  const storeProfile = useUserStore((state) => state.profile);
+  const [pauOfficial, setPauOfficial] = useState(null);
+  const [pauSheetOpen, setPauSheetOpen] = useState(false);
+
+  const pauApplies = showsPau(storeProfile);
+  const pauRegion = storeProfile?.region || null;
+
+  useEffect(() => {
+    if (!pauApplies || !pauRegion) return undefined;
+    let cancelled = false;
+    // Si falla se queda en null y la cuenta atrás sigue con la estimación:
+    // esto no puede tumbar Inicio por una fecha.
+    fetchOfficialPauDate(pauYearFor(), pauRegion).then((date) => {
+      if (!cancelled && date) setPauOfficial(date);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pauApplies, pauRegion]);
+
+  const pau = useMemo(
+    () => (pauApplies ? resolvePauDate({ profile: storeProfile, official: pauOfficial }) : null),
+    [pauApplies, storeProfile, pauOfficial]
+  );
+  const pauDays = pau ? daysUntil(pau.date) : null;
+  // Pasado el examen no se enseña nada: qué hacer después de la PAU
+  // (resultados, preinscripción) es una historia que todavía no existe, y una
+  // cuenta atrás en negativo es peor que ninguna.
+  const pauVisible = pau && pauDays !== null && pauDays >= 0;
+  // El ascenso: de celda a tarjeta cuando el examen entra en el último mes. En
+  // septiembre un número enorme no ayuda a decidir qué hacer hoy.
+  const pauPromoted = pauVisible && pauDays <= PROMOTE_AT_DAYS;
+
+  const savePauDate = useCallback((date) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    useUserStore.getState().updateProfile(uid, { pauDate: date });
+  }, []);
+
+  const pauTagLabel =
+    pau?.source === 'mine' ? 'Tu fecha' : pau?.source === 'official' ? 'Oficial' : 'Estimada';
   const hasAverage = parseFloat(averageGrade) > 0;
   const [loading, setLoading] = useState(true);
 
@@ -698,24 +756,95 @@ export default function Dashboard() {
 
               <View style={styles.statDivider} />
 
-              <TouchableOpacity
-                style={styles.statCell}
-                onPress={() => router.push('/dashboard/profile')}
-                activeOpacity={0.7}
-              >
-                <Emoji name="barChart" style={styles.statEmoji} />
-                <View style={styles.statTextWrap}>
-                  <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
-                  <Text
-                    style={[styles.statValue, !hasAverage && { color: tokens.colors.textDisabled }]}
-                  >
-                    {hasAverage ? String(averageGrade).replace('.', ',') : '—'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              {/* La media cede su sitio a la PAU, y solo mientras la PAU no
+                  ocupa ya su propia tarjeta ahí abajo. Es la celda más barata
+                  de ceder porque la media está también en Perfil, y cuando la
+                  cuenta atrás se asciende en mayo la media vuelve sola —
+                  justo el mes en que más se mira. Misma estructura que sus dos
+                  vecinas (emoji + etiqueta + valor), así que la tira no cambia
+                  de alto ni pierde la alineación. */}
+              {pauVisible && !pauPromoted ? (
+                <TouchableOpacity
+                  style={styles.statCell}
+                  onPress={() => setPauSheetOpen(true)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Faltan ${pauDays} días para la PAU. Tocar para cambiar la fecha.`}
+                >
+                  <Emoji name="bullseye" style={styles.statEmoji} />
+                  <View style={styles.statTextWrap}>
+                    <OverlineLabel style={styles.statLabel}>PAU</OverlineLabel>
+                    <Text style={styles.statValue}>
+                      {pauDays} {pauDays === 1 ? 'día' : 'días'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={styles.statCell}
+                  onPress={() => router.push('/dashboard/profile')}
+                  activeOpacity={0.7}
+                >
+                  <Emoji name="barChart" style={styles.statEmoji} />
+                  <View style={styles.statTextWrap}>
+                    <OverlineLabel style={styles.statLabel}>Media</OverlineLabel>
+                    <Text
+                      style={[
+                        styles.statValue,
+                        !hasAverage && { color: tokens.colors.textDisabled },
+                      ]}
+                    >
+                      {hasAverage ? String(averageGrade).replace('.', ',') : '—'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </StatsStrip>
           </Animated.View>
         </View>
+
+        {/* La cuenta atrás cuando ya aprieta. Va encima de "Hoy" porque a un
+            mes del examen es lo primero que se mira, y no existe el resto del
+            año precisamente para no empujar "Hoy" fuera de la pantalla. */}
+        {pauPromoted ? (
+          <Animated.View entering={FadeInDown.duration(320)}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setPauSheetOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Faltan ${pauDays} días para la PAU. Tocar para cambiar la fecha.`}
+            >
+              <Card padding={18}>
+                <View style={styles.pauRow}>
+                  <View style={styles.pauMain}>
+                    <OverlineLabel style={styles.statLabel}>
+                      {pauRegion ? `PAU · ${regionLabelFor(pauRegion)}` : 'PAU'}
+                    </OverlineLabel>
+                    <View style={styles.pauNumRow}>
+                      <Text style={styles.pauNum}>{pauDays}</Text>
+                      <Text style={styles.pauUnit}>{pauDays === 1 ? 'día' : 'días'}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.pauSide}>
+                    <Text style={styles.pauDate}>
+                      {format(pau.date, "d 'de' MMM", { locale: es })}
+                    </Text>
+                    <View style={[styles.pauTag, pau.source !== 'estimated' && styles.pauTagOn]}>
+                      <Text
+                        style={[
+                          styles.pauTagText,
+                          pau.source !== 'estimated' && styles.pauTagTextOn,
+                        ]}
+                      >
+                        {pauTagLabel}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </Card>
+            </TouchableOpacity>
+          </Animated.View>
+        ) : null}
 
         {/* Welcome / AI suggestion */}
         <View ref={heroCardRef}>
@@ -924,6 +1053,19 @@ export default function Dashboard() {
         />
       )}
 
+      {pauApplies ? (
+        <PauDateSheet
+          visible={pauSheetOpen}
+          onClose={() => setPauSheetOpen(false)}
+          date={pau?.date}
+          fallback={pau?.fallback || null}
+          official={pau?.official || null}
+          source={pau?.source}
+          region={pauRegion}
+          onSave={savePauDate}
+        />
+      ) : null}
+
       {/* Modals */}
       <PrimeStatusSheet visible={primeSheetOpen} onClose={() => setPrimeSheetOpen(false)} />
 
@@ -1064,6 +1206,47 @@ const styles = StyleSheet.create({
   },
 
   // Streak / level strip
+  // La tarjeta ascendida. El número usa la familia display, que es la que el
+  // sistema reserva para cifras grandes, y el bloque de la derecha se alinea
+  // con la línea base del número para que la fecha no baile.
+  pauRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pauMain: { flex: 1, minWidth: 0 },
+  pauNumRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6, marginTop: 4 },
+  pauNum: {
+    fontFamily: tokens.typography.families.display,
+    fontSize: 42,
+    lineHeight: 44,
+    letterSpacing: 0.5,
+    color: tokens.colors.accent,
+  },
+  pauUnit: {
+    fontFamily: tokens.typography.families.inter.regular,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  pauSide: { alignItems: 'flex-end', gap: 6, flexShrink: 0 },
+  pauDate: {
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 14,
+    color: tokens.colors.textPrimary,
+  },
+  pauTag: {
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    borderRadius: tokens.radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  pauTagOn: {
+    borderColor: tokens.colors.accentSoftBorder,
+    backgroundColor: tokens.colors.accentSoftBg,
+  },
+  pauTagText: {
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 10,
+    color: tokens.colors.textSecondary,
+  },
+  pauTagTextOn: { color: tokens.colors.accent },
   statCell: {
     flex: 1,
     flexDirection: 'row',

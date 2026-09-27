@@ -180,6 +180,15 @@ const useUserStore = create((set, get) => ({
           // Editable from Perfil, so the screen needs it in the store rather
           // than re-reading the document to show what's currently selected.
           region: data.region || null,
+          // Los tres que deciden si esta cuenta ve algo de la PAU y qué día.
+          // Una cuenta anterior al onboarding de septiembre de 2026 no tiene
+          // ninguno, así que `showsPau` le da false y no nota ningún cambio.
+          courseYear: data.courseYear || null,
+          takesPau: data.takesPau === true,
+          // La fecha que el estudiante haya puesto a mano, por encima de la
+          // oficial de su comunidad. Se guarda como Timestamp; `resolvePauDate`
+          // la normaliza con el mismo `toDate` que usan exámenes y plan.
+          pauDate: data.pauDate || null,
           // Weekday indices the student marked as free. Left undefined when unset
           // so the generator falls back to DEFAULT_REST_DAYS and an account that
           // never touched it keeps the weekend off.

@@ -35,6 +35,18 @@ service cloud.firestore {
       }
     }
 
+    // 📅 Configuración pública de solo lectura (hoy: las fechas de la PAU por
+    // comunidad, que se publican entre enero y marzo y hay que poder corregir
+    // el mismo día sin publicar una versión nueva de la app).
+    //
+    // Escritura cerrada a cal y canto: se edita desde la consola o con el
+    // Admin SDK, que se salta las reglas. Una fecha de examen editable por
+    // cualquiera sería un vandalismo silencioso y muy dañino.
+    match /config/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
     // 📚 Subjects
     match /subjects/{subjectId} {
       // Split rather than `read, write: if isOwner(resource.data.userId) ||
