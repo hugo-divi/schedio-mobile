@@ -59,8 +59,11 @@ export const uploadFile = async (uri, path, onProgress, options = {}) => {
     uploadTask.on(
       'state_changed',
       (snapshot) => {
+        // Firebase's own resumable-upload snapshots can report
+        // bytesTransferred slightly past totalBytes (seen with photos from
+        // the camera on web/PWA) — clamp so the bar never reads past 100%.
         const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-        if (onProgress) onProgress(progress);
+        if (onProgress) onProgress(Math.min(100, Math.max(0, progress)));
       },
       (error) => {
         // storage/canceled es el propio alumno pulsando "Cancelar", no un
