@@ -1,0 +1,120 @@
+{
+  "common": {
+    "cancel": "Cancelar",
+    "ok": "OK"
+  },
+  "settings": {
+    "headerTitle": "Configuración",
+    "back": "Volver",
+    "version": "Versión {{version}}",
+    "primeBanner": {
+      "title": "Actualizar a Schedio Prime",
+      "subtitle": "Desbloquea todo el potencial de tu estudio"
+    },
+    "groups": {
+      "account": "Cuenta",
+      "preferences": "Preferencias",
+      "legal": "Legal y privacidad",
+      "community": "Comunidad",
+      "development": "Desarrollo"
+    },
+    "rows": {
+      "email": "Correo electrónico",
+      "emailUnavailable": "No disponible",
+      "changePassword": "Cambiar contraseña",
+      "subscription": "Suscripción",
+      "subscriptionPrime": "Schedio Prime · Gestionar en Google Play",
+      "subscriptionFree": "Plan Gratuito",
+      "restore": "Restaurar compra",
+      "restoreChecking": "Comprobando…",
+      "restoreSub": "¿Ya tienes Prime en otro dispositivo?",
+      "export": "Exportar notas y exámenes",
+      "exportGenerating": "Generando PDF…",
+      "exportSubPrime": "Descarga un PDF con tus notas y exámenes",
+      "exportSubFree": "Función Prime",
+      "notifications": "Notificaciones",
+      "notificationsWebInstall": "Instala Schedio en tu iPhone para activarlas",
+      "notificationsSub": "Avisos de examen, vuelta al estudio y resumen semanal",
+      "gradePrompt": "Prompt de calificación",
+      "gradePromptSub": "Preguntar nota al finalizar",
+      "focusMode": "Silenciar al estudiar",
+      "focusModeSub": "Activa No Molestar mientras dura la sesión",
+      "language": "Idioma",
+      "privacy": "Política de privacidad",
+      "terms": "Términos de servicio",
+      "trajectory": "Trayectoria de Schedio",
+      "trajectorySub": "Cómo nació y qué hemos ido añadiendo",
+      "feedback": "Enviar feedback",
+      "rate": "Valorar Schedio",
+      "rateSub": "Déjanos tu opinión en la Play Store",
+      "deleteAccount": "Eliminar cuenta",
+      "logout": "Cerrar sesión",
+      "resetWelcome": "Reiniciar la presentación",
+      "resetWelcomeSub": "Vuelve al estado de instalación limpia. Cierra sesión para verla."
+    },
+    "deleteDialog": {
+      "title": "Eliminar cuenta",
+      "body": "Se borrarán tu cuenta y todos tus datos: materias, sesiones de estudio, exámenes y notas, apuntes rápidos y los archivos de tu mochila. Esta acción no se puede deshacer.",
+      "passwordPlaceholder": "Confirma con tu contraseña",
+      "passwordHintGoogle": "Esta cuenta inició sesión con Google. Cierra sesión, vuelve a entrar y prueba otra vez.",
+      "confirm": "Eliminar",
+      "errors": {
+        "wrongPassword": "La contraseña no es correcta.",
+        "tooManyRequests": "Demasiados intentos. Espera un momento y vuelve a probar.",
+        "generic": "No se pudo eliminar la cuenta."
+      }
+    },
+    "notificationsSheet": {
+      "title": "Notificaciones",
+      "subtitleWeb": "Safari solo deja activar avisos desde una app instalada.",
+      "subtitleDefault": "Esto es todo lo que te podemos enviar. Nada más.",
+      "installTitle": "Añádela a tu pantalla de inicio",
+      "installBody": "Toca el icono de Compartir en Safari y elige \"Añadir a pantalla de inicio\". Al volver a abrirla desde ahí, te pediremos permiso automáticamente.",
+      "footer": "El interruptor las activa o desactiva todas a la vez. Poder elegirlas por separado llegará más adelante.",
+      "kinds": {
+        "exam": {
+          "title": "Avisos de examen",
+          "body": "Tres días antes y la víspera, por la mañana. Si tienes varios exámenes el mismo día, llegan en un solo aviso."
+        },
+        "reengagement": {
+          "title": "Vuelta al estudio",
+          "body": "Si pasas cuatro días sin abrir la app. Como mucho uno por semana, y sin echarte nada en cara."
+        },
+        "weekly": {
+          "title": "Resumen semanal",
+          "body": "Los domingos por la noche, con lo que has estudiado esa semana. Solo si has hecho alguna sesión."
+        }
+      }
+    },
+    "languageSheet": {
+      "title": "Idioma",
+      "subtitle": "Elige el idioma de la app.",
+      "spanish": "Español",
+      "english": "English"
+    },
+    "alerts": {
+      "welcomeResetTitle": "Presentación reiniciada",
+      "welcomeResetBody": "Este dispositivo vuelve a contar como una instalación nueva. Cierra sesión y reinicia la app para ver el carrusel completo.",
+      "welcomeResetErrorTitle": "No se pudo reiniciar",
+      "welcomeResetErrorFallback": "Inténtalo de nuevo.",
+      "restoreSuccessTitle": "Compra restaurada",
+      "restoreSuccessBody": "Tu suscripción Schedio Prime se ha restaurado correctamente.",
+      "restoreNothingTitle": "Nada que restaurar",
+      "restoreNothingBody": "No hemos encontrado ninguna suscripción activa asociada a esta cuenta de Google Play.",
+      "restoreErrorTitle": "No se pudo restaurar",
+      "restoreErrorBody": "Ha habido un problema comprobando tus compras. Inténtalo de nuevo.",
+      "exportErrorTitle": "No se pudo exportar",
+      "exportErrorBody": "Ha habido un problema generando el PDF. Inténtalo de nuevo.",
+      "logoutTitle": "Cerrar sesión",
+      "logoutBody": "¿Estás seguro de que quieres salir?",
+      "logoutConfirm": "Salir",
+      "resetPasswordTitle": "Cambiar contraseña",
+      "resetPasswordBody": "¿Enviar un correo a {{email}} para restablecerla?",
+      "resetPasswordConfirm": "Enviar correo",
+      "resetPasswordSentTitle": "Correo enviado",
+      "resetPasswordSentBody": "Revisa tu bandeja de entrada para restablecer la contraseña.",
+      "resetPasswordErrorTitle": "Error",
+      "resetPasswordErrorBody": "No se pudo enviar el correo. Inténtalo de nuevo."
+    }
+  }
+}

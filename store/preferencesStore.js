@@ -64,6 +64,13 @@ const usePreferencesStore = create(
        */
       hasSeenRhythmPicker: false,
       markRhythmPickerSeen: () => set({ hasSeenRhythmPicker: true }),
+
+      // ── Language ──
+      // Spanish always, for every install, regardless of device locale — the
+      // audience is Spanish students. English is opt-in only, from the row in
+      // Settings; app/_layout.js watches this and pushes it onto i18next.
+      language: 'es',
+      setLanguage: (language) => set({ language }),
     }),
     {
       name: 'schedio-preferences-storage',

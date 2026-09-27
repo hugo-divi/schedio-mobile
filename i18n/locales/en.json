@@ -1,0 +1,120 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "ok": "OK"
+  },
+  "settings": {
+    "headerTitle": "Settings",
+    "back": "Back",
+    "version": "Version {{version}}",
+    "primeBanner": {
+      "title": "Upgrade to Schedio Prime",
+      "subtitle": "Unlock your study's full potential"
+    },
+    "groups": {
+      "account": "Account",
+      "preferences": "Preferences",
+      "legal": "Legal & privacy",
+      "community": "Community",
+      "development": "Development"
+    },
+    "rows": {
+      "email": "Email",
+      "emailUnavailable": "Not available",
+      "changePassword": "Change password",
+      "subscription": "Subscription",
+      "subscriptionPrime": "Schedio Prime · Manage in Google Play",
+      "subscriptionFree": "Free plan",
+      "restore": "Restore purchase",
+      "restoreChecking": "Checking…",
+      "restoreSub": "Already have Prime on another device?",
+      "export": "Export grades and exams",
+      "exportGenerating": "Generating PDF…",
+      "exportSubPrime": "Download a PDF with your grades and exams",
+      "exportSubFree": "Prime feature",
+      "notifications": "Notifications",
+      "notificationsWebInstall": "Install Schedio on your iPhone to turn them on",
+      "notificationsSub": "Exam alerts, get-back-to-it nudges and weekly summary",
+      "gradePrompt": "Grade prompt",
+      "gradePromptSub": "Ask for a grade when you finish",
+      "focusMode": "Silence while studying",
+      "focusModeSub": "Turns on Do Not Disturb for the whole session",
+      "language": "Language",
+      "privacy": "Privacy policy",
+      "terms": "Terms of service",
+      "trajectory": "Schedio's story",
+      "trajectorySub": "How it started and what we've added along the way",
+      "feedback": "Send feedback",
+      "rate": "Rate Schedio",
+      "rateSub": "Leave your review on the Play Store",
+      "deleteAccount": "Delete account",
+      "logout": "Log out",
+      "resetWelcome": "Reset the intro",
+      "resetWelcomeSub": "Returns to a fresh-install state. Log out to see it."
+    },
+    "deleteDialog": {
+      "title": "Delete account",
+      "body": "Your account and all your data will be deleted: subjects, study sessions, exams and grades, quick notes, and the files in your backpack. This action cannot be undone.",
+      "passwordPlaceholder": "Confirm with your password",
+      "passwordHintGoogle": "This account signed in with Google. Log out, sign back in, and try again.",
+      "confirm": "Delete",
+      "errors": {
+        "wrongPassword": "That password isn't correct.",
+        "tooManyRequests": "Too many attempts. Wait a moment and try again.",
+        "generic": "Couldn't delete the account."
+      }
+    },
+    "notificationsSheet": {
+      "title": "Notifications",
+      "subtitleWeb": "Safari only lets you turn on alerts from an installed app.",
+      "subtitleDefault": "This is everything we can send you. Nothing else.",
+      "installTitle": "Add it to your home screen",
+      "installBody": "Tap the Share icon in Safari and choose \"Add to Home Screen\". When you open it from there, we'll ask for permission automatically.",
+      "footer": "The switch turns them all on or off together. Choosing them individually is coming later.",
+      "kinds": {
+        "exam": {
+          "title": "Exam alerts",
+          "body": "Three days before and the night before, in the morning. Several exams on the same day arrive as a single alert."
+        },
+        "reengagement": {
+          "title": "Get back to it",
+          "body": "If you go four days without opening the app. At most one a week, and without guilt-tripping you."
+        },
+        "weekly": {
+          "title": "Weekly summary",
+          "body": "Sunday nights, with what you studied that week. Only if you did at least one session."
+        }
+      }
+    },
+    "languageSheet": {
+      "title": "Language",
+      "subtitle": "Choose the app's language.",
+      "spanish": "Español",
+      "english": "English"
+    },
+    "alerts": {
+      "welcomeResetTitle": "Intro reset",
+      "welcomeResetBody": "This device now counts as a fresh install again. Log out and restart the app to see the full carousel.",
+      "welcomeResetErrorTitle": "Couldn't reset it",
+      "welcomeResetErrorFallback": "Try again.",
+      "restoreSuccessTitle": "Purchase restored",
+      "restoreSuccessBody": "Your Schedio Prime subscription was restored successfully.",
+      "restoreNothingTitle": "Nothing to restore",
+      "restoreNothingBody": "We couldn't find an active subscription linked to this Google Play account.",
+      "restoreErrorTitle": "Couldn't restore it",
+      "restoreErrorBody": "There was a problem checking your purchases. Try again.",
+      "exportErrorTitle": "Couldn't export it",
+      "exportErrorBody": "There was a problem generating the PDF. Try again.",
+      "logoutTitle": "Log out",
+      "logoutBody": "Are you sure you want to log out?",
+      "logoutConfirm": "Log out",
+      "resetPasswordTitle": "Change password",
+      "resetPasswordBody": "Send an email to {{email}} to reset it?",
+      "resetPasswordConfirm": "Send email",
+      "resetPasswordSentTitle": "Email sent",
+      "resetPasswordSentBody": "Check your inbox to reset your password.",
+      "resetPasswordErrorTitle": "Error",
+      "resetPasswordErrorBody": "Couldn't send the email. Try again."
+    }
+  }
+}

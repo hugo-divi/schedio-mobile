@@ -3,8 +3,10 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import Head from 'expo-router/head';
 import useAuthStore from '../store/authStore';
+import usePreferencesStore from '../store/preferencesStore';
+import i18n from '../i18n';
 import { checkGoogleRedirectResult } from '../services/auth';
-import { syncViewportHeightToVisualViewport } from '../services/pwa';
+import { pinAppToVisualViewport } from '../services/pwa';
 import { configureRevenueCat } from '../services/revenuecat';
 import { initCrashlytics } from '../services/crashlytics';
 // Side-effect only: registers notifee's foreground service handler at module
@@ -34,6 +36,14 @@ SplashScreen.preventAutoHideAsync().catch(() => {
 export default function Layout() {
   const initAuth = useAuthStore((state) => state.initAuth);
 
+  // Starts on i18n's own default ('es') and re-fires once preferencesStore
+  // rehydrates from AsyncStorage, same lag every other persisted preference
+  // in that store already has — see its `language` field.
+  const language = usePreferencesStore((state) => state.language);
+  useEffect(() => {
+    i18n.changeLanguage(language);
+  }, [language]);
+
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -55,10 +65,11 @@ export default function Layout() {
   const ready = fontsLoaded || !!fontError || waitedLongEnough;
 
   // Web only (no-ops on native, see the function itself). Runs once for the
-  // whole app's lifetime, independent of routing, so the keyboard never
-  // leaves a blank strip at the bottom of the screen the size of itself —
-  // see syncViewportHeightToVisualViewport for what's actually going on.
-  useEffect(() => syncViewportHeightToVisualViewport(), []);
+  // whole app's lifetime, independent of routing, so tapping a field never
+  // shoves the app off the top of the screen and never leaves a blank strip at
+  // the bottom the size of the keyboard — see pinAppToVisualViewport for what's
+  // actually going on.
+  useEffect(() => pinAppToVisualViewport(), []);
 
   // The native splash stays up past this point on purpose — `app/index.js`
   // hides it once it knows where the student is actually headed (login,

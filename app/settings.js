@@ -16,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
+import { useTranslation } from 'react-i18next';
 import {
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,8 @@ import {
   RotateCcw,
   BellOff,
   Route,
+  Globe,
+  Check,
 } from 'lucide-react-native';
 
 import { auth, db } from '../services/firebase';
@@ -79,32 +82,6 @@ const font = tokens.typography.families.inter;
 const APP_VERSION = Constants.expoConfig?.version || '1.0.1';
 
 // ── Pieces ──────────────────────────────────────────────────────────────────
-
-/**
- * The three things the single "Notificaciones" switch actually turns on, kept
- * in step with the scheduled functions in `functions/index.js`. The row's own
- * subtitle can't describe them — it said "Recordatorios de exámenes y racha",
- * which named one of the three and got one wrong (there is no streak
- * notification). `abandonedOnboarding` is left out on purpose: only accounts
- * that never finished setting up receive it, and anyone reading this screen
- * has finished by definition.
- *
- * When these grow a switch each, this is the list they hang off.
- */
-const NOTIFICATION_KINDS = [
-  {
-    title: 'Avisos de examen',
-    body: 'Tres días antes y la víspera, por la mañana. Si tienes varios exámenes el mismo día, llegan en un solo aviso.',
-  },
-  {
-    title: 'Vuelta al estudio',
-    body: 'Si pasas cuatro días sin abrir la app. Como mucho uno por semana, y sin echarte nada en cara.',
-  },
-  {
-    title: 'Resumen semanal',
-    body: 'Los domingos por la noche, con lo que has estudiado esa semana. Solo si has hecho alguna sesión.',
-  },
-];
 
 function Group({ title, children }) {
   const rows = (Array.isArray(children) ? children : [children]).filter(Boolean);
@@ -164,6 +141,7 @@ function Row({ icon: Icon, label, sub, control, danger, onPress }) {
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
@@ -177,6 +155,28 @@ export default function SettingsScreen() {
   const setNotificationsEnabled = usePreferencesStore((state) => state.setNotificationsEnabled);
   const focusModeEnabled = usePreferencesStore((state) => state.focusModeEnabled);
   const setFocusModeEnabled = usePreferencesStore((state) => state.setFocusModeEnabled);
+  const language = usePreferencesStore((state) => state.language);
+  const setLanguage = usePreferencesStore((state) => state.setLanguage);
+
+  // The three things the single "Notificaciones" switch actually turns on,
+  // kept in step with the scheduled functions in `functions/index.js`.
+  // `abandonedOnboarding` is left out on purpose: only accounts that never
+  // finished setting up receive it, and anyone reading this screen has
+  // finished by definition.
+  const NOTIFICATION_KINDS = [
+    {
+      title: t('settings.notificationsSheet.kinds.exam.title'),
+      body: t('settings.notificationsSheet.kinds.exam.body'),
+    },
+    {
+      title: t('settings.notificationsSheet.kinds.reengagement.title'),
+      body: t('settings.notificationsSheet.kinds.reengagement.body'),
+    },
+    {
+      title: t('settings.notificationsSheet.kinds.weekly.title'),
+      body: t('settings.notificationsSheet.kinds.weekly.body'),
+    },
+  ];
 
   // The switch used to be decorative — this is what actually turns the
   // server-side pipeline (Cloud Functions + FCM) on and off for this device.
@@ -234,6 +234,12 @@ export default function SettingsScreen() {
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [notificationsSheet, setNotificationsSheet] = useState(false);
+  const [languageSheet, setLanguageSheet] = useState(false);
+
+  const chooseLanguage = (code) => {
+    setLanguage(code);
+    setLanguageSheet(false);
+  };
 
   const showAlert = (config) => setAlertConfig({ ...config, visible: true });
   const closeAlert = () => setAlertConfig((prev) => ({ ...prev, visible: false }));
@@ -277,16 +283,15 @@ export default function SettingsScreen() {
     try {
       await resetWelcomeState();
       showAlert({
-        title: 'Presentación reiniciada',
-        message:
-          'Este dispositivo vuelve a contar como una instalación nueva. Cierra sesión y reinicia la app para ver el carrusel completo.',
+        title: t('settings.alerts.welcomeResetTitle'),
+        message: t('settings.alerts.welcomeResetBody'),
         singleButton: true,
         onConfirm: closeAlert,
       });
     } catch (error) {
       showAlert({
-        title: 'No se pudo reiniciar',
-        message: error?.message || 'Inténtalo de nuevo.',
+        title: t('settings.alerts.welcomeResetErrorTitle'),
+        message: error?.message || t('settings.alerts.welcomeResetErrorFallback'),
         singleButton: true,
         onConfirm: closeAlert,
       });
@@ -300,16 +305,15 @@ export default function SettingsScreen() {
       if (restored) {
         setIsPrime(true);
         showAlert({
-          title: 'Compra restaurada',
-          message: 'Tu suscripción Schedio Prime se ha restaurado correctamente.',
+          title: t('settings.alerts.restoreSuccessTitle'),
+          message: t('settings.alerts.restoreSuccessBody'),
           singleButton: true,
           onConfirm: closeAlert,
         });
       } else {
         showAlert({
-          title: 'Nada que restaurar',
-          message:
-            'No hemos encontrado ninguna suscripción activa asociada a esta cuenta de Google Play.',
+          title: t('settings.alerts.restoreNothingTitle'),
+          message: t('settings.alerts.restoreNothingBody'),
           singleButton: true,
           onConfirm: closeAlert,
         });
@@ -317,8 +321,8 @@ export default function SettingsScreen() {
     } catch (error) {
       console.error('[Settings] Error restoring purchases:', error);
       showAlert({
-        title: 'No se pudo restaurar',
-        message: 'Ha habido un problema comprobando tus compras. Inténtalo de nuevo.',
+        title: t('settings.alerts.restoreErrorTitle'),
+        message: t('settings.alerts.restoreErrorBody'),
         singleButton: true,
         onConfirm: closeAlert,
       });
@@ -345,8 +349,8 @@ export default function SettingsScreen() {
     } catch (error) {
       console.error('[Settings] Error exporting PDF:', error);
       showAlert({
-        title: 'No se pudo exportar',
-        message: 'Ha habido un problema generando el PDF. Inténtalo de nuevo.',
+        title: t('settings.alerts.exportErrorTitle'),
+        message: t('settings.alerts.exportErrorBody'),
         singleButton: true,
         onConfirm: closeAlert,
       });
@@ -357,9 +361,9 @@ export default function SettingsScreen() {
 
   const handleLogout = () =>
     showAlert({
-      title: 'Cerrar sesión',
-      message: '¿Estás seguro de que quieres salir?',
-      confirmText: 'Salir',
+      title: t('settings.alerts.logoutTitle'),
+      message: t('settings.alerts.logoutBody'),
+      confirmText: t('settings.alerts.logoutConfirm'),
       isDestructive: true,
       onConfirm: async () => {
         closeAlert();
@@ -376,9 +380,9 @@ export default function SettingsScreen() {
   const handleResetPassword = () => {
     if (!user?.email) return;
     showAlert({
-      title: 'Cambiar contraseña',
-      message: `¿Enviar un correo a ${user.email} para restablecerla?`,
-      confirmText: 'Enviar correo',
+      title: t('settings.alerts.resetPasswordTitle'),
+      message: t('settings.alerts.resetPasswordBody', { email: user.email }),
+      confirmText: t('settings.alerts.resetPasswordConfirm'),
       onConfirm: async () => {
         closeAlert();
         try {
@@ -386,8 +390,8 @@ export default function SettingsScreen() {
           setTimeout(
             () =>
               showAlert({
-                title: 'Correo enviado',
-                message: 'Revisa tu bandeja de entrada para restablecer la contraseña.',
+                title: t('settings.alerts.resetPasswordSentTitle'),
+                message: t('settings.alerts.resetPasswordSentBody'),
                 singleButton: true,
                 onConfirm: closeAlert,
               }),
@@ -398,8 +402,8 @@ export default function SettingsScreen() {
           setTimeout(
             () =>
               showAlert({
-                title: 'Error',
-                message: 'No se pudo enviar el correo. Inténtalo de nuevo.',
+                title: t('settings.alerts.resetPasswordErrorTitle'),
+                message: t('settings.alerts.resetPasswordErrorBody'),
                 singleButton: true,
                 onConfirm: closeAlert,
               }),
@@ -427,11 +431,7 @@ export default function SettingsScreen() {
 
   const openDelete = () => {
     setDeletePassword('');
-    setDeleteError(
-      usesPasswordSignIn(user)
-        ? ''
-        : 'Esta cuenta inició sesión con Google. Cierra sesión, vuelve a entrar y prueba otra vez.'
-    );
+    setDeleteError(usesPasswordSignIn(user) ? '' : t('settings.deleteDialog.passwordHintGoogle'));
     setDeleteOpen(true);
   };
 
@@ -449,11 +449,11 @@ export default function SettingsScreen() {
     } catch (error) {
       const code = error?.code || '';
       if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
-        setDeleteError('La contraseña no es correcta.');
+        setDeleteError(t('settings.deleteDialog.errors.wrongPassword'));
       } else if (code === 'auth/too-many-requests') {
-        setDeleteError('Demasiados intentos. Espera un momento y vuelve a probar.');
+        setDeleteError(t('settings.deleteDialog.errors.tooManyRequests'));
       } else {
-        setDeleteError(error?.message || 'No se pudo eliminar la cuenta.');
+        setDeleteError(error?.message || t('settings.deleteDialog.errors.generic'));
       }
     } finally {
       setDeleting(false);
@@ -469,11 +469,11 @@ export default function SettingsScreen() {
           onPress={() => router.back()}
           style={styles.back}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('settings.back')}
         >
           <ChevronLeft size={22} color={tokens.colors.textPrimary} strokeWidth={1.75} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Configuración</Text>
+        <Text style={styles.headerTitle}>{t('settings.headerTitle')}</Text>
         <View style={styles.back} />
       </View>
 
@@ -497,16 +497,24 @@ export default function SettingsScreen() {
               <Crown size={21} strokeWidth={1.75} color={tokens.colors.premiumText} />
             </View>
             <View style={styles.rowBody}>
-              <Text style={styles.primeTitle}>Actualizar a Schedio Prime</Text>
-              <Text style={styles.primeSub}>Desbloquea todo el potencial de tu estudio</Text>
+              <Text style={styles.primeTitle}>{t('settings.primeBanner.title')}</Text>
+              <Text style={styles.primeSub}>{t('settings.primeBanner.subtitle')}</Text>
             </View>
             <ChevronRight size={18} strokeWidth={1.75} color={tokens.colors.premiumText} />
           </TouchableOpacity>
         )}
 
-        <Group title="Cuenta">
-          <Row icon={Mail} label="Correo electrónico" sub={user?.email || 'No disponible'} />
-          <Row icon={KeyRound} label="Cambiar contraseña" onPress={handleResetPassword} />
+        <Group title={t('settings.groups.account')}>
+          <Row
+            icon={Mail}
+            label={t('settings.rows.email')}
+            sub={user?.email || t('settings.rows.emailUnavailable')}
+          />
+          <Row
+            icon={KeyRound}
+            label={t('settings.rows.changePassword')}
+            onPress={handleResetPassword}
+          />
           {/* Suscripción, Restaurar compra and Exportar (Prime-only) all
               assume a Prime plan that can't exist on web yet — isPrime is
               always false there, so each of these would be a dead end with
@@ -516,16 +524,18 @@ export default function SettingsScreen() {
           {Platform.OS !== 'web' && (
             <Row
               icon={CreditCard}
-              label="Suscripción"
-              sub={isPrime ? 'Schedio Prime · Gestionar en Google Play' : 'Plan Gratuito'}
+              label={t('settings.rows.subscription')}
+              sub={
+                isPrime ? t('settings.rows.subscriptionPrime') : t('settings.rows.subscriptionFree')
+              }
               onPress={handleSubscriptionPress}
             />
           )}
           {isPrime || Platform.OS === 'web' ? null : (
             <Row
               icon={RotateCcw}
-              label="Restaurar compra"
-              sub={restoring ? 'Comprobando…' : '¿Ya tienes Prime en otro dispositivo?'}
+              label={t('settings.rows.restore')}
+              sub={restoring ? t('settings.rows.restoreChecking') : t('settings.rows.restoreSub')}
               control={
                 restoring ? (
                   <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
@@ -537,13 +547,13 @@ export default function SettingsScreen() {
           {Platform.OS !== 'web' && (
             <Row
               icon={Download}
-              label="Exportar notas y exámenes"
+              label={t('settings.rows.export')}
               sub={
                 exporting
-                  ? 'Generando PDF…'
+                  ? t('settings.rows.exportGenerating')
                   : isPrime
-                    ? 'Descarga un PDF con tus notas y exámenes'
-                    : 'Función Prime'
+                    ? t('settings.rows.exportSubPrime')
+                    : t('settings.rows.exportSubFree')
               }
               control={
                 exporting ? (
@@ -555,12 +565,12 @@ export default function SettingsScreen() {
           )}
         </Group>
 
-        <Group title="Preferencias">
+        <Group title={t('settings.groups.preferences')}>
           {/* Tapping the row opens the detail; the switch keeps its own touch,
               so the gesture the student expects still just toggles. */}
           <Row
             icon={Bell}
-            label="Notificaciones"
+            label={t('settings.rows.notifications')}
             sub={
               // Same reasoning as the Focus Mode row below: iOS Safari only
               // grants notification permission to an installed PWA, so the
@@ -568,8 +578,8 @@ export default function SettingsScreen() {
               // opens explains how to install instead of listing what gets
               // sent.
               Platform.OS === 'web' && !canRequestWebPush()
-                ? 'Instala Schedio en tu iPhone para activarlas'
-                : 'Avisos de examen, vuelta al estudio y resumen semanal'
+                ? t('settings.rows.notificationsWebInstall')
+                : t('settings.rows.notificationsSub')
             }
             onPress={() => setNotificationsSheet(true)}
             control={
@@ -580,8 +590,8 @@ export default function SettingsScreen() {
           />
           <Row
             icon={Star}
-            label="Prompt de calificación"
-            sub="Preguntar nota al finalizar"
+            label={t('settings.rows.gradePrompt')}
+            sub={t('settings.rows.gradePromptSub')}
             control={<Toggle value={autoGradePrompt} onValueChange={setAutoGradePrompt} />}
           />
           {/* Web has no equivalent to Android's Notification Policy Access —
@@ -593,44 +603,66 @@ export default function SettingsScreen() {
           {Platform.OS !== 'web' && (
             <Row
               icon={BellOff}
-              label="Silenciar al estudiar"
-              sub="Activa No Molestar mientras dura la sesión"
+              label={t('settings.rows.focusMode')}
+              sub={t('settings.rows.focusModeSub')}
               control={<Toggle value={focusModeEnabled} onValueChange={handleFocusModeToggle} />}
             />
           )}
+          <Row
+            icon={Globe}
+            label={t('settings.rows.language')}
+            sub={
+              language === 'en'
+                ? t('settings.languageSheet.english')
+                : t('settings.languageSheet.spanish')
+            }
+            onPress={() => setLanguageSheet(true)}
+          />
         </Group>
 
         {/* Checkpoint 1, item 4 — its other half: the policies have to be
             reachable from inside the app, not only from registration. */}
-        <Group title="Legal y privacidad">
-          <Row icon={Shield} label="Política de privacidad" onPress={() => openLegal('privacy')} />
-          <Row icon={ScrollText} label="Términos de servicio" onPress={() => openLegal('terms')} />
+        <Group title={t('settings.groups.legal')}>
+          <Row
+            icon={Shield}
+            label={t('settings.rows.privacy')}
+            onPress={() => openLegal('privacy')}
+          />
+          <Row
+            icon={ScrollText}
+            label={t('settings.rows.terms')}
+            onPress={() => openLegal('terms')}
+          />
         </Group>
 
-        <Group title="Comunidad">
+        <Group title={t('settings.groups.community')}>
           <Row
             icon={Route}
-            label="Trayectoria de Schedio"
-            sub="Cómo nació y qué hemos ido añadiendo"
+            label={t('settings.rows.trajectory')}
+            sub={t('settings.rows.trajectorySub')}
             onPress={() => router.push('/trayectoria')}
           />
-          <Row icon={MessageSquare} label="Enviar feedback" onPress={() => openLegal('feedback')} />
+          <Row
+            icon={MessageSquare}
+            label={t('settings.rows.feedback')}
+            onPress={() => openLegal('feedback')}
+          />
           {/* handleRateApp's only fallback is a hardcoded Play Store link —
               there's no app store listing for the PWA to send an iPhone user
               to, so the row would just be a broken promise on web. */}
           {Platform.OS !== 'web' && (
             <Row
               icon={Star}
-              label="Valorar Schedio"
-              sub="Déjanos tu opinión en la Play Store"
+              label={t('settings.rows.rate')}
+              sub={t('settings.rows.rateSub')}
               onPress={handleRateApp}
             />
           )}
         </Group>
 
         <Group>
-          <Row icon={Trash2} label="Eliminar cuenta" danger onPress={openDelete} />
-          <Row icon={LogOut} label="Cerrar sesión" danger onPress={handleLogout} />
+          <Row icon={Trash2} label={t('settings.rows.deleteAccount')} danger onPress={openDelete} />
+          <Row icon={LogOut} label={t('settings.rows.logout')} danger onPress={handleLogout} />
         </Group>
 
         {/* Development only — stripped from release builds by the __DEV__
@@ -639,17 +671,17 @@ export default function SettingsScreen() {
             the app's data once per state: `expo start --clear` empties the
             bundler cache, not AsyncStorage. */}
         {__DEV__ ? (
-          <Group title="Desarrollo">
+          <Group title={t('settings.groups.development')}>
             <Row
               icon={RotateCcw}
-              label="Reiniciar la presentación"
-              sub="Vuelve al estado de instalación limpia. Cierra sesión para verla."
+              label={t('settings.rows.resetWelcome')}
+              sub={t('settings.rows.resetWelcomeSub')}
               onPress={handleResetWelcome}
             />
           </Group>
         ) : null}
 
-        <Text style={styles.version}>Versión {APP_VERSION}</Text>
+        <Text style={styles.version}>{t('settings.version', { version: APP_VERSION })}</Text>
       </ScrollView>
 
       <Modal
@@ -668,16 +700,13 @@ export default function SettingsScreen() {
             <View style={styles.deleteIcon}>
               <Trash2 size={26} color={tokens.colors.danger} strokeWidth={1.75} />
             </View>
-            <Text style={styles.deleteTitle}>Eliminar cuenta</Text>
-            <Text style={styles.deleteBody}>
-              Se borrarán tu cuenta y todos tus datos: materias, sesiones de estudio, exámenes y
-              notas, apuntes rápidos y los archivos de tu mochila. Esta acción no se puede deshacer.
-            </Text>
+            <Text style={styles.deleteTitle}>{t('settings.deleteDialog.title')}</Text>
+            <Text style={styles.deleteBody}>{t('settings.deleteDialog.body')}</Text>
 
             {usesPasswordSignIn(user) ? (
               <TextInput
                 style={styles.deleteInput}
-                placeholder="Confirma con tu contraseña"
+                placeholder={t('settings.deleteDialog.passwordPlaceholder')}
                 placeholderTextColor={tokens.colors.textDisabled}
                 secureTextEntry
                 autoCapitalize="none"
@@ -695,7 +724,7 @@ export default function SettingsScreen() {
                 onPress={() => setDeleteOpen(false)}
                 disabled={deleting}
               >
-                <Text style={styles.deleteCancelText}>Cancelar</Text>
+                <Text style={styles.deleteCancelText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.deleteConfirm, !canConfirmDelete && styles.deleteConfirmOff]}
@@ -705,7 +734,7 @@ export default function SettingsScreen() {
                 {deleting ? (
                   <ActivityIndicator size="small" color="#FFFFFF" />
                 ) : (
-                  <Text style={styles.deleteConfirmText}>Eliminar</Text>
+                  <Text style={styles.deleteConfirmText}>{t('settings.deleteDialog.confirm')}</Text>
                 )}
               </TouchableOpacity>
             </View>
@@ -716,20 +745,17 @@ export default function SettingsScreen() {
       <BottomSheet
         visible={notificationsSheet}
         onClose={() => setNotificationsSheet(false)}
-        title="Notificaciones"
+        title={t('settings.notificationsSheet.title')}
         subtitle={
           Platform.OS === 'web' && !canRequestWebPush()
-            ? 'Safari solo deja activar avisos desde una app instalada.'
-            : 'Esto es todo lo que te podemos enviar. Nada más.'
+            ? t('settings.notificationsSheet.subtitleWeb')
+            : t('settings.notificationsSheet.subtitleDefault')
         }
       >
         {Platform.OS === 'web' && !canRequestWebPush() ? (
           <View style={styles.kind}>
-            <Text style={styles.kindTitle}>Añádela a tu pantalla de inicio</Text>
-            <Text style={styles.kindBody}>
-              Toca el icono de Compartir en Safari y elige "Añadir a pantalla de inicio". Al volver
-              a abrirla desde ahí, te pediremos permiso automáticamente.
-            </Text>
+            <Text style={styles.kindTitle}>{t('settings.notificationsSheet.installTitle')}</Text>
+            <Text style={styles.kindBody}>{t('settings.notificationsSheet.installBody')}</Text>
           </View>
         ) : (
           <>
@@ -739,20 +765,46 @@ export default function SettingsScreen() {
                 <Text style={styles.kindBody}>{kind.body}</Text>
               </View>
             ))}
-            <Text style={styles.kindFoot}>
-              El interruptor las activa o desactiva todas a la vez. Poder elegirlas por separado
-              llegará más adelante.
-            </Text>
+            <Text style={styles.kindFoot}>{t('settings.notificationsSheet.footer')}</Text>
           </>
         )}
+      </BottomSheet>
+
+      <BottomSheet
+        visible={languageSheet}
+        onClose={() => setLanguageSheet(false)}
+        title={t('settings.languageSheet.title')}
+        subtitle={t('settings.languageSheet.subtitle')}
+      >
+        {[
+          { code: 'es', label: t('settings.languageSheet.spanish') },
+          { code: 'en', label: t('settings.languageSheet.english') },
+        ].map((option) => {
+          const selected = language === option.code;
+          return (
+            <TouchableOpacity
+              key={option.code}
+              activeOpacity={0.7}
+              onPress={() => chooseLanguage(option.code)}
+              style={[styles.languageOption, selected && styles.languageOptionOn]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected }}
+            >
+              <Text style={[styles.languageOptionText, selected && styles.languageOptionTextOn]}>
+                {option.label}
+              </Text>
+              {selected ? <Check size={18} strokeWidth={2} color={tokens.colors.accent} /> : null}
+            </TouchableOpacity>
+          );
+        })}
       </BottomSheet>
 
       <CustomAlert
         visible={alertConfig.visible}
         title={alertConfig.title}
         message={alertConfig.message}
-        cancelText={alertConfig.cancelText || 'Cancelar'}
-        confirmText={alertConfig.confirmText || 'OK'}
+        cancelText={alertConfig.cancelText || t('common.cancel')}
+        confirmText={alertConfig.confirmText || t('common.ok')}
         onCancel={closeAlert}
         onConfirm={alertConfig.onConfirm}
         isDestructive={alertConfig.isDestructive}
@@ -905,6 +957,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     color: tokens.colors.textDisabled,
+  },
+  languageOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: tokens.radius.btn,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+    backgroundColor: tokens.colors.surfaceHover,
+    marginBottom: 10,
+  },
+  languageOptionOn: {
+    borderColor: tokens.colors.accentSoftBorder,
+    backgroundColor: tokens.colors.accentSoftBg,
+  },
+  languageOptionText: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    color: tokens.colors.textSecondary,
+  },
+  languageOptionTextOn: {
+    fontFamily: font.semibold,
+    color: tokens.colors.textPrimary,
   },
   version: {
     fontFamily: font.medium,
