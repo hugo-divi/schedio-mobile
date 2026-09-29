@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
 import { tokens } from '../../theme/tokens';
 
@@ -94,7 +94,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontFamily: font.regular,
-    fontSize: 15,
+    // 16 on web, 15 everywhere else — and the one pixel is not a design call.
+    // iOS Safari zooms the page in when a field with text smaller than 16px
+    // takes focus, which on the PWA reads as the app lurching sideways and
+    // upwards just as you start typing. `maximum-scale=1` in app/+html.js is
+    // supposed to suppress that, but it's a request Safari has narrowed the
+    // honouring of over the years; 16px removes the trigger outright instead of
+    // relying on it. At this size the difference is invisible.
+    fontSize: Platform.OS === 'web' ? 16 : 15,
     color: tokens.colors.textPrimary,
   },
   inputFocused: {

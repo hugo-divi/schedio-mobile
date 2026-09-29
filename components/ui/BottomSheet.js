@@ -1,14 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  StyleSheet,
-  Keyboard,
-  Platform,
-  Pressable,
-  useWindowDimensions,
-} from 'react-native';
+import { View, Text, Modal, StyleSheet, Keyboard, Platform, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -24,6 +15,7 @@ import {
   ScrollView,
 } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import useVisibleViewportHeight from '../../hooks/useVisibleViewportHeight';
 import { tokens } from '../../theme/tokens';
 
 const font = tokens.typography.families.inter;
@@ -65,7 +57,13 @@ export function BottomSheet({ visible, onClose, title, subtitle, children }) {
   // taller than the real viewport — exactly the "can't scroll far enough to
   // reach the buttons at the bottom" bug this was causing on the subject
   // editor. useWindowDimensions() re-renders on every real resize instead.
-  const { height: SCREEN_HEIGHT } = useWindowDimensions();
+  // ...and then `useWindowDimensions()` turned out to be wrong on web for a
+  // second reason: it reads `window.innerHeight`, which iOS Safari leaves at
+  // full height while the keyboard is open. Same stale-value bug, same symptom
+  // (a sheet taller than the viewport, buttons out of reach) — just triggered by
+  // the keyboard instead of a resize. useVisibleViewportHeight is
+  // useWindowDimensions on native and the real visible height on web.
+  const SCREEN_HEIGHT = useVisibleViewportHeight();
   // Tall sheets (the event form with its calendar open, the rank ladder) must
   // stay reachable without pushing the buttons off-screen.
   const MAX_SHEET_HEIGHT = SCREEN_HEIGHT * 0.88;
