@@ -3,21 +3,14 @@ import { Plus, ChevronRight, GraduationCap, ClipboardList } from 'lucide-react-n
 import { tokens } from '../theme/tokens';
 import BottomSheet from './ui/BottomSheet';
 import Button from './ui/Button';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
 const capitalise = (text) => (text ? text.charAt(0).toUpperCase() + text.slice(1) : '');
 
-const formatDate = (date) =>
-  date
-    ? capitalise(
-        new Date(date).toLocaleDateString('es-ES', {
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-        })
-      )
-    : '';
+const formatTitle = (date, formatDate) =>
+  date ? capitalise(formatDate(new Date(date), 'weekdayLongDayMonth')) : '';
 
 const isExam = (event) => (event?.type || 'exam') === 'exam';
 
@@ -35,11 +28,12 @@ export default function DayOptionsModal({
   onAddNew,
   onEditEvent,
 }) {
+  const { formatDate } = useLocaleFormat();
   const colourOf = (event) =>
     subjects.find((s) => s.id === event.subjectId)?.color || tokens.colors.textDisabled;
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={formatDate(date)}>
+    <BottomSheet visible={visible} onClose={onClose} title={formatTitle(date, formatDate)}>
       <Text style={styles.lead}>
         {events.length === 1
           ? 'Ya tienes algo este día. Tócalo para editarlo, o añade otro.'

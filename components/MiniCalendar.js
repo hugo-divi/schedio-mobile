@@ -17,11 +17,10 @@ import {
   addWeeks,
   subWeeks,
 } from 'date-fns';
-import { es } from 'date-fns/locale';
 import * as Haptics from 'expo-haptics';
 import { tokens } from '../theme/tokens';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
-const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const WEEK_OPTS = { weekStartsOn: 1 };
 
 /**
@@ -31,6 +30,7 @@ const WEEK_OPTS = { weekStartsOn: 1 };
  * Renders bare (no surface of its own); the caller wraps it in a `Card`.
  */
 const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
+  const { formatDate, weekdayInitials } = useLocaleFormat();
   const [expanded, setExpanded] = useState(false);
   const [cursor, setCursor] = useState(new Date());
 
@@ -52,13 +52,13 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
   const goForward = () => setCursor(expanded ? addMonths(cursor, 1) : addWeeks(cursor, 1));
 
   const label = React.useMemo(() => {
-    if (expanded) return format(cursor, 'MMMM yyyy', { locale: es });
+    if (expanded) return formatDate(cursor, 'monthYear');
     const from = days[0];
     const to = days[days.length - 1];
     // Only repeat the month when the week straddles two of them.
     return isSameMonth(from, to)
-      ? `${format(from, 'd')} – ${format(to, 'd MMM', { locale: es })}`
-      : `${format(from, 'd MMM', { locale: es })} – ${format(to, 'd MMM', { locale: es })}`;
+      ? `${formatDate(from, 'day')} – ${formatDate(to, 'dayMonth')}`
+      : `${formatDate(from, 'dayMonth')} – ${formatDate(to, 'dayMonth')}`;
   }, [cursor, days, expanded]);
 
   const getExamsForDay = (day) => exams.filter((exam) => isSameDay(new Date(exam.date), day));
@@ -89,7 +89,7 @@ const MiniCalendar = ({ exams = [], subjects = [], onDayClick }) => {
       </View>
 
       <View style={styles.weekHeader}>
-        {WEEK_DAYS.map((d, i) => (
+        {weekdayInitials.map((d, i) => (
           <View key={i} style={styles.cellSlot}>
             <Text style={styles.weekDayText}>{d}</Text>
           </View>

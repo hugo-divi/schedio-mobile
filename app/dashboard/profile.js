@@ -65,6 +65,8 @@ import IconButton from '../../components/ui/IconButton';
 import Slider from '@react-native-community/slider';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle from '../../components/ui/SectionTitle';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
+import { intlLocale } from '../../services/localeFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -117,11 +119,11 @@ const difficultyLevelOf = (value) => {
   return 8;
 };
 
-const formatNoteDate = (value) => {
+const formatNoteDate = (value, language) => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date
-    .toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+    .toLocaleDateString(intlLocale(language), { day: '2-digit', month: 'short', year: 'numeric' })
     .toUpperCase()
     .replace(/\./g, '');
 };
@@ -292,6 +294,7 @@ function SwipeToDelete({ onDelete, children }) {
 }
 
 function NoteRow({ note, last, onDelete, onEdit }) {
+  const { language } = useLocaleFormat();
   return (
     <View style={[styles.noteRow, last && { borderBottomWidth: 0 }]}>
       <TouchableOpacity
@@ -303,7 +306,7 @@ function NoteRow({ note, last, onDelete, onEdit }) {
         accessibilityHint="Mantén pulsado para editar el apunte"
       >
         <Text style={styles.noteText}>{note.content}</Text>
-        <Text style={styles.noteDate}>{formatNoteDate(note.createdAt)}</Text>
+        <Text style={styles.noteDate}>{formatNoteDate(note.createdAt, language)}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         onPress={onDelete}
@@ -394,6 +397,7 @@ function BadgeStrip({ unlockedIds, onPress }) {
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
+  const { formatDate, language } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
@@ -506,8 +510,8 @@ export default function ProfileScreen() {
   }, [pauApplies, profile, subjects]);
 
   const analysis = useMemo(
-    () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams }),
-    [sessionHistory, subjects, exams]
+    () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams, language }),
+    [sessionHistory, subjects, exams, language]
   );
 
   // ── Data loading ──
@@ -1310,10 +1314,7 @@ export default function ProfileScreen() {
                             {exam.name}
                           </Text>
                           <Text style={styles.examDate}>
-                            {new Date(exam.date).toLocaleDateString('es-ES', {
-                              day: 'numeric',
-                              month: 'short',
-                            })}
+                            {formatDate(new Date(exam.date), 'dayMonth')}
                           </Text>
                         </View>
 

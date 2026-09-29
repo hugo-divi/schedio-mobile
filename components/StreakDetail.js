@@ -1,15 +1,12 @@
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Flame, Moon, LifeBuoy, Snowflake, Play, Trophy } from 'lucide-react-native';
 import { startOfWeek, addDays, isSameDay, isAfter, format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { tokens } from '../theme/tokens';
 import { MAX_REST_PER_WEEK, MAX_FREE_DAYS, DAILY_GOAL_MINUTES } from '../services/streaks';
 import Button from './ui/Button';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
-
-/** Lunes primero, como la semana española y como `startOfWeek({weekStartsOn:1})`. */
-const DAY_INITIALS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 
 const getMotivation = (streak) => {
   if (streak === 0) return 'Cada día es una nueva oportunidad. Empieza hoy.';
@@ -51,6 +48,7 @@ export default function StreakDetail({
   onSpendJoker,
   onStartSession,
 }) {
+  const { formatDate, weekdayInitials } = useLocaleFormat();
   const today = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
   const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -114,7 +112,7 @@ export default function StreakDetail({
           return (
             <View key={i} style={styles.dayItem}>
               <Text style={[styles.dayLabel, isTodayCell && styles.dayLabelToday]}>
-                {DAY_INITIALS[i]}
+                {weekdayInitials[i]}
               </Text>
               <View
                 style={[
@@ -156,7 +154,7 @@ export default function StreakDetail({
       </View>
       <View style={styles.box}>
         <View style={styles.pickRow}>
-          {DAY_INITIALS.map((initial, i) => {
+          {weekdayInitials.map((initial, i) => {
             const active = freeDays.includes(i);
             return (
               <TouchableOpacity

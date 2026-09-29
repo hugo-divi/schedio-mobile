@@ -8,6 +8,7 @@ import { tokens } from '../../theme/tokens';
 import useUserStore from '../../store/userStore';
 import { auth } from '../../services/firebase';
 import { buildAnalysis } from '../../services/productivityService';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
 import { getUpcomingExams } from '../../services/exams';
 import Card from '../../components/ui/Card';
 
@@ -63,6 +64,7 @@ function WeekBars({ days }) {
  * still shows its `headline` on the card that leads here.
  */
 export default function AnalysisScreen() {
+  const { language } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
@@ -85,8 +87,8 @@ export default function AnalysisScreen() {
   }, [user?.uid]);
 
   const analysis = useMemo(
-    () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams }),
-    [sessionHistory, subjects, exams]
+    () => buildAnalysis({ sessions: sessionHistory || [], subjects, exams, language }),
+    [sessionHistory, subjects, exams, language]
   );
 
   return (

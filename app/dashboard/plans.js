@@ -30,7 +30,6 @@ import {
 import Animated, { LinearTransition, FadeIn, FadeOut } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { startOfWeek, addDays, isSameDay, isToday, format } from 'date-fns';
-import { es } from 'date-fns/locale';
 
 import { tokens } from '../../theme/tokens';
 import { planReasonsFor, STUDY_PHASES } from '../../services/microplanService';
@@ -52,6 +51,8 @@ import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle from '../../components/ui/SectionTitle';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
+import { formatDate } from '../../services/localeFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -85,12 +86,12 @@ const weekDays = (offset) => {
   return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 };
 
-const weekRangeLabel = (days) => {
+const weekRangeLabel = (days, language) => {
   const first = days[0];
   const last = days[6];
   const sameMonth = first.getMonth() === last.getMonth();
-  const left = format(first, sameMonth ? 'd' : 'd MMM', { locale: es });
-  const right = format(last, 'd MMM', { locale: es });
+  const left = formatDate(first, sameMonth ? 'day' : 'dayMonth', language);
+  const right = formatDate(last, 'dayMonth', language);
   return `${left} – ${right}`;
 };
 
@@ -245,6 +246,7 @@ function TaskRow({ task, highlighted, onPress, onEdit, onToggle }) {
  * segundo mecanismo de navegación haciendo el mismo trabajo que el de arriba.
  */
 function DayStrip({ days, tasksByDay, selectedIndex, onSelect }) {
+  const { formatDate: formatDateLocal, language } = useLocaleFormat();
   return (
     <View style={styles.dayStrip}>
       {days.map((day, index) => {
@@ -261,7 +263,7 @@ function DayStrip({ days, tasksByDay, selectedIndex, onSelect }) {
             style={[styles.dayCell, active && styles.dayCellActive]}
           >
             <Text style={[styles.dayCellDow, active && styles.dayCellTextActive]}>
-              {format(day, 'EEEEEE', { locale: es })}
+              {formatDateLocal(day, 'weekdayNarrow')}
             </Text>
             <Text style={[styles.dayCellNum, active && styles.dayCellTextActive]}>
               {format(day, 'd')}
@@ -593,6 +595,7 @@ function ExamDetailSheet({ visible, onClose, detail }) {
 }
 
 function TaskSheet({ visible, onClose, days, subjects, editing, onSave, onDelete }) {
+  const { formatDate: formatDateLocal, language } = useLocaleFormat();
   const [text, setText] = useState('');
   const [date, setDate] = useState(days[0]);
   const [subjectId, setSubjectId] = useState(null);
@@ -648,7 +651,7 @@ function TaskSheet({ visible, onClose, days, subjects, editing, onSave, onDelete
               style={[styles.chip, active && styles.chipActive]}
             >
               <Text style={[styles.chipText, active && styles.chipTextAccent]}>
-                {format(day, 'EEE d', { locale: es })}
+                {formatDateLocal(day, 'weekdayShortDay')}
               </Text>
             </TouchableOpacity>
           );
@@ -784,6 +787,7 @@ function SubjectFolder({ subject, files, expanded, onToggle, onUpload, onDeleteF
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function PlansScreen() {
+  const { formatDate: formatDateLocal, language } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = useAuthStore((state) => state.user);
@@ -939,7 +943,7 @@ export default function PlansScreen() {
         .map((day, index) => {
           if (index === selectedDayIndex) return null;
           const tasks = tasksByDay[index];
-          const label = format(day, 'EEEE', { locale: es });
+          const label = formatDateLocal(day, 'weekdayLong');
           if (tasks.length === 0) return null;
           const names = Array.from(new Set(tasks.map((t) => t.subjectName).filter(Boolean))).join(
             ', '
@@ -1049,7 +1053,7 @@ export default function PlansScreen() {
     if (!detailExamId) return null;
     const exam = examsList.find((e) => e.id === detailExamId);
     if (!exam) return null;
-    const sessions = examSessionsFor({ exam, microplans });
+    const sessions = examSessionsFor({ exam, microplans, language });
     const daysUntil = daysBetween(new Date(), exam.date);
     return {
       id: exam.id,
@@ -1255,7 +1259,7 @@ export default function PlansScreen() {
                   <Text style={styles.cap}>
                     {isToday(selectedDay)
                       ? 'todo el día'
-                      : format(selectedDay, 'EEEE d', { locale: es })}
+                      : formatDateLocal(selectedDay, 'weekdayLongDay')}
                   </Text>
                   <Text style={styles.capEm}>
                     {doneCountToday} de {selectedDayTasks.length} ·{' '}

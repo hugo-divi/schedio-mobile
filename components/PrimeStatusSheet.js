@@ -5,6 +5,7 @@ import { Crown, Check } from 'lucide-react-native';
 import { tokens } from '../theme/tokens';
 import { getPrimeStatus } from '../services/revenuecat';
 import BottomSheet from './ui/BottomSheet';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -18,11 +19,11 @@ const UNLOCKED = [
   'Exportar tus notas y exámenes en PDF',
 ];
 
-const formatSince = (value) => {
+const formatSince = (value, formatDate) => {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+  return formatDate(date, 'dayMonthYearLong');
 };
 
 /**
@@ -35,6 +36,7 @@ const formatSince = (value) => {
  * second door Play likes to see for cancelling.
  */
 export default function PrimeStatusSheet({ visible, onClose }) {
+  const { formatDate } = useLocaleFormat();
   const [status, setStatus] = useState(null);
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export default function PrimeStatusSheet({ visible, onClose }) {
     };
   }, [visible]);
 
-  const since = formatSince(status?.since);
+  const since = formatSince(status?.since, formatDate);
 
   return (
     <BottomSheet visible={visible} onClose={onClose}>

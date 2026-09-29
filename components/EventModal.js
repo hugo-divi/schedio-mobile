@@ -5,6 +5,7 @@ import { tokens } from '../theme/tokens';
 import BottomSheet, { FieldLabel, sheetStyles } from './ui/BottomSheet';
 import Button from './ui/Button';
 import CalendarPicker from './ui/CalendarPicker';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -43,6 +44,7 @@ export default function EventModal({
   onDelete,
   subjects = [],
 }) {
+  const { formatDate } = useLocaleFormat();
   const [name, setName] = useState('');
   const [type, setType] = useState('exam');
   const [priority, setPriority] = useState(5);
@@ -91,11 +93,7 @@ export default function EventModal({
     onClose();
   };
 
-  const formattedDate = date.toLocaleDateString('es-ES', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
+  const formattedDate = formatDate(date, 'weekdayLongDayMonth');
 
   const typeNoun = type === 'task' ? 'tarea' : 'examen';
 

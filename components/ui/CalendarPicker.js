@@ -14,12 +14,11 @@ import {
   addMonths,
   subMonths,
 } from 'date-fns';
-import { es } from 'date-fns/locale';
 import * as Haptics from 'expo-haptics';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { tokens } from '../../theme/tokens';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
 
-const WEEK_DAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
 const font = tokens.typography.families.inter;
 
 /**
@@ -30,6 +29,7 @@ const font = tokens.typography.families.inter;
  * sheet. This mirrors the home screen's calendar instead.
  */
 export function CalendarPicker({ value, onChange }) {
+  const { formatDate, weekdayInitials } = useLocaleFormat();
   const [cursor, setCursor] = useState(value ?? new Date());
 
   const days = useMemo(
@@ -56,7 +56,7 @@ export function CalendarPicker({ value, onChange }) {
         >
           <ChevronLeft size={18} color={tokens.colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.month}>{format(cursor, 'MMMM yyyy', { locale: es })}</Text>
+        <Text style={styles.month}>{formatDate(cursor, 'monthYear')}</Text>
         <TouchableOpacity
           onPress={() => setCursor(addMonths(cursor, 1))}
           style={styles.nav}
@@ -67,7 +67,7 @@ export function CalendarPicker({ value, onChange }) {
       </View>
 
       <View style={styles.row}>
-        {WEEK_DAYS.map((d, i) => (
+        {weekdayInitials.map((d, i) => (
           <View key={i} style={styles.slot}>
             <Text style={styles.weekDay}>{d}</Text>
           </View>

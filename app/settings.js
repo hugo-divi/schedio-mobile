@@ -141,7 +141,7 @@ function Row({ icon: Icon, label, sub, control, danger, onPress }) {
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function SettingsScreen() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const user = auth.currentUser;
@@ -341,6 +341,7 @@ export default function SettingsScreen() {
     try {
       const { subjects, profile } = useUserStore.getState();
       await exportGradesAndExamsPdf({
+        language: i18n.language,
         userId: user.uid,
         studentName: profile?.displayName || user.displayName || '',
         subjects,

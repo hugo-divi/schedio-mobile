@@ -18,6 +18,7 @@ import InlineSheet, { TAB_BAR_HEIGHT } from './ui/InlineSheet';
 import { BottomSheet, sheetStyles } from './ui/BottomSheet';
 import Button from './ui/Button';
 import { PremiumBadge } from './ui/Chip';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -85,6 +86,7 @@ function ActionRow({ icon: Icon, label, desc, locked, disabled, onPress }) {
 // ── Sheet ───────────────────────────────────────────────────────────────────
 
 export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFile }) {
+  const { formatDate } = useLocaleFormat();
   const isPrime = useAuthStore((state) => state.isPrime);
 
   const [view, setView] = useState(VIEW_MAIN);
@@ -329,10 +331,7 @@ export default function QuickActionsModal({ visible, onClose, onAddExam, onAddFi
                       <View style={styles.rowBody}>
                         <Text style={styles.rowLabel}>{exam.name}</Text>
                         <Text style={styles.rowDesc}>
-                          {new Date(exam.date).toLocaleDateString('es-ES', {
-                            day: 'numeric',
-                            month: 'short',
-                          })}
+                          {formatDate(new Date(exam.date), 'dayMonth')}
                         </Text>
                       </View>
                       <ChevronRight

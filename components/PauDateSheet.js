@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { format, isSameDay } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { isSameDay } from 'date-fns';
 
 import { tokens } from '../theme/tokens';
 import { regionLabelFor } from '../services/onboarding';
 import { CalendarPicker } from './ui/CalendarPicker';
 import BottomSheet from './ui/BottomSheet';
 import Button from './ui/Button';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -34,6 +34,7 @@ export default function PauDateSheet({
   region,
   onSave,
 }) {
+  const { formatDate } = useLocaleFormat();
   const [picked, setPicked] = useState(date);
 
   // La hoja se mantiene montada entre aperturas, así que sin esto conservaría
@@ -60,7 +61,7 @@ export default function PauDateSheet({
           camino de vuelta si quiere seguirla. */}
       {source === 'mine' && official ? (
         <Text style={styles.published}>
-          Tu comunidad ha publicado el {format(official, "d 'de' MMMM", { locale: es })}.
+          Tu comunidad ha publicado el {formatDate(official, 'dayMonthLong')}.
         </Text>
       ) : null}
 
@@ -91,9 +92,7 @@ export default function PauDateSheet({
         {source === 'mine' && !isFallback ? (
           <Button
             title={
-              fallback
-                ? `Volver a ${format(fallback, "d 'de' MMMM", { locale: es })}`
-                : 'Quitar mi fecha'
+              fallback ? `Volver a ${formatDate(fallback, 'dayMonthLong')}` : 'Quitar mi fecha'
             }
             variant="secondary"
             fullWidth

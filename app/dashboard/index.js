@@ -71,8 +71,7 @@ import {
   showsPau,
 } from '../../services/pau';
 import { fetchOfficialPauDate } from '../../services/pauConfig';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
 
 /**
  * Rows that fade up as the list paints, instead of the whole block appearing
@@ -97,6 +96,7 @@ const MANUAL_PRIORITY_LABELS = { 3: 'Baja', 5: 'Normal', 9: 'Alta' };
 
 // Main Dashboard component - Refactored for global subject sync
 export default function Dashboard() {
+  const { formatDate } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const isPrime = useAuthStore((state) => state.isPrime);
@@ -603,8 +603,7 @@ export default function Dashboard() {
     return map;
   }, [exams, subjects, sessionHistory]);
 
-  const formatShortDate = (date) =>
-    new Date(date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+  const formatShortDate = (date) => formatDate(new Date(date), 'dayMonth');
 
   const firstName = (profile?.displayName || '').trim().split(' ')[0];
   const isFreshAccount = subjects.length === 0 && exams.length === 0;
@@ -826,9 +825,7 @@ export default function Dashboard() {
                     </View>
                   </View>
                   <View style={styles.pauSide}>
-                    <Text style={styles.pauDate}>
-                      {format(pau.date, "d 'de' MMM", { locale: es })}
-                    </Text>
+                    <Text style={styles.pauDate}>{formatDate(pau.date, 'dayMonth')}</Text>
                     <View style={[styles.pauTag, pau.source !== 'estimated' && styles.pauTagOn]}>
                       <Text
                         style={[

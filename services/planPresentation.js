@@ -1,5 +1,6 @@
 import { STUDY_PHASES, FOCUS_DAYS } from './microplanService';
 import { daysBetween } from './priority';
+import { intlLocale } from './localeFormat';
 
 /**
  * Lo que la pantalla de Planes necesita para *mostrar* el plan y los
@@ -130,7 +131,7 @@ export const formatMinutes = (minutes) => {
  * `overdue` es una sesión sin marcar que ya pasó: no desaparece del plan, y
  * fingir que no está ahí es justo lo que haría que el resumen mintiera.
  */
-export const examSessionsFor = ({ exam, microplans, now = new Date() }) => {
+export const examSessionsFor = ({ exam, microplans, now = new Date(), language }) => {
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
 
@@ -144,7 +145,7 @@ export const examSessionsFor = ({ exam, microplans, now = new Date() }) => {
       return {
         id: task.id,
         date: task.date,
-        dayLabel: dayLabelFor(date),
+        dayLabel: dayLabelFor(date, language),
         minutes: task.duration || 0,
         phaseLabel: task.phase ? task.phase.charAt(0) + task.phase.slice(1).toLowerCase() : '',
         text: task.text || '',
@@ -156,10 +157,10 @@ export const examSessionsFor = ({ exam, microplans, now = new Date() }) => {
 };
 
 /** "jue 12" — el mismo formato corto que ya usa el resto de la app. */
-export const dayLabelFor = (date) => {
+export const dayLabelFor = (date, language) => {
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return '';
-  const weekday = d.toLocaleDateString('es-ES', { weekday: 'short' }).replace('.', '');
+  const weekday = d.toLocaleDateString(intlLocale(language), { weekday: 'short' }).replace('.', '');
   return `${weekday} ${d.getDate()}`;
 };
 

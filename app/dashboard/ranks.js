@@ -6,6 +6,8 @@ import { ChevronLeft, Check } from 'lucide-react-native';
 
 import { tokens } from '../../theme/tokens';
 import useUserStore from '../../store/userStore';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
+import { formatNumber } from '../../services/localeFormat';
 import {
   RANKS,
   BADGES,
@@ -18,7 +20,7 @@ import { softBg } from '../../utils/color';
 const font = tokens.typography.families.inter;
 const iconFor = (entry) => getIcon(entry.icon);
 
-const formatXp = (value) => Math.round(value).toLocaleString('es-ES');
+const formatXp = (value, language) => formatNumber(Math.round(value), language);
 
 /**
  * Ranks are gated by level, and level is a function of XP
@@ -26,7 +28,7 @@ const formatXp = (value) => Math.round(value).toLocaleString('es-ES');
  * its `minLevel`. Showing the threshold in XP rather than in levels matches
  * the design and is the currency the student actually watches go up.
  */
-const buildLadder = () =>
+const buildLadder = (language) =>
   RANKS.map((rank, index) => {
     const from = calculateXpForLevel(rank.minLevel);
     const next = RANKS[index + 1];
@@ -35,7 +37,9 @@ const buildLadder = () =>
       ...rank,
       from,
       to,
-      range: to ? `${formatXp(from)} – ${formatXp(to - 1)} XP` : `${formatXp(from)}+ XP`,
+      range: to
+        ? `${formatXp(from, language)} – ${formatXp(to - 1, language)} XP`
+        : `${formatXp(from, language)}+ XP`,
     };
   });
 
@@ -112,6 +116,7 @@ function BadgeRow({ badge, unlocked }) {
 }
 
 export default function RanksScreen() {
+  const { language } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const gamification = useUserStore((state) => state.gamification);
@@ -164,7 +169,9 @@ export default function RanksScreen() {
             </View>
             <View style={styles.trackLabels}>
               <Text style={styles.trackValue}>
-                {next ? `${formatXp(xp)} / ${formatXp(next.from)} XP` : `${formatXp(xp)} XP`}
+                {next
+                  ? `${formatXp(xp, language)} / ${formatXp(next.from, language)} XP`
+                  : `${formatXp(xp, language)} XP`}
               </Text>
               <Text style={styles.trackNext}>
                 {next ? `Siguiente: ${next.title}` : 'Rango máximo'}

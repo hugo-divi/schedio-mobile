@@ -15,8 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { deleteFile } from '../services/storage';
 import { BottomSheet, sheetStyles } from './ui/BottomSheet';
 import { Button } from './ui/Button';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const ResourceList = ({ resources, onDelete, isDarkMode }) => {
+  const { formatDate } = useLocaleFormat();
   const [pendingDelete, setPendingDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(false);
@@ -133,7 +135,9 @@ const ResourceList = ({ resources, onDelete, isDarkMode }) => {
             >
               {resource.name}
             </Text>
-            <Text style={styles.date}>{new Date(resource.createdAt).toLocaleDateString()}</Text>
+            <Text style={styles.date}>
+              {formatDate(new Date(resource.createdAt), 'dayMonthYear')}
+            </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>

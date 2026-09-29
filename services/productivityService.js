@@ -3,6 +3,7 @@
  * Logic to derive insights from study sessions (Golden Hour, Recommended Technique, etc.)
  */
 import { localDateKey } from './priority';
+import { intlLocale } from './localeFormat';
 
 /**
  * Calculates the "Golden Hour" - the hour of the day when the user study most.
@@ -101,7 +102,7 @@ export const getProductivityTip = (sessions) => {
  * @param {Array} sessions - Array of session objects
  * @returns {Array} - Array of objects { day: string, minutes: number }
  */
-export const getWeeklyStats = (sessions) => {
+export const getWeeklyStats = (sessions, language) => {
   const last7Days = [];
   const today = new Date();
 
@@ -111,7 +112,7 @@ export const getWeeklyStats = (sessions) => {
     d.setDate(today.getDate() - i);
     last7Days.push({
       dateStr: localDateKey(d),
-      dayName: d.toLocaleDateString('es-ES', { weekday: 'short' }).toUpperCase(),
+      dayName: d.toLocaleDateString(intlLocale(language), { weekday: 'short' }).toUpperCase(),
       minutes: 0,
     });
   }
@@ -426,8 +427,8 @@ const formatMinutes = (minutes) => {
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 };
 
-export const buildAnalysis = ({ sessions = [], subjects = [], exams = [] } = {}) => {
-  const week = getWeeklyStats(sessions);
+export const buildAnalysis = ({ sessions = [], subjects = [], exams = [], language } = {}) => {
+  const week = getWeeklyStats(sessions, language);
   const thisWeek = week.reduce((sum, d) => sum + d.minutes, 0);
 
   // getWeeklyStats only covers seven days, so the comparison window is

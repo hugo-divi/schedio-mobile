@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { getAllExams } from './exams';
+import { intlLocale } from './localeFormat';
 
 const ACCENT = '#2979FF';
 const TEXT = '#000000';
@@ -14,8 +15,12 @@ const escapeHtml = (value) =>
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]
   );
 
-const formatDate = (date) =>
-  new Date(date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+const formatDate = (date, language) =>
+  new Date(date).toLocaleDateString(intlLocale(language), {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
 
 /**
  * Builds the printable HTML for a student's grade + exam report.
@@ -23,7 +28,7 @@ const formatDate = (date) =>
  * matching every design-system token — this only ever renders inside
  * expo-print's offscreen WebView, never in the app itself.
  */
-const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGrade }) => {
+const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGrade, language }) => {
   const subjectsById = new Map(subjects.map((s) => [s.id, s]));
   const upcoming = exams.filter((e) => !e.completed).sort((a, b) => a.date - b.date);
 
@@ -43,7 +48,7 @@ const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGra
           (exam) => `
             <tr>
               <td>${escapeHtml(exam.name)}</td>
-              <td>${formatDate(exam.date)}</td>
+              <td>${formatDate(exam.date, language)}</td>
               <td class="num">${escapeHtml(exam.grade)}</td>
             </tr>`
         )
@@ -71,7 +76,7 @@ const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGra
         <tr>
           <td>${escapeHtml(exam.name)}</td>
           <td>${escapeHtml(subject?.name || '—')}</td>
-          <td>${formatDate(exam.date)}</td>
+          <td>${formatDate(exam.date, language)}</td>
         </tr>`;
     })
     .join('');
@@ -124,7 +129,7 @@ const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGra
         <div class="brand">Schedio</div>
         <h1>Informe académico</h1>
         <div class="meta">
-          ${studentName ? `${escapeHtml(studentName)} · ` : ''}Generado el ${formatDate(generatedAt)}
+          ${studentName ? `${escapeHtml(studentName)} · ` : ''}Generado el ${formatDate(generatedAt, language)}
         </div>
 
         <div class="summary">
@@ -160,7 +165,13 @@ const buildReportHtml = ({ studentName, generatedAt, subjects, exams, averageGra
  * Caller is responsible for the Prime gate — this has no entitlement check
  * of its own, same split as the rest of the plan-limited features.
  */
-export const exportGradesAndExamsPdf = async ({ userId, studentName, subjects, averageGrade }) => {
+export const exportGradesAndExamsPdf = async ({
+  userId,
+  studentName,
+  subjects,
+  averageGrade,
+  language,
+}) => {
   // expo-print's web shim doesn't generate a file at all — printToFileAsync
   // there just calls window.print() on the *current* page and returns
   // nothing, so the `{ uri }` destructure below would throw on web before
@@ -172,6 +183,7 @@ export const exportGradesAndExamsPdf = async ({ userId, studentName, subjects, a
 
   const exams = await getAllExams(userId);
   const html = buildReportHtml({
+    language,
     studentName,
     generatedAt: new Date(),
     subjects: subjects || [],

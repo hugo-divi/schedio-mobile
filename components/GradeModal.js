@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput } from 'react-native';
 import { tokens } from '../theme/tokens';
 import BottomSheet, { FieldLabel, sheetStyles } from './ui/BottomSheet';
 import Button from './ui/Button';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -17,6 +18,7 @@ const font = tokens.typography.families.inter;
  * can be added.
  */
 export default function GradeModal({ visible, onClose, exam, onSave }) {
+  const { formatDate } = useLocaleFormat();
   const [grade, setGrade] = useState('');
   const [weight, setWeight] = useState('100');
 
@@ -43,9 +45,7 @@ export default function GradeModal({ visible, onClose, exam, onSave }) {
     onClose();
   };
 
-  const formattedDate = exam?.date
-    ? new Date(exam.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
-    : '';
+  const formattedDate = exam?.date ? formatDate(new Date(exam.date), 'dayMonth') : '';
 
   return (
     <BottomSheet

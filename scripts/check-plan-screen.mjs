@@ -11,14 +11,24 @@
  * does: this project's package.json has no "type": "module". The repo is never
  * written to.
  */
-import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const services = join(dirname(fileURLToPath(import.meta.url)), '..', 'services');
-const here = mkdtempSync(join(tmpdir(), 'schedio-plan-screen-'));
-for (const name of ['priority', 'taskCopy', 'planProfile', 'microplanService', 'planPresentation']) {
+// Las copias van dentro del proyecto, no en el temporal del sistema:
+// planPresentation importa ./localeFormat, que importa date-fns, y desde
+// fuera del árbol Node no encuentra node_modules.
+const here = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '.cache', 'schedio', 'plan-screen');
+mkdirSync(here, { recursive: true });
+for (const name of [
+  'priority',
+  'taskCopy',
+  'planProfile',
+  'microplanService',
+  'localeFormat',
+  'planPresentation',
+]) {
   writeFileSync(
     join(here, `${name}.mjs`),
     readFileSync(join(services, `${name}.js`), 'utf8')
@@ -26,6 +36,7 @@ for (const name of ['priority', 'taskCopy', 'planProfile', 'microplanService', '
       .replace(/from '\.\/taskCopy'/g, "from './taskCopy.mjs'")
       .replace(/from '\.\/planProfile'/g, "from './planProfile.mjs'")
       .replace(/from '\.\/microplanService'/g, "from './microplanService.mjs'")
+      .replace(/from '\.\/localeFormat'/g, "from './localeFormat.mjs'")
   );
 }
 const load = (name) => import(`file://${join(here, name)}`);

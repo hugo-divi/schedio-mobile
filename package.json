@@ -21,6 +21,7 @@
     "check:streak-rules": "node scripts/check-streak-rules.mjs",
     "check:subject-colors": "node scripts/check-subject-colors.mjs",
     "check:plan-profile": "node scripts/check-plan-profile.mjs",
+    "check:locale-format": "node scripts/check-locale-format.mjs",
     "check:pau": "node scripts/check-pau.mjs"
   },
   "dependencies": {

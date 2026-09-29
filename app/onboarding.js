@@ -27,8 +27,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { addDays, format, isBefore, startOfDay } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { addDays, isBefore, startOfDay } from 'date-fns';
 
 import { auth } from '../services/firebase';
 import { tokens } from '../theme/tokens';
@@ -66,6 +65,7 @@ import { CalendarPicker } from '../components/ui/CalendarPicker';
 import OnboardingCalc from '../components/OnboardingCalc';
 import OnboardingIntro from '../components/OnboardingIntro';
 import OnboardingPaywall from '../components/OnboardingPaywall';
+import useLocaleFormat from '../hooks/useLocaleFormat';
 
 const font = tokens.typography.families.inter;
 
@@ -225,6 +225,7 @@ function Pill({ label, selected, onPress }) {
 // ── Screen ──────────────────────────────────────────────────────────────────
 
 export default function Onboarding() {
+  const { formatDate } = useLocaleFormat();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const clearUser = useAuthStore((state) => state.clearUser);
@@ -1153,9 +1154,7 @@ export default function Onboarding() {
             {isBefore(startOfDay(examDate), startOfDay(new Date())) ? (
               <Text style={styles.error}>La fecha no puede estar en el pasado.</Text>
             ) : (
-              <Text style={styles.hint}>
-                {format(examDate, "EEEE d 'de' MMMM", { locale: es })}
-              </Text>
+              <Text style={styles.hint}>{formatDate(examDate, 'weekdayLongDayMonth')}</Text>
             )}
 
             <Text style={styles.fieldLabel}>Importancia</Text>

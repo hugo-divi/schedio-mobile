@@ -17,6 +17,7 @@ import { GlassCard } from '../../components/GlassView';
 import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import { Svg, Rect, G } from 'react-native-svg';
+import useLocaleFormat from '../../hooks/useLocaleFormat';
 
 const { width } = Dimensions.get('window');
 
@@ -25,6 +26,7 @@ const { width } = Dimensions.get('window');
 const MIN_SAMPLES_FOR_INSIGHT = 3;
 
 export default function HistoryScreen() {
+  const { formatDate: formatLocaleDate } = useLocaleFormat();
   const router = useRouter();
   const user = useAuthStore((state) => state.user);
   // Per-slice selectors so an unrelated store write doesn't redraw the list.
@@ -58,7 +60,7 @@ export default function HistoryScreen() {
       const daySessions = sessionHistory.filter((s) => new Date(s.date).toDateString() === dateStr);
       const totalMins = daySessions.reduce((acc, s) => acc + (s.duration || 0), 0);
       return {
-        label: d.toLocaleDateString('es-ES', { weekday: 'short' }),
+        label: formatLocaleDate(d, 'weekdayShort'),
         value: totalMins / 60, // to hours
         mins: totalMins,
       };
@@ -152,7 +154,7 @@ export default function HistoryScreen() {
     if (d.toDateString() === today) return 'Hoy';
     if (d.toDateString() === yesterday.toDateString()) return 'Ayer';
 
-    return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+    return formatLocaleDate(d, 'dayMonth');
   };
 
   return (
