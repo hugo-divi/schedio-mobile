@@ -170,6 +170,12 @@ theme/        Tokens del Schedio Design System
 legal/        Política de privacidad y términos
 ```
 
+## Licencia
+
+[Apache License 2.0](LICENSE). Puedes usar, modificar y redistribuir el código citando la autoría y conservando los avisos.
+
+El nombre "Schedio", su logotipo y su identidad visual quedan fuera de la licencia y siguen siendo propiedad de Schedio — ver [NOTICE](NOTICE). Si publicas una obra derivada, hazlo bajo otro nombre.
+
 ## Estado
 
 En producción y en uso diario. Publicada en el canal de producción de Google Play y disponible en iPhone como PWA instalable. El foco actual es adquisición y crecimiento, no infraestructura.
