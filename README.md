@@ -2,180 +2,184 @@
 
 # Schedio
 
-**Todo tu curso académico en una sola pantalla.**
+**Your whole school year on a single screen.**
 
-App de productividad académica para estudiantes de 16 a 22 años. No enseña contenido: organiza el estudio, decide qué toca hoy y se encarga de que llegues al examen con el temario repartido.
+A study-planning app for students aged 16 to 22. It doesn't teach you the material — it organises your studying, tells you what to work on today, and makes sure you reach exam day with the syllabus actually covered.
 
-[**Descargar en Google Play**](https://play.google.com/store/apps/details?id=com.schedio.mobile) · [**schedio.es**](https://schedio.es) · [**Instalar en iPhone**](https://schedio.es/iphone)
+[**Get it on Google Play**](https://play.google.com/store/apps/details?id=com.schedio.mobile) · [**schedio.es**](https://schedio.es) · [**Install on iPhone**](https://schedio.es/iphone)
 
-_En producción desde el 9 de septiembre de 2026 · versión 1.0.1 · Android, iOS (PWA) y web_
+_Live in production since 9 September 2026 · version 1.0.1 · Android, iOS (PWA) and web_
+
+📄 [Leer este README en español](README.es.md)
 
 </div>
 
 ---
 
-## El problema
+## The problem
 
-Un estudiante de Bachillerato lleva entre 8 y 11 asignaturas a la vez. Sabe qué exámenes tiene y sabe que no le da tiempo, pero no sabe **qué estudiar hoy**. Las apps de tareas le piden que planifique él, que es justo lo que no sabe hacer; los calendarios le enseñan el problema sin resolverlo.
+A Spanish high-school student juggles between 8 and 11 subjects at once. They know which exams are coming and they know there isn't enough time, but they don't know **what to study today**. To-do apps ask them to plan it themselves, which is precisely the thing they can't do; calendars show them the problem without solving it.
 
-Schedio invierte la carga: tú metes las asignaturas y las fechas de examen, y la app reparte el temario en sesiones concretas, día a día, recalculando cuando algo cambia.
+Schedio flips the burden. You enter your subjects and your exam dates, and the app breaks the syllabus down into concrete sessions, day by day, recalculating whenever something changes.
 
-## Cómo se ve
+> **Note for reviewers:** the app ships in Spanish by default because its audience is students in Spain, but it has a full English mode — **Settings → Language → English**.
 
-|                                                            El plan, repartido por día                                                             |                                                                La sesión de estudio                                                                |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <img src="https://schedio.es/assets/screens/playstore-02-plan-crop.png" width="260" alt="Pantalla de Plan con las sesiones repartidas por día" /> |    <img src="https://schedio.es/assets/screens/playstore-03-estudio-timer-crop.png" width="260" alt="Temporizador de sesión en modo enfoque" />    |
-|                                                        **La Mochila: apuntes y archivos**                                                         |                                                            **Perfil, nivel y progreso**                                                            |
-|         <img src="https://schedio.es/assets/screens/playstore-04-mochila-crop.png" width="260" alt="La Mochila con apuntes y archivos" />         | <img src="https://schedio.es/assets/screens/playstore-07-estad-sticas-crop.png" width="260" alt="Perfil con nivel, XP, insignias y asignaturas" /> |
+## What it looks like
 
-## Qué hace
+|                                                         The plan, spread across your days                                                          |                                                                     A study session                                                                     |
+| :------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------: |
+| <img src="https://schedio.es/assets/screens/playstore-02-plan-crop.png" width="260" alt="The Plan screen, with sessions spread across the days" /> |        <img src="https://schedio.es/assets/screens/playstore-03-estudio-timer-crop.png" width="260" alt="A study session timer in focus mode" />        |
+|                                                         **The Backpack: notes and files**                                                          |                                                             **Profile, level and progress**                                                             |
+|       <img src="https://schedio.es/assets/screens/playstore-04-mochila-crop.png" width="260" alt="The Backpack, holding notes and files" />        | <img src="https://schedio.es/assets/screens/playstore-07-estad-sticas-crop.png" width="260" alt="Profile screen with level, XP, badges and subjects" /> |
 
-- **Plan de estudio automático.** Reparte cada examen en sesiones según la nota objetivo, la dificultad percibida, el tiempo que queda y los días que el estudiante marca como libres. Se regenera solo cuando cambian los exámenes, no cuando alguien se acuerda de pulsar un botón.
-- **Sesiones de estudio con ritmo configurable.** Pomodoro, _Schedio Study_ o continuo, con descansos ajustables y notificación persistente mientras corre el cronómetro.
-- **Focus Mode (Android).** Módulo nativo propio en Kotlin que silencia el ruido del móvil durante la sesión.
-- **Mochila.** Apuntes y archivos por asignatura, en Firebase Storage.
-- **Gamificación con reglas honestas.** Racha con días libres y comodines explícitos, rangos, XP e insignias — diseñado para que la racha no mienta ni castigue por descansar.
-- **Widgets de Android** en tres tamaños: próximo examen, resumen del día y plan completo.
-- **PAU.** Cuenta atrás en Inicio para 2.º de Bachillerato y calculadora de la nota de acceso con las ponderaciones reales.
-- **Notificaciones** de examen próximo, reenganche y resumen semanal, servidas desde Cloud Functions programadas.
-- **Español e inglés**, con fechas, días, meses y números formateados según el idioma elegido.
+## What it does
 
-## Arquitectura
+- **Automatic study plan.** Splits each exam into sessions based on the grade you're aiming for, how hard you find the subject, how much time is left, and the days you mark as off. It regenerates when your exams change, not when someone remembers to press a button.
+- **Study sessions with a configurable rhythm.** Pomodoro, _Schedio Study_ or continuous, with adjustable breaks and a persistent notification while the timer runs.
+- **Focus Mode (Android).** A custom native Kotlin module that silences the phone's noise for the duration of a session.
+- **The Backpack.** Notes and files per subject, stored in Firebase Storage.
+- **Gamification with honest rules.** Streaks with explicit rest days and freezes, ranks, XP and badges — designed so the streak never lies to you or punishes you for taking a break.
+- **Android home-screen widgets** in three sizes: next exam, today's summary, and the full plan.
+- **University-entrance exams (PAU).** A countdown on the home screen for final-year students, and a calculator for the entrance grade using the real subject weightings.
+- **Notifications** for upcoming exams, re-engagement and a weekly summary, served from scheduled Cloud Functions.
+- **Spanish and English**, with dates, weekdays, months and numbers all formatted to match the chosen language.
 
-### Tres plataformas, un solo código
+## Architecture
 
-El mismo proyecto Expo compila a tres destinos, con ramas por plataforma donde no queda más remedio:
+### Three platforms, one codebase
 
-| Destino     | Cómo se entrega                                           | Notas                                                                 |
-| ----------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Android** | Build nativa EAS → Google Play                            | Widgets, Focus Mode y Google Sign-In nativo                           |
-| **iOS**     | **PWA instalable** (React Native Web, `output: "static"`) | Sin App Store: se instala desde `schedio.es/iphone`                   |
-| **Web**     | El mismo bundle estático, en Firebase Hosting             | Prime no se vende aquí; el tier gratis lleva topes más altos a cambio |
+The same Expo project builds for three targets, branching per platform only where there's no way around it:
 
-La decisión de servir iOS como PWA fue deliberada: evita la cuota y la revisión de App Store, y permite desplegar una corrección en minutos en vez de días.
+| Target      | How it ships                                               | Notes                                                         |
+| ----------- | ---------------------------------------------------------- | ------------------------------------------------------------- |
+| **Android** | Native EAS build → Google Play                             | Widgets, Focus Mode and native Google Sign-In                 |
+| **iOS**     | **Installable PWA** (React Native Web, `output: "static"`) | No App Store: installed from `schedio.es/iphone`              |
+| **Web**     | The same static bundle, on Firebase Hosting                | Prime isn't sold here; the free tier gets higher caps instead |
 
-### El plan es determinista; la IA es un extra
+Serving iOS as a PWA was a deliberate call: it sidesteps the App Store fee and review, and it means a fix ships in minutes instead of days.
 
-Esto es a propósito y conviene subrayarlo: **el plan de estudio no lo genera un modelo de lenguaje.** Es un algoritmo en `services/priority.js` y `services/microplanService.js`, con invariantes verificadas por scripts (`npm run check:plan`) — suelo de 15 minutos por sesión, techo diario, modelado de cansancio, foco en el examen inminente. Un estudiante no puede permitirse que su plan de estudio cambie porque un modelo haya tenido un mal día, ni esperar a una llamada de red para saber qué estudiar.
+### The plan is deterministic; the AI is a bonus
 
-La IA (Google Gemini) alimenta lo que sí gana con ella: las **recomendaciones personalizadas** de la pantalla de Inicio, que leen el patrón real de estudio del usuario.
+This is on purpose and worth spelling out: **the study plan is not generated by a language model.** It's an algorithm living in `services/priority.js` and `services/microplanService.js`, with its invariants verified by scripts (`npm run check:plan`) — a 15-minute floor per session, a daily ceiling, fatigue modelling, and focus on whichever exam is closest. A student can't afford a study plan that shifts because a model had an off day, or that makes them wait on a network round-trip to find out what to revise.
 
-### La capa de IA, endurecida
+The AI (Google Gemini) powers the part that genuinely benefits from it: the **personalised recommendations** on the home screen, which read the student's actual study patterns.
 
-La clave de Gemini **nunca viaja en el bundle del cliente**. Las llamadas pasan por la Cloud Function `aiProxy`, que guarda la clave como secreto de Firebase Functions y añade tres defensas:
+### The AI layer, hardened
 
-1. **Cuota por usuario**, para que una cuenta no se coma el presupuesto.
-2. **Circuit breaker de presupuesto mensual**, que corta el gasto global antes de que se dispare.
-3. **Pool de respuestas de reserva**, para que la app siga siendo útil cuando el circuito está abierto o la API falla.
+The Gemini key **never travels in the client bundle**. Calls go through the `aiProxy` Cloud Function, which holds the key as a Firebase Functions secret and adds three defences:
+
+1. **A per-user quota**, so one account can't eat the budget.
+2. **A monthly budget circuit breaker**, cutting off global spend before it runs away.
+3. **A fallback response pool**, so the app stays useful when the circuit is open or the API fails.
 
 ### Backend
 
-Firebase completo: Auth, Firestore, Storage y Cloud Functions en plan Blaze. Cinco funciones en producción:
+Firebase throughout: Auth, Firestore, Storage and Cloud Functions on the Blaze plan. Five functions in production:
 
-| Función               | Tipo       | Qué hace                                         |
-| --------------------- | ---------- | ------------------------------------------------ |
-| `aiProxy`             | Callable   | Proxy de Gemini con cuota, presupuesto y reserva |
-| `examAlerts`          | Programada | Avisa de los exámenes que se acercan             |
-| `abandonedOnboarding` | Programada | Recupera a quien se quedó a medias del registro  |
-| `reengagement`        | Programada | Reengancha cuentas inactivas                     |
-| `weeklySummary`       | Programada | Resumen semanal de estudio                       |
+| Function              | Type      | What it does                                      |
+| --------------------- | --------- | ------------------------------------------------- |
+| `aiProxy`             | Callable  | Gemini proxy with quota, budget cap and fallbacks |
+| `examAlerts`          | Scheduled | Warns about exams that are coming up              |
+| `abandonedOnboarding` | Scheduled | Recovers people who dropped out mid-signup        |
+| `reengagement`        | Scheduled | Re-engages inactive accounts                      |
+| `weeklySummary`       | Scheduled | Weekly study recap                                |
 
 ## Stack
 
-- **Expo SDK 54** (React Native 0.81, React 19), New Architecture activada, motor Hermes.
-- **Expo Router** para navegación basada en ficheros (`app/`).
-- **Requiere dev client / prebuild.** Con módulos nativos (Google Sign-In, Firebase, Notifee, widgets, Focus Mode) Expo Go ya no vale: `npm run android` / `ios` ejecutan `expo run:android` / `run:ios`.
-- **Firebase** (Auth + Firestore + Storage + Functions), más `@react-native-firebase` (app + Crashlytics) para la parte nativa.
-- **Zustand** para estado global (`store/`), **NativeWind** (Tailwind) para estilos, **Reanimated** para movimiento.
-- **Notifee** para notificaciones locales y el servicio en primer plano de la sesión de estudio.
-- **RevenueCat** para las compras de Schedio Prime.
-- **i18next** para español e inglés.
-- **Módulo nativo propio:** `modules/expo-focus-mode/` (Kotlin, Android).
+- **Expo SDK 54** (React Native 0.81, React 19), New Architecture enabled, Hermes engine.
+- **Expo Router** for file-based navigation (`app/`).
+- **Dev client / prebuild required.** With native modules in play (Google Sign-In, Firebase, Notifee, widgets, Focus Mode) Expo Go no longer cuts it: `npm run android` / `ios` run `expo run:android` / `run:ios`.
+- **Firebase** (Auth + Firestore + Storage + Functions), plus `@react-native-firebase` (app + Crashlytics) for the native side.
+- **Zustand** for global state (`store/`), **NativeWind** (Tailwind) for styling, **Reanimated** for motion.
+- **Notifee** for local notifications and the study session's foreground service.
+- **RevenueCat** for Schedio Prime purchases.
+- **i18next** for Spanish and English.
+- **Custom native module:** `modules/expo-focus-mode/` (Kotlin, Android).
 
-## Puesta en marcha
+## Getting started
 
-Requisitos: Node `>=22.20.0` (ver `.nvmrc`), cuenta de Expo/EAS para builds, y entorno nativo de Android (o Xcode en macOS).
+Requirements: Node `>=22.20.0` (see `.nvmrc`), an Expo/EAS account for builds, and a native Android environment (or Xcode on macOS).
 
 ```bash
 npm install
-cp .env.example .env.local   # completa los valores reales
-npm run android              # prebuild + build nativo
+cp .env.example .env.local   # fill in the real values
+npm run android              # prebuild + native build
 ```
 
-Para el target web/PWA:
+For the web/PWA target:
 
 ```bash
-npm run web                  # desarrollo
+npm run web                  # development
 npx expo export --platform web && firebase deploy --only hosting
 ```
 
-### Variables de entorno
+### Environment variables
 
-Las variables del cliente usan el prefijo `EXPO_PUBLIC__` porque Expo **las incluye en el bundle**: no son secretas de verdad, así que nunca pongas ahí una clave que no puedas permitirte exponer. Ver `.env.example` para la lista completa y de dónde sale cada una.
+Client variables use the `EXPO_PUBLIC__` prefix because Expo **bakes them into the bundle**: they aren't truly secret, so never put a key there that you can't afford to expose. See `.env.example` for the full list and where each one comes from.
 
-La clave de Gemini es la excepción: vive como secreto de Firebase Functions (`firebase functions:secrets:set GEMINI_API_KEY`) y solo la ve la Cloud Function `aiProxy`. `.env.local` está en `.gitignore`.
+The Gemini key is the exception: it lives as a Firebase Functions secret (`firebase functions:secrets:set GEMINI_API_KEY`) and only the `aiProxy` Cloud Function ever sees it. `.env.local` is gitignored.
 
-## Comprobaciones de invariantes
+## Invariant checks
 
-El proyecto no se apoya en tests de interfaz: las reglas que no pueden romperse están cubiertas por scripts que fallan el commit si alguien las viola.
+This project doesn't lean on UI tests. The rules that must never break are covered by scripts that fail the commit if anyone violates them.
 
 ```bash
 npm run lint                  # eslint
-npm run check:plan            # invariantes del algoritmo de planificación
-npm run check:streak-rules    # reglas de racha, días libres y comodines
-npm run check:pau             # ponderaciones y cálculo de la nota de acceso
-npm run check:locale-format   # formato de fechas y números por idioma
-npm run check:widgets         # datos que alimentan los widgets de Android
-npm run check:subject-colors  # contraste mínimo de la paleta de asignaturas
-npm run check:tab-bar         # geometría de la barra inferior
-npm run check:plan-screen     # presentación de la pantalla de Plan
-npm run check:plan-profile    # perfil de planificación del estudiante
-npm run check:fab-springs     # animación del botón central
-npm run check:tour            # pasos del tour guiado
+npm run check:plan            # study-planning algorithm invariants
+npm run check:streak-rules    # streak, rest-day and freeze rules
+npm run check:pau             # entrance-exam weightings and grade maths
+npm run check:locale-format   # date and number formatting per language
+npm run check:widgets         # the data feeding the Android widgets
+npm run check:subject-colors  # minimum contrast across the subject palette
+npm run check:tab-bar         # bottom bar geometry
+npm run check:plan-screen     # Plan screen presentation
+npm run check:plan-profile    # the student's planning profile
+npm run check:fab-springs     # centre button animation
+npm run check:tour            # guided tour steps
 ```
 
 ## Builds (EAS)
 
-Perfiles en `eas.json`:
+Profiles live in `eas.json`:
 
-- `development` — dev client interno (`developmentClient: true`), `.apk`.
-- `preview` — `.apk` instalable para pruebas manuales.
-- `production` — subida a Google Play, con autoincremento de versión.
+- `development` — internal dev client (`developmentClient: true`), `.apk`.
+- `preview` — an installable `.apk` for manual testing.
+- `production` — Google Play upload, with version auto-increment.
 
 ```bash
 npx eas build --profile production --platform android
 ```
 
-## Privacidad y cumplimiento
+## Privacy and compliance
 
-Aprobado por revisión de Google Play. Los permisos de Android están recortados al mínimo real (POST_NOTIFICATIONS y el servicio en primer plano de la sesión de estudio), con `blockedPermissions` cerrando el almacenamiento externo, las alarmas exactas y las ventanas flotantes que arrastraban las dependencias.
+Approved by Google Play review. Android permissions are trimmed to what's actually used (POST_NOTIFICATIONS and the study session's foreground service), with `blockedPermissions` shutting out external storage, exact alarms and the floating-window permissions that dependencies dragged in.
 
-- [Política de privacidad](https://schedio.es/privacidad) · [Términos de servicio](https://schedio.es/terminos)
-- Verificación de email obligatoria en el registro con contraseña.
-- Borrado de cuenta y de todos sus datos desde Ajustes (`services/account.js`).
+- [Privacy policy](https://schedio.es/privacidad) · [Terms of service](https://schedio.es/terminos)
+- Email verification is mandatory for password signups.
+- Account and full data deletion from Settings (`services/account.js`).
 
-## Estructura
+## Project layout
 
 ```
-app/          Rutas de Expo Router (Inicio, Plan, Estudio, Perfil, PAU…)
-components/   Componentes compartidos del design system
-services/     Lógica de negocio: plan, racha, IA, auth, notificaciones, PAU
-store/        Estado global (Zustand)
-functions/    Cloud Functions (aiProxy + 4 programadas)
-modules/      Módulo nativo de Focus Mode (Kotlin)
-widgets/      Widgets de pantalla de inicio de Android
-i18n/         Traducciones es/en
-scripts/      Comprobaciones de invariantes
-theme/        Tokens del Schedio Design System
-legal/        Política de privacidad y términos
+app/          Expo Router routes (Home, Plan, Study, Profile, PAU…)
+components/   Shared design-system components
+services/     Business logic: planning, streaks, AI, auth, notifications, PAU
+store/        Global state (Zustand)
+functions/    Cloud Functions (aiProxy + 4 scheduled)
+modules/      Focus Mode native module (Kotlin)
+widgets/      Android home-screen widgets
+i18n/         es/en translations
+scripts/      Invariant checks
+theme/        Schedio Design System tokens
+legal/        Privacy policy and terms
 ```
 
-## Licencia
+## Licence
 
-[Apache License 2.0](LICENSE). Puedes usar, modificar y redistribuir el código citando la autoría y conservando los avisos.
+[Apache License 2.0](LICENSE). You may use, modify and redistribute the code, keeping attribution and the required notices.
 
-El nombre "Schedio", su logotipo y su identidad visual quedan fuera de la licencia y siguen siendo propiedad de Schedio — ver [NOTICE](NOTICE). Si publicas una obra derivada, hazlo bajo otro nombre.
+The name "Schedio", its logo and its visual identity fall outside the licence and remain the property of Schedio — see [NOTICE](NOTICE). If you publish a derivative work, publish it under a different name.
 
-## Estado
+## Status
 
-En producción y en uso diario. Publicada en el canal de producción de Google Play y disponible en iPhone como PWA instalable. El foco actual es adquisición y crecimiento, no infraestructura.
+Live and in daily use. Published on Google Play's production channel and available on iPhone as an installable PWA. The current focus is growth and acquisition, not infrastructure.
