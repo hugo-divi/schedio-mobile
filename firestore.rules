@@ -14,13 +14,17 @@ service cloud.firestore {
     // 👤 User Profiles
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create, delete: if isOwner(userId);
+      allow delete: if isOwner(userId);
 
-      // 🛡️ Premium entitlement is owned by RevenueCat, never by the client.
-      // Reject any update that touches `isPrime` so a user cannot grant
-      // themselves Prime by writing a single field.
+      // 🛡️ Premium entitlement is owned by RevenueCat, never by the client,
+      // and `betaTester` — what switches on features still being tested —
+      // is set by hand from the console. Neither can be written by the
+      // account itself: not on update, and not on create either, which used
+      // to accept any field at all.
+      allow create: if isOwner(userId)
+        && !request.resource.data.keys().hasAny(['isPrime', 'betaTester']);
       allow update: if isOwner(userId)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPrime']);
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isPrime', 'betaTester']);
 
       // Server-only usage counters (e.g. daily AI quota in functions/index.js).
       // The Admin SDK bypasses rules entirely, so the client should never be
