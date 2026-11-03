@@ -200,11 +200,14 @@ Responde SOLO con este JSON, sin texto adicional:
       if (typeof recommendations?.mainRecommendation !== 'string') {
         return getFallbackRecommendations(userData);
       }
+      // `source` lets Inicio tell a sentence the model wrote for this exact
+      // context from a predetermined one, and present each for what it is.
+      const result = { ...recommendations, source: 'ai' };
       // Guardar en cache
       cache.key = prompt;
-      cache.recommendations = recommendations;
+      cache.recommendations = result;
       cache.timestamp = Date.now();
-      return recommendations;
+      return result;
     } catch (parseError) {
       console.error('Error parsing JSON from Gemini:', parseError);
       console.log('Raw text received:', response);
@@ -466,6 +469,7 @@ const getFallbackRecommendations = (userData) => {
     exams?.filter((e) => !e.completed && new Date(e.date) > new Date()).slice(0, 3) || [];
 
   return {
+    source: 'fallback',
     mainRecommendation: pickGenericRecommendation(),
     studyPlan: upcomingExams.map((exam) => {
       const subject = subjects?.find((s) => s.id === exam.subjectId);

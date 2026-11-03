@@ -12,6 +12,8 @@ import {
   addDoc,
   deleteDoc,
   where,
+  arrayUnion,
+  increment,
 } from 'firebase/firestore';
 import {
   getUserSubjects,
@@ -21,12 +23,18 @@ import {
   deleteSubject,
 } from '../services/userData';
 import { createSession } from '../services/sessions';
+import { calculateLevel, getRankForLevel, BASE_XP_PER_MINUTE } from '../services/gamification';
 import {
-  calculateLevel,
-  getRankForLevel,
-  checkNewBadges,
-  BASE_XP_PER_MINUTE,
-} from '../services/gamification';
+  badgeById,
+  buildBadgeStats,
+  mergeReloadedProgress,
+  newlyEarned,
+  rewardFor,
+} from '../services/badges';
+import { enqueueCelebrations } from './celebrationStore';
+import { dayCompletedBy } from '../services/reviewPolicy';
+import { localDateKey } from '../services/priority';
+import { isBetaProfile } from '../services/beta';
 import {
   getWeeklyUploadLimit,
   getMaxSubjects,
@@ -51,8 +59,11 @@ import useAuthStore from './authStore';
  *   removes the task; anything else is applied on top of the generated version.
  * @param {Object} [extra] - additional state/document fields to write in the same
  *   round trip (gamification after a tick, say).
+ * @param {Object} [docExtra] - when the document needs different fields from the
+ *   state — `increment()` instead of a whole object, so a tick can never write
+ *   back a stale copy of something another write just changed.
  */
-const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
+const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}, docExtra = extra) => {
   const { planOverrides, microplans } = get();
 
   const nextOverrides = {
@@ -77,7 +88,7 @@ const writePlanOverride = async (get, set, uid, taskId, patch, extra = {}) => {
     await updateDoc(doc(db, 'users', uid), {
       planOverrides: nextOverrides,
       microplans: nextPlans,
-      ...extra,
+      ...docExtra,
     });
     return true;
   } catch (error) {
@@ -132,7 +143,13 @@ const initialState = {
     level: 1,
     rank: 'Novato',
     badges: [],
+    // When each badge was unlocked, `{ [id]: ISO date }`. Older accounts have
+    // badges without a date; the gallery simply doesn't show one for those.
+    badgeUnlocks: {},
   },
+  // Whose data is loaded. Lets a reload tell "the same student, read again"
+  // from "a different account", which decides whether it may merge.
+  loadedUid: null,
   loading: false,
   error: null,
   // Sube cada vez que se toca un examen. Lo escuchan las pantallas que
@@ -210,17 +227,42 @@ const useUserStore = create((set, get) => ({
           // Profile can show it against how things actually turned out.
           estimatedRange: data.estimatedRange || null,
           estimationReason: data.estimationReason || null,
+          // Set by hand from the console; see services/beta.js.
+          betaTester: data.betaTester === true,
+          // The daily plan reminder the student chose, if any.
+          dailyReminder: data.dailyReminder || null,
+          createdAt: data.createdAt || null,
         };
         statsData = { ...initialState.stats, ...(data.stats || {}) };
         gameData = { ...initialState.gamification, ...(data.gamification || {}) };
         microplansData = data.microplans || [];
         statsData.lastPlanGenerationDate = data.stats?.lastPlanGenerationDate || null; // Load date from stats or root if moved
 
+        // A reload of the same account may never take away what the app
+        // already knows. Inicio reads the user document *before* a session's
+        // writes land (it does on every return after a session), and setting
+        // that older copy here dropped the badge the session had just
+        // unlocked — so the next session unlocked and celebrated it again. XP
+        // and the session totals only ever go up, and badges are only ever
+        // added, so the union / the maximum is always the right merge.
+        const previous = get();
+        if (previous.loadedUid === uid) {
+          const merged = mergeReloadedProgress({
+            previousGame: previous.gamification,
+            previousStats: previous.stats,
+            game: gameData,
+            stats: statsData,
+          });
+          gameData = merged.game;
+          statsData = merged.stats;
+        }
+
         const calculatedLevel = calculateLevel(gameData.xp);
         gameData.level = calculatedLevel;
         gameData.rank = getRankForLevel(calculatedLevel).title;
 
         set({
+          loadedUid: uid,
           subjects: subjectsData,
           profile: profileData,
           stats: statsData,
@@ -355,6 +397,8 @@ const useUserStore = create((set, get) => ({
           r.path === resourceData.path ? { ...r, id: created.id } : r
         ),
       });
+      // "Mochila lista" (beta) is earned by the first file.
+      get().evaluateBadges(userId);
       return true;
     } catch (error) {
       console.error('Error adding resource:', error);
@@ -388,21 +432,23 @@ const useUserStore = create((set, get) => ({
   },
 
   addSession: async (uid, sessionData) => {
-    const { stats, gamification } = get();
-
-    // 1. Update Stats
+    // 1. Use centralized reliable streak logic
     const now = new Date();
-
-    // 2. Use centralized reliable streak logic
     const { recordActivity } = await import('../services/streaks');
     const streakResult = await recordActivity(uid, sessionData.duration);
     const newStreak = streakResult.currentStreak;
 
+    // Read after the await, not before: a tick on the plan can land while the
+    // streak is being recorded, and reading earlier would build on a copy
+    // that no longer is the current one.
+    const { stats, gamification } = get();
+
     const newStats = {
       ...stats,
-      totalSessions: stats.totalSessions + 1,
-      totalTime: stats.totalTime + sessionData.duration,
+      totalSessions: (stats.totalSessions || 0) + 1,
+      totalTime: (stats.totalTime || 0) + sessionData.duration,
       streak: newStreak,
+      bestStreak: Math.max(stats.bestStreak || 0, newStreak || 0, streakResult.maxStreak || 0),
       lastStudyDate: now.toISOString(),
     };
 
@@ -412,20 +458,14 @@ const useUserStore = create((set, get) => ({
     const newLevel = calculateLevel(newXp);
     const newRank = getRankForLevel(newLevel).title;
 
-    // 3. Badges
-    const unlockedBadges = checkNewBadges(gamification.badges, newStats, {
-      duration: sessionData.duration,
-    });
-    const newBadges = [...gamification.badges, ...unlockedBadges];
-
     const newGameData = {
+      ...gamification,
       xp: newXp,
       level: newLevel,
       rank: newRank,
-      badges: newBadges,
     };
 
-    // 4. Create local session for immediate UI update
+    // 3. Create local session for immediate UI update
     const newLocalSession = {
       id: 'temp-' + Date.now(),
       userId: uid,
@@ -443,14 +483,37 @@ const useUserStore = create((set, get) => ({
       sessionHistory: [newLocalSession, ...state.sessionHistory],
     }));
 
+    // 4. Badges — through the one path that decides unlocks (evaluateBadges),
+    // with this session folded in. Awarded before the writes below so the
+    // unlock is already in memory if anything else evaluates meanwhile.
+    const unlockedBadges = await get().evaluateBadges(uid, {
+      event: {
+        duration: sessionData.duration,
+        endedAt: now,
+        subjectId: sessionData.subjectId,
+      },
+    });
+
     try {
       const userRef = doc(db, 'users', uid);
 
-      // Parallel writes for efficiency
+      // Parallel writes for efficiency. Counters go up with `increment()` and
+      // only the fields this session changes are named: writing the whole
+      // `stats` / `gamification` objects back put the store's copy — stale, if
+      // anything else had written since — over whatever was really there,
+      // badges included.
       const [, createdSession] = await Promise.all([
         updateDoc(userRef, {
-          stats: newStats,
-          gamification: newGameData,
+          'stats.totalSessions': increment(1),
+          'stats.totalTime': increment(sessionData.duration),
+          'stats.streak': newStreak,
+          'stats.bestStreak': newStats.bestStreak,
+          'stats.lastStudyDate': newStats.lastStudyDate,
+          'gamification.xp': increment(xpEarned),
+          // After any badge bonus. Stored only as a convenience: loadUserData
+          // recomputes both from the XP on every load.
+          'gamification.level': get().gamification.level,
+          'gamification.rank': get().gamification.rank,
         }),
         createSession({
           userId: uid,
@@ -473,38 +536,141 @@ const useUserStore = create((set, get) => ({
         }));
       }
 
-      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: createdSession?.id ?? null };
+      const { level: finalLevel, rank: finalRank } = get().gamification;
+      return {
+        xpEarned,
+        newLevel: finalLevel,
+        unlockedBadges,
+        newRank: finalRank,
+        sessionId: createdSession?.id ?? null,
+      };
     } catch (error) {
       console.error('Error saving session:', error);
-      return { xpEarned, newLevel, unlockedBadges, newRank, sessionId: null };
+      const { level: finalLevel, rank: finalRank } = get().gamification;
+      return {
+        xpEarned,
+        newLevel: finalLevel,
+        unlockedBadges,
+        newRank: finalRank,
+        sessionId: null,
+      };
     }
   },
 
   /**
-   * Badges a saved grade can unlock — today, "Excelencia" for a 10. Sessions
-   * evaluate badges in `addSession` with `{ duration }`; this is the grading
-   * side, with `{ examGrade }`, which is why "Excelencia" could never be won
-   * before: nothing ever evaluated it with a grade. Session-only badges can't
-   * fire from here (see the note above BADGES in services/gamification.js).
+   * The one place that decides badge unlocks.
+   *
+   * Builds the numbers from what the store holds (plus `event`, whatever just
+   * happened, and `extra`, anything the caller had to fetch), asks
+   * services/badges.js which badges those numbers earn that the student
+   * doesn't have, and awards them. Session end, plan ticks, grades, uploads
+   * and Inicio's catch-up for beta accounts all come through here, so a badge
+   * can only ever be decided one way.
    *
    * Returns the ids it unlocked, for the caller to celebrate.
    */
-  awardGradeBadges: async (uid, grade) => {
-    const { stats, gamification } = get();
-    const current = gamification.badges || [];
-    const unlocked = checkNewBadges(current, stats, { examGrade: grade });
-    if (unlocked.length === 0) return [];
+  evaluateBadges: async (uid, { event = null, extra = {}, celebrate = 'each' } = {}) => {
+    const { stats, gamification, profile, sessionHistory, resources } = get();
+    const beta = isBetaProfile(profile);
+    const badgeStats = buildBadgeStats({
+      stats,
+      event,
+      history: sessionHistory,
+      extra: { uploads: (resources || []).length, ...extra },
+      beta,
+    });
+    const ids = newlyEarned(gamification.badges, badgeStats, { beta });
+    if (ids.length === 0) return [];
+    return get().awardBadges(uid, ids, { celebrate });
+  },
 
-    const badges = [...current, ...unlocked];
-    set({ gamification: { ...gamification, badges } });
+  /**
+   * Adds badges, never twice. Persisted with `arrayUnion` and one dated field
+   * per badge, so this write can't take away a badge written by another one,
+   * and the XP a badge is worth (beta) goes up with `increment()`.
+   *
+   * Every unlock is handed to the app-wide celebration queue from here, so no
+   * caller can forget one or show one twice: `'each'` (one card per badge),
+   * `'summary'` (one card for several — the catch-up after new badges ship)
+   * or `'none'`.
+   */
+  awardBadges: async (uid, ids, { celebrate = 'each' } = {}) => {
+    const { gamification, profile } = get();
+    const owned = new Set(gamification.badges || []);
+    const fresh = [...new Set(ids)].filter((id) => !owned.has(id));
+    if (fresh.length === 0) return [];
+
+    const at = new Date().toISOString();
+    const bonus = rewardFor(fresh, { beta: isBetaProfile(profile) });
+    const xp = (gamification.xp || 0) + bonus;
+    const level = calculateLevel(xp);
+    const unlockDates = Object.fromEntries(fresh.map((id) => [id, at]));
+
+    set({
+      gamification: {
+        ...gamification,
+        xp,
+        level,
+        rank: getRankForLevel(level).title,
+        badges: [...(gamification.badges || []), ...fresh],
+        badgeUnlocks: { ...(gamification.badgeUnlocks || {}), ...unlockDates },
+      },
+    });
+
+    // Not awaited on purpose. Offline, a Firestore write only resolves once it
+    // reaches the server; awaiting it here held `addSession` back from even
+    // queueing the session itself, which a closed app would then lose. The
+    // write is queued now and lands when it can; memory already has it.
     if (uid) {
-      try {
-        await updateDoc(doc(db, 'users', uid), { 'gamification.badges': badges });
-      } catch (error) {
-        console.error('Error saving grade badges:', error);
-      }
+      updateDoc(doc(db, 'users', uid), {
+        'gamification.badges': arrayUnion(...fresh),
+        ...Object.fromEntries(fresh.map((id) => [`gamification.badgeUnlocks.${id}`, at])),
+        ...(bonus > 0 ? { 'gamification.xp': increment(bonus) } : {}),
+      }).catch((error) => console.error('Error saving badges:', error));
     }
-    return unlocked;
+
+    const unlocked = fresh.map((id) => badgeById(id)).filter(Boolean);
+    if (celebrate === 'summary' && unlocked.length > 1) {
+      enqueueCelebrations(uid, [{ type: 'summary', badges: unlocked }]);
+    } else if (celebrate !== 'none') {
+      enqueueCelebrations(
+        uid,
+        unlocked.map((badge) => ({ type: 'badge', badge }))
+      );
+    }
+    return fresh;
+  },
+
+  /**
+   * How many exams have a grade and the best one, for the exam badges. Kept
+   * on `stats` so badges don't have to read every exam each time; refreshed
+   * whenever a grade changes (updateAverageGrade) and, for accounts that never
+   * had it, once from Inicio.
+   */
+  refreshGradeStats: async (uid, completedExams = null) => {
+    try {
+      let exams = completedExams;
+      if (!exams) {
+        const { getCompletedExams } = await import('../services/exams');
+        exams = await getCompletedExams(uid, 100);
+      }
+      const grades = (exams || [])
+        .map((exam) => parseFloat(exam.grade))
+        .filter((grade) => Number.isFinite(grade));
+      const gradedExams = grades.length;
+      const bestGrade = grades.length > 0 ? Math.max(...grades) : 0;
+      set((state) => ({ stats: { ...state.stats, gradedExams, bestGrade } }));
+      if (uid) {
+        await updateDoc(doc(db, 'users', uid), {
+          'stats.gradedExams': gradedExams,
+          'stats.bestGrade': bestGrade,
+        });
+      }
+      return { gradedExams, bestGrade };
+    } catch (error) {
+      console.error('Error refreshing grade stats:', error);
+      return null;
+    }
   },
 
   /**
@@ -639,6 +805,9 @@ const useUserStore = create((set, get) => ({
         subjects: updatedSubjects,
         profile: state.profile ? { ...state.profile, averageGrade } : { averageGrade },
       }));
+
+      // The exam badges read these two numbers; the exams are already here.
+      await get().refreshGradeStats(userId, completedExams);
 
       return averageGrade;
     } catch (error) {
@@ -803,7 +972,28 @@ const useUserStore = create((set, get) => ({
       rank: newRank,
     };
 
+    // What this tick means for the plan badges: a task from a later day done
+    // early, and — once the in-memory plan is patched — a day with nothing
+    // left. Days are kept as date keys with `arrayUnion`, so ticking, unticking
+    // and ticking again can't count the same day twice.
+    const todayKey = localDateKey(new Date());
+    const ahead = !!task.date && localDateKey(task.date) > todayKey;
+    const stats = get().stats;
+    const projected = microplans.map((t) => (t.id === taskId ? { ...t, completed: true } : t));
+    const dayCompleted = dayCompletedBy(projected, taskId, new Date());
+    const nextStats = {
+      ...stats,
+      aheadSessions: (stats.aheadSessions || 0) + (ahead ? 1 : 0),
+      planDaysCompleted:
+        dayCompleted && !(stats.planDaysCompleted || []).includes(todayKey)
+          ? [...(stats.planDaysCompleted || []), todayKey]
+          : stats.planDaysCompleted || [],
+    };
+
     // Same write as the override, so a tick costs one Firestore round trip.
+    // The document gets increments, not the store's `gamification` object:
+    // writing that object back could erase a badge another write had just
+    // added, and the next session would then unlock — and celebrate — it again.
     await writePlanOverride(
       get,
       set,
@@ -814,10 +1004,19 @@ const useUserStore = create((set, get) => ({
       // duration here we would know *that* a session was done and never *how
       // long* it was. One integer in a record already being written.
       { completed: true, minutes: task.duration || null },
-      { gamification: newGameData }
+      { gamification: newGameData, stats: nextStats },
+      {
+        'gamification.xp': increment(bonusXp),
+        'gamification.level': newLevel,
+        'gamification.rank': newRank,
+        ...(ahead ? { 'stats.aheadSessions': increment(1) } : {}),
+        ...(dayCompleted ? { 'stats.planDaysCompleted': arrayUnion(todayKey) } : {}),
+      }
     );
 
-    return { bonusXp, newLevel, newRank };
+    const unlockedBadges = await get().evaluateBadges(uid);
+
+    return { bonusXp, newLevel, newRank, unlockedBadges, dayCompleted };
   },
 
   addManualTask: async (uid, taskData) => {

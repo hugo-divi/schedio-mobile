@@ -26,6 +26,8 @@ function pathFor(data) {
         : '/dashboard/plans';
     case 'weekly_summary':
       return '/dashboard/streak';
+    case 'daily_plan':
+      return '/dashboard';
     default:
       return '/';
   }

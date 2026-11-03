@@ -16,6 +16,8 @@ import {
   getIcon,
 } from '../../services/gamification';
 import { softBg } from '../../utils/color';
+import { isBetaProfile } from '../../services/beta';
+import BadgeGallery from '../../components/BadgeGallery';
 
 const font = tokens.typography.families.inter;
 const iconFor = (entry) => getIcon(entry.icon);
@@ -120,6 +122,7 @@ export default function RanksScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const gamification = useUserStore((state) => state.gamification);
+  const beta = useUserStore((state) => isBetaProfile(state.profile));
 
   const level = gamification?.level || 1;
   const xp = gamification?.xp || 0;
@@ -200,11 +203,21 @@ export default function RanksScreen() {
         </View>
 
         <Text style={styles.ladderTitle}>Insignias</Text>
-        <View style={styles.ladder}>
-          {BADGES.map((badge) => (
-            <BadgeRow key={badge.id} badge={badge} unlocked={unlockedBadgeIds.includes(badge.id)} />
-          ))}
-        </View>
+        {beta ? (
+          // Beta: categories, tiers, progress and "Más cerca" — see
+          // components/BadgeGallery.js.
+          <BadgeGallery />
+        ) : (
+          <View style={styles.ladder}>
+            {BADGES.map((badge) => (
+              <BadgeRow
+                key={badge.id}
+                badge={badge}
+                unlocked={unlockedBadgeIds.includes(badge.id)}
+              />
+            ))}
+          </View>
+        )}
       </ScrollView>
     </View>
   );

@@ -23,7 +23,6 @@ import { auth } from '../../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkDailyStreak } from '../../services/streaks';
 import {
-  BADGES,
   calculateXpForLevel,
   calculateXpForNextLevel,
   getNextRank,
@@ -31,6 +30,7 @@ import {
 import { REVIEW_MOMENTS, isGoodGrade } from '../../services/reviewPolicy';
 import { maybeAskForReview } from '../../services/storeReview';
 import useReviewMomentStore, { markReviewMoment } from '../../store/reviewMomentStore';
+import useCelebrationStore from '../../store/celebrationStore';
 import {
   getUpcomingExams,
   getPendingExams,
@@ -52,8 +52,13 @@ import { registerForPushNotifications } from '../../services/notificationService
 import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import Skeleton from '../../components/Skeleton';
+import TodayCard from '../../components/TodayCard';
+import DailyReminderPrompt from '../../components/DailyReminderPrompt';
+import DailyReminderSheet from '../../components/DailyReminderSheet';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { buildTodayView } from '../../services/todayCopy';
+import { isBetaProfile } from '../../services/beta';
 import GradeModal from '../../components/GradeModal';
-import AchievementCelebration from '../../components/AchievementCelebration';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
@@ -187,6 +192,9 @@ export default function Dashboard() {
   const pendingSectionRef = useRef(null);
   const calendarSectionRef = useRef(null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
+  // 'ai' when the model wrote it for this exact situation, 'fallback' for a
+  // predetermined line. "Hoy" (beta) shows only the former as its coach line.
+  const [aiSource, setAiSource] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
   const sessionHistoryLoadRef = useRef(null);
   const lastFetchRef = useRef(0);
@@ -209,8 +217,31 @@ export default function Dashboard() {
   const [examsExpanded, setExamsExpanded] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
   const [primeSheetOpen, setPrimeSheetOpen] = useState(false);
-  // Badges a saved grade just unlocked, queued for AchievementCelebration.
-  const [gradeCelebration, setGradeCelebration] = useState(null);
+  // The daily reminder (beta): its sheet, and whether "Ahora no" was said on
+  // this device for this account. Starts as dismissed so nothing flashes in
+  // before storage has been read.
+  const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
+  const [reminderPromptDismissed, setReminderPromptDismissed] = useState(true);
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return undefined;
+    let cancelled = false;
+    AsyncStorage.getItem(`schedio:reminderPromptDismissed:${uid}`)
+      .then((value) => {
+        if (!cancelled) setReminderPromptDismissed(value === 'true');
+      })
+      .catch(() => {
+        if (!cancelled) setReminderPromptDismissed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const dismissReminderPrompt = () => {
+    setReminderPromptDismissed(true);
+    const uid = auth.currentUser?.uid;
+    if (uid) AsyncStorage.setItem(`schedio:reminderPromptDismissed:${uid}`, 'true').catch(() => {});
+  };
 
   const [easterEggVisible, setEasterEggVisible] = useState(false);
   // Timestamps of recent taps on the header logo, pruned to the trailing
@@ -283,6 +314,12 @@ export default function Dashboard() {
       // read instead of fetching users/{uid} a second time.
       await useUserStore.getState().loadUserData(user.uid, profileDoc);
 
+      // Beta: Inicio leads with today's plan, so it has to be today's —
+      // regenerated here exactly as Plan does on focus (a no-op unless the day
+      // or the exams changed). It is also the plan the daily reminder reads.
+      const beta = isBetaProfile(useUserStore.getState().profile);
+      if (beta) await useUserStore.getState().initDailyMicroplans(user.uid);
+
       setUserData({
         streak: streakData.currentStreak || 0,
         // Minutes studied today and the personal record, straight from
@@ -311,6 +348,7 @@ export default function Dashboard() {
       });
 
       loadAIRecommendation(profileData, examsData, streakData);
+      if (beta) catchUpBadges(user.uid, streakData);
 
       // Auto-Prompt logic. Reading the store live rather than through the
       // `autoGradePrompt` closure above is necessary but wasn't sufficient:
@@ -345,6 +383,26 @@ export default function Dashboard() {
     }
   }, [refreshing]);
 
+  /**
+   * Beta: badges for things done before they existed (and for anything a
+   * session decided while offline), granted on the way into Inicio — shown as
+   * one summary card when there are several, never one card each.
+   */
+  const catchUpBadges = async (uid, streakData) => {
+    try {
+      if (useUserStore.getState().stats.gradedExams === undefined) {
+        await useUserStore.getState().refreshGradeStats(uid);
+      }
+      await sessionHistoryLoadRef.current;
+      await useUserStore.getState().evaluateBadges(uid, {
+        extra: { bestStreak: streakData?.maxStreak || 0 },
+        celebrate: 'summary',
+      });
+    } catch (error) {
+      console.warn('Could not catch up on badges', error);
+    }
+  };
+
   const loadAIRecommendation = async (profileData, examsData, streakData) => {
     try {
       setAiLoading(true);
@@ -371,6 +429,7 @@ export default function Dashboard() {
         todayPlan: (microplans || []).filter((task) => localDateKey(task?.date) === todayKey),
       });
       setAiRecommendation(recommendations?.mainRecommendation);
+      setAiSource(recommendations?.source || null);
     } catch (error) {
       console.error('Error loading AI recommendation:', error);
       // Fallback recommendation
@@ -463,6 +522,7 @@ export default function Dashboard() {
    * services/reviewPolicy.js's call, and it usually says no.
    */
   const reviewMoment = useReviewMomentStore((state) => state.pending);
+  const celebrationShowing = useCelebrationStore((state) => state.queue.length > 0);
   const [screenFocused, setScreenFocused] = useState(false);
   useFocusEffect(
     useCallback(() => {
@@ -479,7 +539,8 @@ export default function Dashboard() {
     primeSheetOpen ||
     easterEggVisible ||
     !!examToDelete ||
-    !!gradeCelebration;
+    reminderSheetOpen ||
+    celebrationShowing;
   useEffect(() => {
     if (!reviewMoment || !screenFocused || loading || overlayOpen) return undefined;
     // A beat after Inicio settles, so the card doesn't arrive on top of the
@@ -646,14 +707,10 @@ export default function Dashboard() {
 
       await fetchData();
 
-      // What a grade can unlock (a 10 earns "Excelencia"), celebrated here the
-      // way Estudiar celebrates what a session unlocks.
-      const unlocked = await useUserStore.getState().awardGradeBadges(user?.uid, grade);
-      const queue = unlocked
-        .map((id) => BADGES.find((badge) => badge.id === id))
-        .filter(Boolean)
-        .map((badge) => ({ type: 'badge', badge }));
-      if (queue.length > 0) setGradeCelebration(queue);
+      // What a grade can unlock (a 10 earns "Excelencia"). The store awards
+      // and queues the celebration; updateAverageGrade above has already
+      // refreshed the graded-exam count the beta exam badges read.
+      await useUserStore.getState().evaluateBadges(user?.uid, { event: { grade } });
 
       // A good grade is one of the moments a rating may be asked for — the
       // effect below decides whether, once nothing else is on screen.
@@ -721,6 +778,45 @@ export default function Dashboard() {
   const welcomeBody = isFreshAccount
     ? 'Añade tus asignaturas y haz una sesión corta de 15 min para activar tu racha y empezar a ganar XP.'
     : null;
+
+  // ── Hoy (beta) ──
+  const beta = isBetaProfile(storeProfile);
+  const microplans = useUserStore((state) => state.microplans);
+  const todayTasks = useMemo(() => {
+    const todayKey = localDateKey(new Date());
+    return (microplans || []).filter((task) => localDateKey(task?.date) === todayKey);
+  }, [microplans]);
+  const todayView = useMemo(
+    () =>
+      buildTodayView({
+        tasks: todayTasks,
+        // Exams only: a task due tomorrow isn't "tu examen de…".
+        exams: exams
+          .filter((exam) => exam.type !== 'task')
+          .map((exam) => ({
+            ...exam,
+            subjectName: subjects.find((s) => s.id === exam.subjectId)?.name,
+          })),
+        streak: userData.streak,
+      }),
+    [todayTasks, exams, subjects, userData.streak]
+  );
+  // The model's sentence when it wrote one for today's situation; otherwise
+  // the predetermined line picked for it. Never a generic one under a plan.
+  const coachLine = aiSource === 'ai' && aiRecommendation ? aiRecommendation : todayView.tip;
+  // Same hand-off as "Empezar" on the Plan tab.
+  const startTask = (task) => {
+    const params = task.subjectId
+      ? {
+          subjectId: task.subjectId,
+          autoStart: 'true',
+          duration: String(task.duration || 25),
+          goal: task.text,
+          taskId: task.id,
+        }
+      : {};
+    router.push({ pathname: '/dashboard/study', params });
+  };
 
   const visibleExams = examsExpanded ? exams : exams.slice(0, 3);
 
@@ -933,42 +1029,66 @@ export default function Dashboard() {
           </Animated.View>
         ) : null}
 
-        {/* Welcome / AI suggestion */}
+        {/* Welcome / AI suggestion — or, for beta accounts, today's plan. */}
         <View ref={heroCardRef}>
-          <Card padding={20}>
-            {loading ? (
-              <>
-                <Skeleton width={54} height={14} style={{ marginBottom: 10 }} />
-                <Skeleton width="85%" height={24} style={{ marginBottom: 10 }} />
-                <Skeleton width="70%" height={16} style={{ marginBottom: 20 }} />
-                <Skeleton width="100%" height={46} borderRadius={tokens.radius.btn} />
-              </>
-            ) : (
-              <>
-                <OverlineLabel style={styles.welcomeOverline}>Hoy</OverlineLabel>
+          {beta ? (
+            <TodayCard
+              view={todayView}
+              tasks={todayTasks}
+              coachLine={coachLine}
+              coachIsAi={aiSource === 'ai'}
+              loading={loading}
+              onStart={startTask}
+              onOpenPlan={() => router.push('/dashboard/plans')}
+              onAddExam={() => {
+                setSelectedEvent(null);
+                setSelectedDate(new Date());
+                setEventModalVisible(true);
+              }}
+            />
+          ) : (
+            <Card padding={20}>
+              {loading ? (
+                <>
+                  <Skeleton width={54} height={14} style={{ marginBottom: 10 }} />
+                  <Skeleton width="85%" height={24} style={{ marginBottom: 10 }} />
+                  <Skeleton width="70%" height={16} style={{ marginBottom: 20 }} />
+                  <Skeleton width="100%" height={46} borderRadius={tokens.radius.btn} />
+                </>
+              ) : (
+                <>
+                  <OverlineLabel style={styles.welcomeOverline}>Hoy</OverlineLabel>
 
-                {aiLoading ? (
-                  <View style={styles.aiLoadingRow}>
-                    <Text style={styles.welcomeTitle}>Analizando tu día…</Text>
-                    <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
-                  </View>
-                ) : (
-                  <Text style={[styles.welcomeTitle, !welcomeBody && styles.welcomeTitleAlone]}>
-                    {welcomeTitle}
-                  </Text>
-                )}
+                  {aiLoading ? (
+                    <View style={styles.aiLoadingRow}>
+                      <Text style={styles.welcomeTitle}>Analizando tu día…</Text>
+                      <ActivityIndicator size="small" color={tokens.colors.textSecondary} />
+                    </View>
+                  ) : (
+                    <Text style={[styles.welcomeTitle, !welcomeBody && styles.welcomeTitleAlone]}>
+                      {welcomeTitle}
+                    </Text>
+                  )}
 
-                {welcomeBody ? <Text style={styles.welcomeBody}>{welcomeBody}</Text> : null}
+                  {welcomeBody ? <Text style={styles.welcomeBody}>{welcomeBody}</Text> : null}
 
-                <Button
-                  title="Comenzar sesión de estudio →"
-                  fullWidth
-                  onPress={() => router.push('/dashboard/study')}
-                />
-              </>
-            )}
-          </Card>
+                  <Button
+                    title="Comenzar sesión de estudio →"
+                    fullWidth
+                    onPress={() => router.push('/dashboard/study')}
+                  />
+                </>
+              )}
+            </Card>
+          )}
         </View>
+
+        {beta && !loading && !storeProfile?.dailyReminder && !reminderPromptDismissed ? (
+          <DailyReminderPrompt
+            onChoose={() => setReminderSheetOpen(true)}
+            onDismiss={dismissReminderPrompt}
+          />
+        ) : null}
 
         {/* Calendar — month grid and upcoming exams share one card */}
         <View ref={calendarSectionRef}>
@@ -1156,6 +1276,13 @@ export default function Dashboard() {
       {/* Modals */}
       <PrimeStatusSheet visible={primeSheetOpen} onClose={() => setPrimeSheetOpen(false)} />
 
+      {beta ? (
+        <DailyReminderSheet
+          visible={reminderSheetOpen}
+          onClose={() => setReminderSheetOpen(false)}
+        />
+      ) : null}
+
       <EventModal
         visible={eventModalVisible}
         onClose={() => setEventModalVisible(false)}
@@ -1190,13 +1317,6 @@ export default function Dashboard() {
         exam={examToGrade}
         onSave={handleSaveGrade}
       />
-
-      {gradeCelebration ? (
-        <AchievementCelebration
-          queue={gradeCelebration}
-          onFinish={() => setGradeCelebration(null)}
-        />
-      ) : null}
 
       {/* Deleting from "Por calificar" used to go through the OS's own
           Alert.alert — a native Android dialog dropped in the middle of an

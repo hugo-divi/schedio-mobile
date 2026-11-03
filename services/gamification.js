@@ -13,7 +13,19 @@ import {
   Trophy,
   Award,
   Sunrise,
+  CalendarCheck,
+  CalendarRange,
+  FastForward,
+  Mountain,
+  Layers,
+  Hourglass,
+  GraduationCap,
+  Medal,
+  BookCheck,
+  Shuffle,
+  Backpack,
 } from 'lucide-react-native';
+import { BADGE_CATALOG, badgeById, catalogFor } from './badges';
 
 // --- RANKS ---
 export const RANKS = [
@@ -97,117 +109,39 @@ export const calculateXpForLevel = (level) => {
 
 // --- BADGES ---
 //
-// Every condition takes `(stats, context)`: `stats` is the account's running
-// totals, `context` what just happened — `{ duration }` when a session ends
-// (userStore.addSession), `{ examGrade }` when a grade is saved
-// (userStore.awardGradeBadges). "Excelencia" was written as `(stats,
-// examGrade)` and called with the session's `{ duration }` object, so it
-// compared an object with 10 and could never be won. The time-of-day badges
-// now require a session in the context too, so saving a grade at 7:30 can't
-// hand out "Madrugador".
-//
-// The time windows stop at midnight and start again at 5:00 on purpose. They
-// used to cover 22:00–04:00 and anything before 8:00, which rewarded studying
-// at three in the morning — not something an app for 16-year-olds should be
-// celebrating. Same ids, so badges already earned stay earned.
-const sessionHour = (context) => (context?.duration > 0 ? new Date().getHours() : null);
-
-export const BADGES = [
-  {
-    id: 'first_steps',
-    name: 'Primeros Pasos',
-    description: 'Completa tu primera sesión de estudio.',
-    icon: 'BookOpen',
-    color: '#32ADE6',
-    condition: (stats) => stats.totalSessions >= 1,
-  },
-  {
-    id: 'marathon',
-    name: 'Maratonista',
-    description: 'Completa una sesión de más de 60 minutos.',
-    icon: 'Clock',
-    color: '#FF9500',
-    condition: (stats, context) => context?.duration >= 60,
-  },
-  {
-    id: 'night_owl',
-    name: 'Búho Nocturno',
-    description: 'Completa una sesión entre las 21:00 y la medianoche.',
-    icon: 'Moon',
-    color: '#5856D6',
-    condition: (stats, context) => {
-      const hour = sessionHour(context);
-      return hour !== null && hour >= 21;
-    },
-  },
-  {
-    id: 'excellence',
-    name: 'Excelencia',
-    description: 'Consigue un 10 en un examen.',
-    icon: 'Star',
-    color: '#FFD60A',
-    condition: (stats, context) => Number(context?.examGrade) >= 10,
-  },
-  {
-    id: 'streak_master',
-    name: 'En Llamas',
-    description: 'Mantén una racha de 7 días.',
-    icon: 'Zap',
-    color: '#FF3B30',
-    condition: (stats) => stats.streak >= 7,
-  },
-  {
-    id: 'early_bird',
-    name: 'Madrugador',
-    description: 'Completa una sesión entre las 5:00 y las 8:00.',
-    icon: 'Sunrise',
-    color: '#FF9F0A',
-    condition: (stats, context) => {
-      const hour = sessionHour(context);
-      return hour !== null && hour >= 5 && hour < 8;
-    },
-  },
-  {
-    id: 'double_marathon',
-    name: 'Doble Maratón',
-    description: 'Completa una sesión de más de 120 minutos.',
-    icon: 'Clock',
-    color: '#FF6B00',
-    condition: (stats, context) => context?.duration >= 120,
-  },
-  {
-    id: 'iron_streak',
-    name: 'Racha de Hierro',
-    description: 'Mantén una racha de 30 días.',
-    icon: 'Flame',
-    color: '#FF3B30',
-    condition: (stats) => stats.streak >= 30,
-  },
-  {
-    id: 'century_club',
-    name: 'Club de las 100 Horas',
-    description: 'Supera las 100 horas de estudio acumuladas.',
-    icon: 'Award',
-    color: '#D4A94C',
-    condition: (stats) => stats.totalTime >= 100 * 60,
-  },
-];
+// The catalogue and the rules live in services/badges.js, without React
+// Native, so scripts/check-badges.mjs can check them. `BADGES` stays the
+// original nine for every screen that already lists them; beta accounts get
+// `catalogFor({ beta: true })` instead.
+export const BADGES = catalogFor({ beta: false });
+export const ALL_BADGES = BADGE_CATALOG;
+export { badgeById, catalogFor };
 
 // Both RANKS and BADGES carry an `icon` string (lucide component name) rather
 // than the component itself, so screens resolve it through this single map
 // instead of each keeping its own — that's how a rank ended up rendering the
 // same Award glyph everywhere despite RANKS already defining a distinct icon.
-export const ICONS = { Clock, Star, Zap, BookOpen, Crown, Moon, Flame, Trophy, Sunrise, Award };
-export const getIcon = (name) => ICONS[name] || Award;
-
-export const checkNewBadges = (currentBadges, stats, context = {}) => {
-  const unlocked = [];
-  BADGES.forEach((badge) => {
-    if (!currentBadges.includes(badge.id)) {
-      if (badge.condition(stats, context)) {
-        unlocked.push(badge.id);
-      }
-    }
-  });
-  return unlocked;
+export const ICONS = {
+  Clock,
+  Star,
+  Zap,
+  BookOpen,
+  Crown,
+  Moon,
+  Flame,
+  Trophy,
+  Sunrise,
+  Award,
+  CalendarCheck,
+  CalendarRange,
+  FastForward,
+  Mountain,
+  Layers,
+  Hourglass,
+  GraduationCap,
+  Medal,
+  BookCheck,
+  Shuffle,
+  Backpack,
 };
+export const getIcon = (name) => ICONS[name] || Award;

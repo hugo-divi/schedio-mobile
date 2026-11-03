@@ -59,10 +59,24 @@ ok(
   same(Object.values(serverKinds).sort(), Object.values(NOTIFICATION_KINDS).sort()),
   Object.values(serverKinds).join(', ')
 );
+// A kind is "sent" if some push names it directly, or if the daily reminder
+// (functions/dailyReminder.js, sent with `pushData(decision.kind, …)`) can
+// decide on it.
 const sendsWithKind = [...functions.matchAll(/pushData\(KIND\.([A-Z_]+)/g)].map((m) => m[1]);
-Object.keys(serverKinds).forEach((key) => {
-  ok(`algún envío usa KIND.${key}`, sendsWithKind.includes(key));
+const reminder = readFileSync(join(root, 'functions', 'dailyReminder.js'), 'utf8');
+const reminderKinds = [...reminder.matchAll(/kind: '([a-z_]+)'/g)].map((m) => m[1]);
+Object.entries(serverKinds).forEach(([key, value]) => {
+  ok(
+    `algún envío usa ${value}`,
+    sendsWithKind.includes(key) || reminderKinds.includes(value),
+    sendsWithKind.includes(key) ? `KIND.${key}` : 'desde el recordatorio diario'
+  );
 });
+ok(
+  'todo lo que decide el recordatorio diario es un tipo conocido',
+  reminderKinds.every((kind) => Object.values(serverKinds).includes(kind)),
+  [...new Set(reminderKinds)].join(', ')
+);
 ok(
   'ningún envío sale sin `data`',
   !/sendToUser\([^)]*\{\s*title[^}]*\}\s*\)/.test(functions),
@@ -84,6 +98,11 @@ const expectations = [
     { pathname: '/dashboard/plans', params: { highlightId: ID } },
   ],
   ['resumen semanal → la racha', { kind: 'weekly_summary' }, { pathname: '/dashboard/streak' }],
+  [
+    'recordatorio diario → Inicio, con el plan de hoy',
+    { kind: 'daily_plan', taskId: 'x' },
+    { pathname: '/dashboard' },
+  ],
   ['onboarding a medias → nada (ya lo hace "/")', { kind: 'abandoned_onboarding' }, null],
   ['tipo desconocido → nada', { kind: 'promo' }, null],
   ['sin data → nada', undefined, null],

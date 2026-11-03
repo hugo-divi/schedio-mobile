@@ -25,6 +25,7 @@ import {
   KeyRound,
   CreditCard,
   Bell,
+  BellRing,
   Star,
   Shield,
   ScrollText,
@@ -50,6 +51,8 @@ import { hasDndPermission, openDndPermissionSettings } from '../services/focusMo
 import { canRequestWebPush } from '../services/pwa';
 import { resetWelcomeState } from '../services/welcome';
 import { openStoreListing } from '../services/storeReview';
+import { isBetaProfile } from '../services/beta';
+import DailyReminderSheet from '../components/DailyReminderSheet';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -216,6 +219,8 @@ export default function SettingsScreen() {
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [notificationsSheet, setNotificationsSheet] = useState(false);
+  const [reminderSheetOpen, setReminderSheetOpen] = useState(false);
+  const storeProfile = useUserStore((state) => state.profile);
   const [languageSheet, setLanguageSheet] = useState(false);
 
   const chooseLanguage = (code) => {
@@ -563,6 +568,19 @@ export default function SettingsScreen() {
               )
             }
           />
+          {/* Beta: the daily plan reminder (components/DailyReminderSheet.js). */}
+          {isBetaProfile(storeProfile) ? (
+            <Row
+              icon={BellRing}
+              label="Recordatorio diario"
+              sub={
+                storeProfile?.dailyReminder?.enabled
+                  ? `Cada día a las ${storeProfile.dailyReminder.time}, con tu plan`
+                  : 'Desactivado'
+              }
+              onPress={() => setReminderSheetOpen(true)}
+            />
+          ) : null}
           <Row
             icon={Star}
             label={t('settings.rows.gradePrompt')}
@@ -716,6 +734,13 @@ export default function SettingsScreen() {
           </View>
         </View>
       </Modal>
+
+      {isBetaProfile(storeProfile) ? (
+        <DailyReminderSheet
+          visible={reminderSheetOpen}
+          onClose={() => setReminderSheetOpen(false)}
+        />
+      ) : null}
 
       <BottomSheet
         visible={notificationsSheet}

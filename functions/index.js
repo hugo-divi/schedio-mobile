@@ -10,6 +10,8 @@ const { defineSecret } = require('firebase-functions/params');
 // own, without the rest of the barrel.
 const { setGlobalOptions } = require('firebase-functions/v2/options');
 const logger = require('firebase-functions/logger');
+const { createHash } = require('node:crypto');
+const dailyReminder = require('./dailyReminder');
 const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getMessaging } = require('firebase-admin/messaging');
@@ -101,7 +103,27 @@ const KIND = {
   REENGAGEMENT: 'reengagement',
   WEEKLY_SUMMARY: 'weekly_summary',
   ABANDONED_ONBOARDING: 'abandoned_onboarding',
+  DAILY_PLAN: 'daily_plan',
 };
+
+/**
+ * The daily plan reminder is in beta (services/beta.js): only accounts with
+ * `betaTester: true` get it. Flip to false to open it to everyone who turns it
+ * on in the app.
+ */
+const DAILY_REMINDER_BETA_ONLY = true;
+
+/**
+ * Whether this account gets its one push a day from dailyPlanReminder. The
+ * other scheduled functions skip it then: that one push already carries the
+ * exam alerts and the Sunday summary, at the time the student chose, and
+ * re-engagement would only add a second one to someone who already hears
+ * from Schedio daily.
+ */
+const hasActiveDailyReminder = (userData) =>
+  userData?.dailyReminder?.enabled === true &&
+  !!userData?.dailyReminderKey &&
+  (!DAILY_REMINDER_BETA_ONLY || userData?.betaTester === true);
 
 /**
  * FCM `data` values must be strings, and a key the app doesn't know must not
@@ -190,6 +212,9 @@ exports.examAlerts = onSchedule(
         const userSnap = await db.collection('users').doc(uid).get();
         const fcmToken = userSnap.get('fcmToken');
         if (!fcmToken) continue;
+        // Their reminder sends this alert at their own time (and marks the
+        // exam), so it must be left unmarked here.
+        if (hasActiveDailyReminder(userSnap.data())) continue;
 
         const names = await Promise.all(userExams.map(subjectNameFor));
         const body =
@@ -374,6 +399,7 @@ exports.reengagement = onSchedule(
       const data = doc.data();
       if (!data.fcmToken) continue;
       if (alreadyNotifiedToday(data)) continue;
+      if (hasActiveDailyReminder(data)) continue;
 
       const next = upcoming.get(doc.id);
       if (!next) continue;
@@ -476,6 +502,8 @@ exports.weeklySummary = onSchedule(
           if (!data.fcmToken) return;
           // Still the same one-push-a-day flag the other two categories read.
           if (alreadyNotifiedToday(data)) return;
+          // Sunday's summary rides in their daily reminder instead.
+          if (hasActiveDailyReminder(data)) return;
 
           const count = countByUser.get(snap.id) || 0;
           if (count === 0) return; // no positive reinforcement to give — stay silent
@@ -496,6 +524,137 @@ exports.weeklySummary = onSchedule(
           await snap.ref.update({ lastNotifiedDate: madridDateKey(new Date()) });
         })
       );
+    }
+  }
+);
+
+// ── Category 4: the daily plan reminder ──────────────────────────────────
+//
+// What it decides lives in dailyReminder.js (pure, checked by
+// scripts/check-daily-reminder.mjs and shared with the app's preview); this
+// is only the plumbing.
+//
+// Every 15 minutes, for the students whose chosen time is this slot — or the
+// previous one, as a catch-up if a run started late or failed. `dailyReminderKey`
+// ("Europe/Madrid@17:00") is a single field, so `in` rides the automatic index,
+// and the query reads only the students due now, never everyone with it on.
+
+/** Sessions in the last 7 days — only read on Sundays, for the summary. */
+const weekSessionCount = async (uid) => {
+  const snap = await db
+    .collection('sessions')
+    .where('userId', '==', uid)
+    .where('date', '>=', new Date(Date.now() - 7 * DAY_MS))
+    .get();
+  return snap.size;
+};
+
+/** Pending exams and tasks, each with its subject's name. */
+const pendingExamsFor = async (uid) => {
+  // Two equality filters merge single-field indexes: no composite needed —
+  // the same query the app itself runs (services/exams.js).
+  const snap = await db
+    .collection('exams')
+    .where('userId', '==', uid)
+    .where('completed', '==', false)
+    .get();
+  const exams = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return Promise.all(
+    exams.map(async (exam) => ({ ...exam, subjectName: await subjectNameFor(exam) }))
+  );
+};
+
+exports.dailyPlanReminder = onSchedule(
+  { schedule: '*/15 * * * *', timeZone: TIMEZONE, timeoutSeconds: BATCH_TIMEOUT_SECONDS },
+  async () => {
+    const now = new Date();
+    const keys = dailyReminder.keysForRun(now);
+    const usersSnap = await db.collection('users').where('dailyReminderKey', 'in', keys).get();
+
+    for (const doc of usersSnap.docs) {
+      const user = doc.data();
+      if (!hasActiveDailyReminder(user) || !user.fcmToken) continue;
+
+      try {
+        const settings = user.dailyReminder || {};
+        const tz = dailyReminder.normalizeTimeZone(settings.tz);
+        const isSunday = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
+          .format(now)
+          .startsWith('Sun');
+
+        const [streakSnap, exams, weekSessions] = await Promise.all([
+          db.collection('streaks').doc(doc.id).get(),
+          pendingExamsFor(doc.id),
+          isSunday ? weekSessionCount(doc.id) : Promise.resolve(0),
+        ]);
+
+        const decision = dailyReminder.decideDailyReminder({
+          now,
+          user,
+          streak: streakSnap.exists ? streakSnap.data() : {},
+          exams,
+          weekSessions,
+          betaOnly: DAILY_REMINDER_BETA_ONLY,
+        });
+        if (!decision.send) {
+          logger.info(`dailyPlanReminder: skipped ${doc.id}`, { reason: decision.reason });
+          continue;
+        }
+
+        // Claim the day before sending, inside a transaction: two overlapping
+        // runs (the catch-up slot) must not both send.
+        const previousSentDate = user.dailyReminderState?.lastSentDate ?? null;
+        const claimed = await db.runTransaction(async (tx) => {
+          const fresh = await tx.get(doc.ref);
+          const data = fresh.data() || {};
+          if (data.dailyReminderState?.lastSentDate === decision.today) return false;
+          if (data.lastNotifiedDate === madridDateKey(now)) return false;
+          tx.update(doc.ref, {
+            'dailyReminderState.lastSentDate': decision.today,
+            lastNotifiedDate: madridDateKey(now),
+          });
+          return true;
+        });
+        if (!claimed) continue;
+
+        const sent = await sendToUser(
+          doc.id,
+          user.fcmToken,
+          { title: decision.title, body: decision.body },
+          pushData(decision.kind, decision.data)
+        );
+        if (!sent) {
+          // Give the day back so the next slot can try again (a dead token
+          // has already been cleared, so that one simply won't be picked).
+          await doc.ref.update({
+            'dailyReminderState.lastSentDate': previousSentDate,
+            lastNotifiedDate: user.lastNotifiedDate ?? null,
+          });
+          continue;
+        }
+
+        await doc.ref.update({
+          'dailyReminderState.lastSentAt': FieldValue.serverTimestamp(),
+          'dailyReminderState.lastKind': decision.kind,
+          ...(decision.isPlan
+            ? {
+                'dailyReminderState.lastPlanSentAt': FieldValue.serverTimestamp(),
+                'dailyReminderState.ignoredCount': decision.ignoredCount,
+              }
+            : {}),
+        });
+        await Promise.all(
+          decision.examUpdates.map(({ id, field }) =>
+            db
+              .collection('exams')
+              .doc(id)
+              .update({ [field]: true })
+          )
+        );
+      } catch (error) {
+        // One student's failure must not stop everyone after them.
+        logger.error(`dailyPlanReminder failed for ${doc.id}`, error);
+      }
     }
   }
 );
@@ -603,11 +762,18 @@ exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
   const sameDay = usage?.date === todayKey;
   const countSoFar = sameDay ? (usage.count ?? 0) : 0;
 
+  // What this recommendation was written for. The prompt carries today's plan
+  // and what's done of it, so the same hash means the same situation.
+  const promptHash = createHash('sha256').update(prompt).digest('hex');
+
   if (countSoFar >= AI_DAILY_LIMIT) {
     // Replay today's last real recommendation rather than calling Gemini
-    // again. `text: null` is the signal for the rare case there isn't one
-    // yet to replay — the client falls back to its own local logic then.
-    return { text: sameDay ? (usage.lastRecommendation ?? null) : null, limited: true };
+    // again — but only for the situation it was written for. Replaying it for
+    // any prompt meant "empieza con Química" kept coming back after Química
+    // was done. `text: null` sends the client to its own predetermined lines,
+    // which are built from the plan and can't be out of date.
+    const replayable = sameDay && usage.lastPromptHash === promptHash;
+    return { text: replayable ? (usage.lastRecommendation ?? null) : null, limited: true };
   }
 
   let text, costUsd;
@@ -624,7 +790,12 @@ exports.aiProxy = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
     return { text: null, limited: false };
   }
 
-  await usageRef.set({ date: todayKey, count: countSoFar + 1, lastRecommendation: text });
+  await usageRef.set({
+    date: todayKey,
+    count: countSoFar + 1,
+    lastRecommendation: text,
+    lastPromptHash: promptHash,
+  });
 
   // FieldValue.increment rather than reading spentUsd and writing spentUsd +
   // costUsd back: this doc is shared across every user's calls, so a plain

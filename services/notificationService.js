@@ -6,13 +6,20 @@ import { canRequestWebPush } from './pwa';
 
 // Configure how notifications should be handled when the app is open.
 // `shouldShowAlert` was deprecated in favour of the banner/list pair.
+//
+// The daily plan reminder is the exception: with the app already open, a
+// banner saying "Hoy toca Química" over Inicio's own "Hoy" — or over a running
+// session — is noise. It still lands in the notification list.
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notification) => {
+    const quiet = notification?.request?.content?.data?.kind === 'daily_plan';
+    return {
+      shouldShowBanner: !quiet,
+      shouldShowList: true,
+      shouldPlaySound: !quiet,
+      shouldSetBadge: true,
+    };
+  },
 });
 
 /**

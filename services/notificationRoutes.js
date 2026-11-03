@@ -19,6 +19,7 @@ export const NOTIFICATION_KINDS = {
   REENGAGEMENT: 'reengagement',
   WEEKLY_SUMMARY: 'weekly_summary',
   ABANDONED_ONBOARDING: 'abandoned_onboarding',
+  DAILY_PLAN: 'daily_plan',
 };
 
 /**
@@ -36,7 +37,7 @@ const cleanExamId = (value) => (typeof value === 'string' && EXAM_ID.test(value)
  * Exam alerts and the exam-aware re-engagement push open the Plan on that
  * exam — the same thing tapping the exam on Inicio does. The weekly summary
  * counts sessions, so it opens the streak screen, which is where those days
- * are drawn.
+ * are drawn. The daily plan reminder opens Inicio.
  *
  * `abandoned_onboarding` gets no route on purpose: opening the app goes
  * through `/`, and `/` already sends an unfinished account back into the
@@ -55,6 +56,11 @@ export const routeForNotification = (data) => {
         : { pathname: '/dashboard/plans' };
     case NOTIFICATION_KINDS.WEEKLY_SUMMARY:
       return { pathname: '/dashboard/streak' };
+    // The daily reminder lands on Inicio, where "Hoy" has the plan and its
+    // "Empezar" button — one tap from the push, not a timer that starts on
+    // its own the moment the student glances at their phone.
+    case NOTIFICATION_KINDS.DAILY_PLAN:
+      return { pathname: '/dashboard' };
     default:
       return null;
   }

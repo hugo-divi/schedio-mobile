@@ -24,7 +24,10 @@
     "check:locale-format": "node scripts/check-locale-format.mjs",
     "check:pau": "node scripts/check-pau.mjs",
     "check:notification-routes": "node scripts/check-notification-routes.mjs",
-    "check:review-prompt": "node scripts/check-review-prompt.mjs"
+    "check:review-prompt": "node scripts/check-review-prompt.mjs",
+    "check:badges": "node scripts/check-badges.mjs",
+    "check:today-copy": "node scripts/check-today-copy.mjs",
+    "check:daily-reminder": "node scripts/check-daily-reminder.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

@@ -31,6 +31,7 @@ import { tokens } from '../../theme/tokens';
 import QuickActionsModal from '../../components/QuickActionsModal';
 import EventModal from '../../components/EventModal';
 import UploadModal from '../../components/UploadModal';
+import CelebrationHost from '../../components/CelebrationHost';
 import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
@@ -538,6 +539,10 @@ export default function DashboardLayout() {
         onSave={handleSaveExam}
         subjects={subjects}
       />
+
+      {/* Rank-ups and badges, over whichever tab is open — see
+          store/celebrationStore.js for why this isn't per screen any more. */}
+      <CelebrationHost />
 
       <UploadModal
         visible={uploadModalVisible}

@@ -42,7 +42,7 @@ import {
   daysUntilLabel,
 } from '../../services/planPresentation';
 import { daysBetween } from '../../services/priority';
-import { REVIEW_MOMENTS, dayCompletedBy } from '../../services/reviewPolicy';
+import { REVIEW_MOMENTS } from '../../services/reviewPolicy';
 import { markReviewMoment } from '../../store/reviewMomentStore';
 import useUserStore, { FREE_WEEKLY_UPLOADS, PRIME_WEEKLY_UPLOADS } from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
@@ -1147,13 +1147,9 @@ export default function PlansScreen() {
       .completeMicroTask(user?.uid, task.id)
       .then((result) => {
         // Ticking the last of today's tasks finishes the day: a good moment,
-        // asked about on Inicio, not here (store/reviewMomentStore.js).
-        if (
-          result?.bonusXp > 0 &&
-          dayCompletedBy(useUserStore.getState().microplans, task.id, new Date())
-        ) {
-          markReviewMoment(REVIEW_MOMENTS.DAY_COMPLETED);
-        }
+        // asked about on Inicio, not here (store/reviewMomentStore.js). Any
+        // badge it unlocks is celebrated by the store itself.
+        if (result?.dayCompleted) markReviewMoment(REVIEW_MOMENTS.DAY_COMPLETED);
       })
       .catch(() => {});
   };

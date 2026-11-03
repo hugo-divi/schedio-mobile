@@ -136,6 +136,9 @@ npm run check:fab-springs     # animación del botón central
 npm run check:tour            # pasos del tour guiado
 npm run check:notification-routes  # a dónde lleva tocar una push (app, service worker, servidor)
 npm run check:review-prompt   # cuándo se puede pedir una valoración en la tienda
+npm run check:badges          # reglas de las insignias y la regresión de la insignia repetida
+npm run check:today-copy      # lo que dice "Hoy" en Inicio sin la IA
+npm run check:daily-reminder  # cuándo sale el recordatorio diario y qué dice
 ```
 
 ## Builds (EAS)

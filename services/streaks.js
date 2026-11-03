@@ -281,6 +281,8 @@ export const recordActivity = async (userId, activityDuration) => {
       dailyActivity: newDailyActivity,
       streakUpdated: !wasComplete && isNowComplete,
       currentStreak: updates.currentStreak || streakData.currentStreak,
+      // For the streak badges, which go by the best run ever.
+      maxStreak: updates.maxStreak || streakData.maxStreak || 0,
     };
   } catch (error) {
     console.error('Error recording activity:', error);

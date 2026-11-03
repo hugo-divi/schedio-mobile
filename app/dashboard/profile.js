@@ -49,9 +49,11 @@ import usePrimeIntentStore, { PRIME_INTENTS } from '../../store/primeIntentStore
 import {
   calculateXpForLevel,
   calculateXpForNextLevel,
-  BADGES,
+  catalogFor,
   getIcon,
 } from '../../services/gamification';
+import { isBetaProfile } from '../../services/beta';
+import BadgeMedal from '../../components/BadgeMedal';
 import { softBg } from '../../utils/color';
 import { buildAnalysis } from '../../services/productivityService';
 import { getUpcomingExams } from '../../services/exams';
@@ -352,21 +354,27 @@ function LevelFill({ percent }) {
  * (including what's still locked and how to get it) already exists in
  * `ranks.js`, so this points there instead of becoming a second badge screen.
  */
-function BadgeStrip({ unlockedIds, onPress }) {
-  const unlocked = BADGES.filter((badge) => unlockedIds.includes(badge.id));
+function BadgeStrip({ unlockedIds, unlockDates = {}, beta, onPress }) {
+  // Beta accounts count against the whole catalogue, see the newest first and
+  // see each badge's tier on its ring; everyone else keeps the original nine.
+  const catalog = catalogFor({ beta });
+  const unlocked = catalog
+    .filter((badge) => unlockedIds.includes(badge.id))
+    .sort((a, b) => String(unlockDates[b.id] || '').localeCompare(String(unlockDates[a.id] || '')));
+  const shown = beta ? unlocked.slice(0, 6) : unlocked;
 
   return (
     <TouchableOpacity
       activeOpacity={0.85}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Insignias: ${unlocked.length} de ${BADGES.length}`}
+      accessibilityLabel={`Insignias: ${unlocked.length} de ${catalog.length}`}
     >
       <Card padding={16}>
         <View style={styles.badgeStripHead}>
           <Text style={styles.badgeStripTitle}>Insignias</Text>
           <Text style={styles.badgeStripCount}>
-            {unlocked.length} de {BADGES.length}
+            {unlocked.length} de {catalog.length}
           </Text>
         </View>
 
@@ -376,21 +384,29 @@ function BadgeStrip({ unlockedIds, onPress }) {
           </Text>
         ) : (
           <View style={styles.badgeStripRow}>
-            {unlocked.map((badge) => {
-              const Icon = getIcon(badge.icon);
-              return (
-                <View
-                  key={badge.id}
-                  style={[styles.badgeStripIcon, { backgroundColor: softBg(badge.color) }]}
-                >
-                  <Icon size={18} color={badge.color} fill={badge.color} strokeWidth={1.75} />
-                </View>
-              );
-            })}
+            {shown.map((badge) =>
+              beta ? (
+                <BadgeMedal key={badge.id} badge={badge} size={36} />
+              ) : (
+                <LegacyBadgeIcon key={badge.id} badge={badge} />
+              )
+            )}
+            {beta && unlocked.length > shown.length ? (
+              <Text style={styles.badgeStripCount}>+{unlocked.length - shown.length}</Text>
+            ) : null}
           </View>
         )}
       </Card>
     </TouchableOpacity>
+  );
+}
+
+function LegacyBadgeIcon({ badge }) {
+  const Icon = getIcon(badge.icon);
+  return (
+    <View style={[styles.badgeStripIcon, { backgroundColor: softBg(badge.color) }]}>
+      <Icon size={18} color={badge.color} fill={badge.color} strokeWidth={1.75} />
+    </View>
   );
 }
 
@@ -871,6 +887,8 @@ export default function ProfileScreen() {
 
           <BadgeStrip
             unlockedIds={gamification?.badges || []}
+            unlockDates={gamification?.badgeUnlocks || {}}
+            beta={isBetaProfile(profile)}
             onPress={() => router.push('/dashboard/ranks')}
           />
 
@@ -1620,6 +1638,7 @@ const styles = StyleSheet.create({
   badgeStripRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
   },
   badgeStripIcon: {

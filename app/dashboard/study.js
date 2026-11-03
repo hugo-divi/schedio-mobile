@@ -49,15 +49,12 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { tokens } from '../../theme/tokens';
 import KeyboardAwareScrollView from '../../components/ui/KeyboardAwareScrollView';
 import { TAB_BAR_STYLE } from '../../components/ui/InlineSheet';
-import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
+import { BASE_XP_PER_MINUTE, RANKS } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
 import { syncHomeScreenWidgets } from '../../services/widgetData';
-import {
-  REVIEW_MOMENTS,
-  dayCompletedBy,
-  reachedStreakMilestone,
-} from '../../services/reviewPolicy';
+import { REVIEW_MOMENTS, reachedStreakMilestone } from '../../services/reviewPolicy';
 import { markReviewMoment } from '../../store/reviewMomentStore';
+import useCelebrationStore, { enqueueCelebrations } from '../../store/celebrationStore';
 import { hasDndPermission, enableStudyFocus, disableStudyFocus } from '../../services/focusMode';
 import {
   updateStudySessionNotification,
@@ -86,7 +83,6 @@ import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import SchedioLogoReveal from '../../components/SchedioLogoReveal';
-import AchievementCelebration from '../../components/AchievementCelebration';
 
 const font = tokens.typography.families.inter;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -648,9 +644,6 @@ export default function StudySessionScreen() {
   const [summary, setSummary] = useState(null);
   // 'draw' while the mark is being traced, 'settled' once the summary can land.
   const [endPhase, setEndPhase] = useState('draw');
-  // Filled once addSession resolves with an actual rank-up or badge unlock —
-  // held back until the reveal settles, so it never competes with it.
-  const [celebrationQueue, setCelebrationQueue] = useState(null);
   const [mood, setMood] = useState(null);
   const [notes, setNotes] = useState('');
   const [upcomingExams, setUpcomingExams] = useState([]);
@@ -979,6 +972,16 @@ export default function StudySessionScreen() {
 
       if (!user?.uid) return;
 
+      // Snapshotted before anything below moves them. The tick on the plan
+      // adds 50 XP straight away, so reading the rank after it (as this used
+      // to) meant a rank reached through that tick was never celebrated — the
+      // "before" already had it.
+      const previousRank = useUserStore.getState().gamification.rank;
+      const previousLevel = useUserStore.getState().gamification.level;
+      // Only a streak that actually moved earns the pulse on the summary —
+      // one that beats every time says nothing.
+      const previousStreak = useUserStore.getState().stats.streak;
+
       if (!early && taskId) {
         useUserStore
           .getState()
@@ -987,27 +990,14 @@ export default function StudySessionScreen() {
             // The session that finished today's plan is a good moment to ask
             // for a rating — marked here, asked on Inicio once the student is
             // back there and nothing else is open (store/reviewMomentStore.js).
-            if (
-              result?.bonusXp > 0 &&
-              dayCompletedBy(useUserStore.getState().microplans, taskId, new Date())
-            ) {
-              markReviewMoment(REVIEW_MOMENTS.DAY_COMPLETED);
-            }
+            // Badges this unlocks are celebrated by the store itself.
+            if (result?.dayCompleted) markReviewMoment(REVIEW_MOMENTS.DAY_COMPLETED);
           })
           .catch(() => {});
       }
 
       // A session shorter than a minute earns nothing and isn't worth a row.
       if (minutesSpent >= 1) {
-        // Snapshotted before addSession's optimistic update overwrites the
-        // store — otherwise there'd be no way to tell a rank/level the
-        // student just reached from one they already held.
-        const previousRank = useUserStore.getState().gamification.rank;
-        const previousLevel = useUserStore.getState().gamification.level;
-        // Only a streak that actually moved earns the pulse on the summary —
-        // one that beats every time says nothing.
-        const previousStreak = useUserStore.getState().stats.streak;
-
         const sessionPromise = useUserStore.getState().addSession(user.uid, {
           subjectId: selectedSubject,
           duration: minutesSpent,
@@ -1045,16 +1035,18 @@ export default function StudySessionScreen() {
           .then((result) => {
             if (!result) return;
 
-            const queue = [];
-            if (result.newRank && result.newRank !== previousRank) {
-              const rank = RANKS.find((r) => r.title === result.newRank);
-              if (rank) queue.push({ type: 'rank', rank });
-            }
-            (result.unlockedBadges || []).forEach((badgeId) => {
-              const badge = BADGES.find((b) => b.id === badgeId);
-              if (badge) queue.push({ type: 'badge', badge });
-            });
-            if (queue.length > 0) setCelebrationQueue(queue);
+            // To the app-wide queue, not to this screen's state. This promise
+            // can resolve after the student has already left the summary (slow
+            // connection, the PWA especially); a screen-local queue then sat
+            // there and was shown again at the end of the next session, as if
+            // the badge had just been earned. The queue shows it wherever the
+            // student is, once, and never again on this device.
+            const rank =
+              result.newRank && result.newRank !== previousRank
+                ? RANKS.find((r) => r.title === result.newRank)
+                : null;
+            if (rank) enqueueCelebrations(user.uid, [{ type: 'rank', rank }]);
+            // Badges: queued by userStore.awardBadges as they're awarded.
 
             // A level-up without a rank change is common enough that a full
             // celebration for each one would get old fast — this gets a
@@ -1488,10 +1480,16 @@ export default function StudySessionScreen() {
   useEffect(() => {
     if (step !== 'end') {
       setEndPhase('draw');
-      setCelebrationQueue(null);
       flash.value = 0;
     }
   }, [step, flash]);
+
+  // Celebrations (components/CelebrationHost.js) wait for the reveal to land,
+  // as they always did here — and never stay held once this screen is left.
+  useEffect(() => {
+    useCelebrationStore.getState().setHeld(step === 'end' && endPhase !== 'settled');
+    return () => useCelebrationStore.getState().setHeld(false);
+  }, [step, endPhase]);
 
   // ── Render: setup ──
 
@@ -1911,13 +1909,6 @@ export default function StudySessionScreen() {
             </>
           ) : null}
         </KeyboardAwareScrollView>
-
-        {settled && celebrationQueue ? (
-          <AchievementCelebration
-            queue={celebrationQueue}
-            onFinish={() => setCelebrationQueue(null)}
-          />
-        ) : null}
       </View>
     );
   };
