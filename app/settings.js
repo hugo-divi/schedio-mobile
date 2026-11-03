@@ -49,6 +49,7 @@ import { restorePurchases } from '../services/revenuecat';
 import { hasDndPermission, openDndPermissionSettings } from '../services/focusMode';
 import { canRequestWebPush } from '../services/pwa';
 import { resetWelcomeState } from '../services/welcome';
+import { openStoreListing } from '../services/storeReview';
 import useUserStore from '../store/userStore';
 import useAuthStore from '../store/authStore';
 import usePreferencesStore from '../store/preferencesStore';
@@ -57,25 +58,6 @@ import { openLegal } from '../constants/legal';
 import CustomAlert from '../components/CustomAlert';
 import { Toggle } from '../components/ui/Toggle';
 import BottomSheet from '../components/ui/BottomSheet';
-
-/**
- * Guarded the same way services/focusMode.js guards its own native module,
- * and for the same reason: a static import throws on a dev client built
- * before expo-store-review shipped, and because it throws at module scope it
- * takes the whole Settings route down with it. expo-router then reports the
- * screen as "missing the required default export", which points nowhere near
- * the real cause.
- *
- * Rating the app is the least important thing on this screen. Account
- * deletion, the legal links and the focus-mode toggle all live here too, and
- * none of them should vanish because an optional module is absent.
- */
-let StoreReview = null;
-try {
-  StoreReview = require('expo-store-review');
-} catch {
-  StoreReview = null;
-}
 
 const font = tokens.typography.families.inter;
 
@@ -415,20 +397,12 @@ export default function SettingsScreen() {
     });
   };
 
-  const handleRateApp = async () => {
-    try {
-      // Without the native module the in-app review sheet simply isn't
-      // available, and the store page below is the honest fallback — which is
-      // the same path a device that can't show the sheet already took.
-      if (StoreReview && (await StoreReview.hasAction())) {
-        await StoreReview.requestReview();
-      } else {
-        await Linking.openURL('https://play.google.com/store/apps/details?id=com.schedio.mobile');
-      }
-    } catch (error) {
-      console.error('Error requesting store review:', error);
-    }
-  };
+  // Straight to the store listing. This used to call the in-app review API,
+  // which Google says not to put behind a button: once its quota is spent it
+  // shows nothing, so the row looked broken exactly to the students who had
+  // already been asked. The in-app sheet is now asked for on its own, at good
+  // moments only — see services/reviewPolicy.js.
+  const handleRateApp = () => openStoreListing();
 
   const openDelete = () => {
     setDeletePassword('');

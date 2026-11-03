@@ -23,10 +23,14 @@ import { auth } from '../../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { checkDailyStreak } from '../../services/streaks';
 import {
+  BADGES,
   calculateXpForLevel,
   calculateXpForNextLevel,
   getNextRank,
 } from '../../services/gamification';
+import { REVIEW_MOMENTS, isGoodGrade } from '../../services/reviewPolicy';
+import { maybeAskForReview } from '../../services/storeReview';
+import useReviewMomentStore, { markReviewMoment } from '../../store/reviewMomentStore';
 import {
   getUpcomingExams,
   getPendingExams,
@@ -49,6 +53,7 @@ import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import Skeleton from '../../components/Skeleton';
 import GradeModal from '../../components/GradeModal';
+import AchievementCelebration from '../../components/AchievementCelebration';
 import MiniCalendar from '../../components/MiniCalendar';
 import EventModal from '../../components/EventModal';
 import DayOptionsModal from '../../components/DayOptionsModal';
@@ -86,6 +91,10 @@ const rowEnter = (index) => FadeInDown.duration(300).delay(Math.min(index, 6) * 
 // How long the dashboard data stays fresh before returning to the tab
 // triggers a refetch.
 const FOCUS_REFETCH_MS = 60_000;
+
+// How long Inicio has to sit idle after a good moment before a rating may be
+// asked for (see the review effect inside the component).
+const REVIEW_ASK_DELAY_MS = 1200;
 
 // Mirrors the 3/5/9 scale EventModal.js offers under "Prioridad" — this is
 // what the student actually picked. The exam row's badge used to show only
@@ -200,6 +209,8 @@ export default function Dashboard() {
   const [examsExpanded, setExamsExpanded] = useState(false);
   const [tourVisible, setTourVisible] = useState(false);
   const [primeSheetOpen, setPrimeSheetOpen] = useState(false);
+  // Badges a saved grade just unlocked, queued for AchievementCelebration.
+  const [gradeCelebration, setGradeCelebration] = useState(null);
 
   const [easterEggVisible, setEasterEggVisible] = useState(false);
   // Timestamps of recent taps on the header logo, pruned to the trailing
@@ -441,6 +452,52 @@ export default function Dashboard() {
     }
   }, [loading, profile]);
 
+  /**
+   * The one place a store rating is ever asked for.
+   *
+   * A good moment (today's plan finished, a streak milestone, a good grade) is
+   * marked wherever it happens; it is asked about here, with Inicio on screen,
+   * loaded, and nothing else open — no sheet, no tour, no celebration — because
+   * Google forbids the card next to a question, and the screens where those
+   * moments happen are full of them. Whether to ask at all is
+   * services/reviewPolicy.js's call, and it usually says no.
+   */
+  const reviewMoment = useReviewMomentStore((state) => state.pending);
+  const [screenFocused, setScreenFocused] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+      return () => setScreenFocused(false);
+    }, [])
+  );
+  const overlayOpen =
+    eventModalVisible ||
+    dayOptionsVisible ||
+    gradeModalVisible ||
+    tourVisible ||
+    pauSheetOpen ||
+    primeSheetOpen ||
+    easterEggVisible ||
+    !!examToDelete ||
+    !!gradeCelebration;
+  useEffect(() => {
+    if (!reviewMoment || !screenFocused || loading || overlayOpen) return undefined;
+    // A beat after Inicio settles, so the card doesn't arrive on top of the
+    // transition. Cancelled if anything opens in the meantime.
+    const timer = setTimeout(() => {
+      const moment = useReviewMomentStore.getState().take();
+      if (!moment) return;
+      const { stats, sessionHistory } = useUserStore.getState();
+      maybeAskForReview({
+        moment,
+        totalSessions: stats?.totalSessions || 0,
+        sessions: sessionHistory,
+        accountCreatedAt: profile?.createdAt,
+      });
+    }, REVIEW_ASK_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [reviewMoment, screenFocused, loading, overlayOpen, profile]);
+
   const handleTourComplete = async () => {
     setTourVisible(false);
     try {
@@ -588,6 +645,19 @@ export default function Dashboard() {
       }
 
       await fetchData();
+
+      // What a grade can unlock (a 10 earns "Excelencia"), celebrated here the
+      // way Estudiar celebrates what a session unlocks.
+      const unlocked = await useUserStore.getState().awardGradeBadges(user?.uid, grade);
+      const queue = unlocked
+        .map((id) => BADGES.find((badge) => badge.id === id))
+        .filter(Boolean)
+        .map((badge) => ({ type: 'badge', badge }));
+      if (queue.length > 0) setGradeCelebration(queue);
+
+      // A good grade is one of the moments a rating may be asked for — the
+      // effect below decides whether, once nothing else is on screen.
+      if (isGoodGrade(grade)) markReviewMoment(REVIEW_MOMENTS.GOOD_GRADE);
     } catch (error) {
       console.error('Error saving grade:', error);
       Alert.alert('Error', 'No se pudo guardar la nota.');
@@ -1120,6 +1190,13 @@ export default function Dashboard() {
         exam={examToGrade}
         onSave={handleSaveGrade}
       />
+
+      {gradeCelebration ? (
+        <AchievementCelebration
+          queue={gradeCelebration}
+          onFinish={() => setGradeCelebration(null)}
+        />
+      ) : null}
 
       {/* Deleting from "Por calificar" used to go through the OS's own
           Alert.alert — a native Android dialog dropped in the middle of an

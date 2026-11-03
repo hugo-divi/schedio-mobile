@@ -481,6 +481,33 @@ const useUserStore = create((set, get) => ({
   },
 
   /**
+   * Badges a saved grade can unlock — today, "Excelencia" for a 10. Sessions
+   * evaluate badges in `addSession` with `{ duration }`; this is the grading
+   * side, with `{ examGrade }`, which is why "Excelencia" could never be won
+   * before: nothing ever evaluated it with a grade. Session-only badges can't
+   * fire from here (see the note above BADGES in services/gamification.js).
+   *
+   * Returns the ids it unlocked, for the caller to celebrate.
+   */
+  awardGradeBadges: async (uid, grade) => {
+    const { stats, gamification } = get();
+    const current = gamification.badges || [];
+    const unlocked = checkNewBadges(current, stats, { examGrade: grade });
+    if (unlocked.length === 0) return [];
+
+    const badges = [...current, ...unlocked];
+    set({ gamification: { ...gamification, badges } });
+    if (uid) {
+      try {
+        await updateDoc(doc(db, 'users', uid), { 'gamification.badges': badges });
+      } catch (error) {
+        console.error('Error saving grade badges:', error);
+      }
+    }
+    return unlocked;
+  },
+
+  /**
    * Attach what the student wrote after the timer stopped. Kept separate from
    * `addSession` because that one runs the moment the session ends — waiting
    * for the summary screen would risk losing the streak and the XP if the app

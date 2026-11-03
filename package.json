@@ -23,7 +23,8 @@
     "check:plan-profile": "node scripts/check-plan-profile.mjs",
     "check:locale-format": "node scripts/check-locale-format.mjs",
     "check:pau": "node scripts/check-pau.mjs",
-    "check:notification-routes": "node scripts/check-notification-routes.mjs"
+    "check:notification-routes": "node scripts/check-notification-routes.mjs",
+    "check:review-prompt": "node scripts/check-review-prompt.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

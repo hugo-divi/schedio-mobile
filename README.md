@@ -137,6 +137,7 @@ npm run check:plan-profile    # the student's planning profile
 npm run check:fab-springs     # centre button animation
 npm run check:tour            # guided tour steps
 npm run check:notification-routes  # where a tapped push lands (app, web worker, server)
+npm run check:review-prompt   # when a store rating may be asked for
 ```
 
 ## Builds (EAS)

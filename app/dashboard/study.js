@@ -52,6 +52,12 @@ import { TAB_BAR_STYLE } from '../../components/ui/InlineSheet';
 import { BASE_XP_PER_MINUTE, RANKS, BADGES } from '../../services/gamification';
 import { getUpcomingExams } from '../../services/exams';
 import { syncHomeScreenWidgets } from '../../services/widgetData';
+import {
+  REVIEW_MOMENTS,
+  dayCompletedBy,
+  reachedStreakMilestone,
+} from '../../services/reviewPolicy';
+import { markReviewMoment } from '../../store/reviewMomentStore';
 import { hasDndPermission, enableStudyFocus, disableStudyFocus } from '../../services/focusMode';
 import {
   updateStudySessionNotification,
@@ -974,7 +980,21 @@ export default function StudySessionScreen() {
       if (!user?.uid) return;
 
       if (!early && taskId) {
-        useUserStore.getState().completeMicroTask(user.uid, taskId);
+        useUserStore
+          .getState()
+          .completeMicroTask(user.uid, taskId)
+          .then((result) => {
+            // The session that finished today's plan is a good moment to ask
+            // for a rating — marked here, asked on Inicio once the student is
+            // back there and nothing else is open (store/reviewMomentStore.js).
+            if (
+              result?.bonusXp > 0 &&
+              dayCompletedBy(useUserStore.getState().microplans, taskId, new Date())
+            ) {
+              markReviewMoment(REVIEW_MOMENTS.DAY_COMPLETED);
+            }
+          })
+          .catch(() => {});
       }
 
       // A session shorter than a minute earns nothing and isn't worth a row.
@@ -1043,8 +1063,12 @@ export default function StudySessionScreen() {
               setSummary((prev) => (prev ? { ...prev, newLevel: result.newLevel } : prev));
             }
 
-            if (useUserStore.getState().stats.streak > previousStreak) {
+            const streakNow = useUserStore.getState().stats.streak;
+            if (streakNow > previousStreak) {
               setSummary((prev) => (prev ? { ...prev, streakUp: true } : prev));
+            }
+            if (reachedStreakMilestone(previousStreak, streakNow)) {
+              markReviewMoment(REVIEW_MOMENTS.STREAK_MILESTONE);
             }
           })
           .catch(() => {});

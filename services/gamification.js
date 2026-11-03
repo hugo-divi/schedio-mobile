@@ -96,6 +96,22 @@ export const calculateXpForLevel = (level) => {
 };
 
 // --- BADGES ---
+//
+// Every condition takes `(stats, context)`: `stats` is the account's running
+// totals, `context` what just happened — `{ duration }` when a session ends
+// (userStore.addSession), `{ examGrade }` when a grade is saved
+// (userStore.awardGradeBadges). "Excelencia" was written as `(stats,
+// examGrade)` and called with the session's `{ duration }` object, so it
+// compared an object with 10 and could never be won. The time-of-day badges
+// now require a session in the context too, so saving a grade at 7:30 can't
+// hand out "Madrugador".
+//
+// The time windows stop at midnight and start again at 5:00 on purpose. They
+// used to cover 22:00–04:00 and anything before 8:00, which rewarded studying
+// at three in the morning — not something an app for 16-year-olds should be
+// celebrating. Same ids, so badges already earned stay earned.
+const sessionHour = (context) => (context?.duration > 0 ? new Date().getHours() : null);
+
 export const BADGES = [
   {
     id: 'first_steps',
@@ -111,17 +127,17 @@ export const BADGES = [
     description: 'Completa una sesión de más de 60 minutos.',
     icon: 'Clock',
     color: '#FF9500',
-    condition: (stats, currentSession) => currentSession?.duration >= 60,
+    condition: (stats, context) => context?.duration >= 60,
   },
   {
     id: 'night_owl',
     name: 'Búho Nocturno',
-    description: 'Estudia entre las 22:00 y las 04:00.',
+    description: 'Completa una sesión entre las 21:00 y la medianoche.',
     icon: 'Moon',
     color: '#5856D6',
-    condition: (stats, currentSession) => {
-      const hour = new Date().getHours();
-      return hour >= 22 || hour < 4;
+    condition: (stats, context) => {
+      const hour = sessionHour(context);
+      return hour !== null && hour >= 21;
     },
   },
   {
@@ -130,7 +146,7 @@ export const BADGES = [
     description: 'Consigue un 10 en un examen.',
     icon: 'Star',
     color: '#FFD60A',
-    condition: (stats, examGrade) => examGrade >= 10,
+    condition: (stats, context) => Number(context?.examGrade) >= 10,
   },
   {
     id: 'streak_master',
@@ -143,10 +159,13 @@ export const BADGES = [
   {
     id: 'early_bird',
     name: 'Madrugador',
-    description: 'Completa una sesión antes de las 8:00.',
+    description: 'Completa una sesión entre las 5:00 y las 8:00.',
     icon: 'Sunrise',
     color: '#FF9F0A',
-    condition: () => new Date().getHours() < 8,
+    condition: (stats, context) => {
+      const hour = sessionHour(context);
+      return hour !== null && hour >= 5 && hour < 8;
+    },
   },
   {
     id: 'double_marathon',
@@ -154,7 +173,7 @@ export const BADGES = [
     description: 'Completa una sesión de más de 120 minutos.',
     icon: 'Clock',
     color: '#FF6B00',
-    condition: (stats, currentSession) => currentSession?.duration >= 120,
+    condition: (stats, context) => context?.duration >= 120,
   },
   {
     id: 'iron_streak',
