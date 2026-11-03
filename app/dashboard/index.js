@@ -179,6 +179,7 @@ export default function Dashboard() {
   const calendarSectionRef = useRef(null);
   const [aiRecommendation, setAiRecommendation] = useState(null);
   const [aiLoading, setAiLoading] = useState(false);
+  const sessionHistoryLoadRef = useRef(null);
   const lastFetchRef = useRef(0);
   // Held so a refetch can cancel the previous pending prompt, and so leaving
   // the tab doesn't leave a timer behind that opens the modal on a screen the
@@ -336,10 +337,27 @@ export default function Dashboard() {
   const loadAIRecommendation = async (profileData, examsData, streakData) => {
     try {
       setAiLoading(true);
+      // Everything below comes from the store, which `fetchData` has just
+      // loaded — except the session history, which has its own effect; wait
+      // for it rather than describe a student with zero sessions.
+      await sessionHistoryLoadRef.current;
+      const {
+        subjects: storeSubjects,
+        sessionHistory,
+        microplans,
+        gamification,
+      } = useUserStore.getState();
+      const todayKey = localDateKey(new Date());
       const recommendations = await generateRecommendations({
         profile: profileData,
         exams: examsData,
         streak: streakData,
+        subjects: storeSubjects,
+        sessions: sessionHistory,
+        gamification,
+        // What the planner has for today, so the headline backs the plan
+        // instead of improvising a different one.
+        todayPlan: (microplans || []).filter((task) => localDateKey(task?.date) === todayKey),
       });
       setAiRecommendation(recommendations?.mainRecommendation);
     } catch (error) {
@@ -396,10 +414,12 @@ export default function Dashboard() {
   );
 
   // Session history feeds the streak screen's calendar. Kept out of fetchData
-  // so the data/notification flow there stays untouched.
+  // so the data/notification flow there stays untouched. The promise is kept
+  // so the AI headline can wait for it (see loadAIRecommendation);
+  // loadSessionHistory never rejects.
   useEffect(() => {
     const user = auth.currentUser;
-    if (user) useUserStore.getState().loadSessionHistory(user.uid);
+    if (user) sessionHistoryLoadRef.current = useUserStore.getState().loadSessionHistory(user.uid);
   }, []);
 
   useEffect(() => () => clearTimeout(gradePromptTimerRef.current), []);

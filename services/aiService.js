@@ -16,18 +16,26 @@ import { functions } from './firebase';
 
 const callAiProxy = httpsCallable(functions, 'aiProxy');
 
-// Cache para evitar llamadas excesivas a la API
+// Cache para evitar llamadas excesivas a la API.
+//
+// Va por prompt, no solo por tiempo. Con una sola entrada por tiempo, acabar
+// la sesión que la frase de Inicio recomendaba y volver a Inicio seguía
+// mostrando "empieza con Química" durante cinco minutos: el plan ya había
+// cambiado y la caché no se enteraba. Como el plan de hoy forma parte del
+// prompt, un cambio en él pide una frase nueva y un prompt idéntico reutiliza
+// la que hay.
 const cache = {
+  key: null,
   recommendations: null,
   timestamp: null,
   CACHE_DURATION: 5 * 60 * 1000, // 5 minutos
 };
 
 /**
- * Verifica si el cache es válido
+ * Verifica si el cache es válido para este prompt
  */
-const isCacheValid = () => {
-  if (!cache.recommendations || !cache.timestamp) return false;
+const isCacheValid = (key) => {
+  if (!cache.recommendations || !cache.timestamp || cache.key !== key) return false;
   return Date.now() - cache.timestamp < cache.CACHE_DURATION;
 };
 
@@ -53,23 +61,53 @@ const callGeminiAPI = async (prompt) => {
   }
 };
 
+/** Nombres escritos por el alumno: se recortan para que nada hinche el prompt
+ * (aiProxy rechaza los de más de 8000 caracteres). */
+const MAX_NAME_LENGTH = 60;
+const clip = (value) => {
+  const text = String(value ?? '').trim();
+  return text.length > MAX_NAME_LENGTH ? `${text.slice(0, MAX_NAME_LENGTH - 1)}…` : text;
+};
+
 /**
- * Construye contexto del usuario para el prompt
+ * Construye contexto del usuario para el prompt.
+ *
+ * Inicio le pasaba solo `profile`, `exams` y `streak`, así que el prompt salía
+ * con "Materias (0)", "0 sesiones", nivel 1 y la asignatura de cada examen como
+ * `undefined`: la frase "personalizada" de Inicio se escribía casi a ciegas. Y
+ * no sabía nada del plan, así que podía recomendar algo distinto de lo que la
+ * pestaña Plan decía para ese mismo día. Ahora recibe las materias, las
+ * sesiones, la gamificación y el plan de hoy (`todayPlan`).
  */
 const buildUserContext = (userData) => {
-  const { profile, subjects, sessions, exams, streak, gamification } = userData;
+  const { profile, subjects, sessions, exams, streak, gamification, todayPlan } = userData;
 
   // Calcular estadísticas
-  const totalStudyTime = sessions?.reduce((acc, s) => acc + s.duration, 0) || 0;
+  const totalStudyTime = sessions?.reduce((acc, s) => acc + (Number(s.duration) || 0), 0) || 0;
   const avgSessionDuration = sessions?.length > 0 ? totalStudyTime / sessions.length : 0;
   const upcomingExamsCount =
     exams?.filter((e) => !e.completed && new Date(e.date) > new Date()).length || 0;
 
-  // Materias por dificultad
-  const subjectsByDifficulty = subjects?.sort((a, b) => b.difficulty - a.difficulty) || [];
+  // Materias por dificultad. Sobre una copia: `subjects` llega del store, y
+  // `sort` ordena en sitio — habría reordenado las materias de toda la app.
+  const subjectsByDifficulty = [...(subjects || [])].sort(
+    (a, b) => (Number(b.difficulty) || 0) - (Number(a.difficulty) || 0)
+  );
+  const subjectName = (id) => subjects?.find((s) => s.id === id)?.name;
+
+  const plan = Array.isArray(todayPlan) ? todayPlan : [];
+  const pending = plan.filter((task) => !task.completed);
+  const planLines = plan
+    .slice(0, 6)
+    .map(
+      (task) =>
+        `- ${clip(task.subjectName || 'General')} · ${Number(task.duration) || 0} min · ${
+          task.completed ? 'hecha' : 'pendiente'
+        }${task.text ? ` · ${clip(task.text)}` : ''}`
+    );
 
   return `
-Usuario: ${profile?.displayName || 'Estudiante'}
+Usuario: ${clip(profile?.displayName) || 'Estudiante'}
 Nivel educativo: ${profile?.course || 'No especificado'} - ${profile?.grade || ''}
 Nivel de organización: ${profile?.organizationLevel || 3}/5
 
@@ -81,7 +119,7 @@ XP total: ${gamification?.xp || 0}
 Materias (${subjects?.length || 0}):
 ${subjectsByDifficulty
   .slice(0, 5)
-  .map((s) => `- ${s.name} (Dificultad: ${s.difficulty}/10)`)
+  .map((s) => `- ${clip(s.name)} (Dificultad: ${s.difficulty ?? 5}/10)`)
   .join('\n')}
 
 Sesiones de estudio recientes: ${sessions?.length || 0} sesiones
@@ -89,52 +127,54 @@ Tiempo total de estudio: ${Math.round(totalStudyTime)} minutos
 Duración promedio por sesión: ${Math.round(avgSessionDuration)} minutos
 
 Exámenes próximos: ${upcomingExamsCount}
-${exams
-  ?.slice(0, 3)
+${(exams || [])
+  .slice(0, 3)
   .map(
     (e) =>
-      `- ${e.name} (${subjects?.find((s) => s.id === e.subjectId)?.name}) - ${new Date(e.date).toLocaleDateString('es-ES')}`
+      `- ${clip(e.name)}${subjectName(e.subjectId) ? ` (${clip(subjectName(e.subjectId))})` : ''} - ${new Date(e.date).toLocaleDateString('es-ES')}`
   )
   .join('\n')}
+
+Plan de hoy, decidido por el planificador de Schedio (${plan.length} ${
+    plan.length === 1 ? 'sesión' : 'sesiones'
+  }, ${pending.length} ${pending.length === 1 ? 'pendiente' : 'pendientes'}):
+${planLines.join('\n') || '- Nada planificado para hoy'}
     `.trim();
 };
 
 /**
- * Genera recomendaciones personalizadas completas
+ * Genera la recomendación del día para Inicio.
+ *
+ * Solo se pide `mainRecommendation`, que es lo único que lee la app. El JSON
+ * de antes pedía además un `studyPlan` propio, patrones, alertas y un mensaje
+ * motivacional que no se mostraban en ningún sitio: tokens de salida pagados
+ * (los caros) y, en el caso del `studyPlan`, un segundo plan que podía
+ * contradecir al del planificador. El plan es determinista y manda; la IA
+ * solo lo acompaña.
  */
 export const generateRecommendations = async (userData) => {
-  // Verificar cache
-  if (isCacheValid()) {
-    console.log('Returning cached recommendations');
-    return cache.recommendations;
-  }
-
   const context = buildUserContext(userData);
 
-  const prompt = `Eres un coach de productividad académica experto. Analiza el siguiente perfil de estudiante y genera recomendaciones personalizadas.
+  const prompt = `Eres el coach de estudio de Schedio. El plan de hoy ya lo ha decidido el planificador de la app y es el que manda: no propongas otro plan, ni otras asignaturas, ni otros tiempos.
 
 ${context}
 
-Genera un análisis en formato JSON con la siguiente estructura:
-{
-  "mainRecommendation": "Recomendación principal del día (1-2 frases motivadoras y accionables)",
-  "studyPlan": [
-    {
-      "subject": "Nombre de la materia",
-      "duration": "Duración sugerida en minutos",
-      "priority": "Alta/Media/Baja",
-      "reason": "Por qué estudiar esto ahora"
-    }
-  ],
-  "patterns": {
-    "strengths": ["Fortaleza 1", "Fortaleza 2"],
-    "improvements": ["Área de mejora 1", "Área de mejora 2"]
-  },
-  "motivationalInsight": "Mensaje motivacional personalizado basado en su progreso",
-  "alerts": ["Alerta 1 si hay materias descuidadas o riesgo de sobrecarga"]
-}
+Escribe UNA recomendación para la pantalla de inicio: 1-2 frases en español, cercanas y accionables, sin echarle nada en cara.
+- Si quedan sesiones pendientes hoy, anima a empezar la siguiente y nómbrala (asignatura y minutos).
+- Si ya está todo hecho, reconócelo y deja claro que puede parar.
+- Si hoy no hay nada planificado, sugiere algo ligero o añadir sus próximos exámenes.
+- No prometas notas.
 
-Responde SOLO con el JSON, sin texto adicional.`;
+Responde SOLO con este JSON, sin texto adicional:
+{
+  "mainRecommendation": "..."
+}`;
+
+  // Verificar cache
+  if (isCacheValid(prompt)) {
+    console.log('Returning cached recommendations');
+    return cache.recommendations;
+  }
 
   try {
     const response = await callGeminiAPI(prompt);
@@ -157,7 +197,11 @@ Responde SOLO con el JSON, sin texto adicional.`;
 
     try {
       const recommendations = JSON.parse(jsonText);
+      if (typeof recommendations?.mainRecommendation !== 'string') {
+        return getFallbackRecommendations(userData);
+      }
       // Guardar en cache
+      cache.key = prompt;
       cache.recommendations = recommendations;
       cache.timestamp = Date.now();
       return recommendations;
@@ -452,6 +496,7 @@ const getFallbackRecommendations = (userData) => {
  * Limpia el cache (útil para forzar nuevas recomendaciones)
  */
 export const clearCache = () => {
+  cache.key = null;
   cache.recommendations = null;
   cache.timestamp = null;
 };
