@@ -621,6 +621,20 @@ const useUserStore = create((set, get) => ({
   },
 
   initDailyMicroplans: async (uid, force = false) => {
+    // Nothing may regenerate the plan before the student's own changes to it
+    // are in memory. `reconcilePlan` merges the fresh plan with
+    // `planOverrides`, and an empty map there gets written back to Firestore
+    // as if no tick, postpone or deletion had ever happened. Inicio loads it on
+    // the way in, but Plan can be the first screen to run: opened from a
+    // tapped notification, or tapped before Inicio's own load had finished.
+    // `profile` is set in the same write that loads the overrides.
+    if (get().profile === null) {
+      await get().loadUserData(uid);
+      // Still nothing (no document, or the read failed): there is no plan of
+      // theirs to rebuild safely, so don't.
+      if (get().profile === null) return;
+    }
+
     const { subjects, microplans, stats, profile, sessionHistory, manualTasks, planOverrides } =
       get();
     const today = new Date().toDateString();

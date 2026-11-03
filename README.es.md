@@ -134,6 +134,7 @@ npm run check:plan-screen     # presentación de la pantalla de Plan
 npm run check:plan-profile    # perfil de planificación del estudiante
 npm run check:fab-springs     # animación del botón central
 npm run check:tour            # pasos del tour guiado
+npm run check:notification-routes  # a dónde lleva tocar una push (app, service worker, servidor)
 ```
 
 ## Builds (EAS)

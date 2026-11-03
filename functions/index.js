@@ -90,10 +90,37 @@ const markNotifiedToday = (uid) =>
     .doc(uid)
     .update({ lastNotifiedDate: madridDateKey(new Date()) });
 
+/**
+ * What each push is about, for the app to route a tap on it — the same values
+ * as NOTIFICATION_KINDS in services/notificationRoutes.js, which is what reads
+ * them. Pushes used to go out with no `data` at all, so a tap could only ever
+ * open the app wherever it happened to start.
+ */
+const KIND = {
+  EXAM_ALERT: 'exam_alert',
+  REENGAGEMENT: 'reengagement',
+  WEEKLY_SUMMARY: 'weekly_summary',
+  ABANDONED_ONBOARDING: 'abandoned_onboarding',
+};
+
+/**
+ * FCM `data` values must be strings, and a key the app doesn't know must not
+ * reach it as `undefined`, so anything empty is dropped here. Never `title`,
+ * `body` or `message`: on Android those names are read from the same bundle
+ * as the notification's own fields.
+ */
+const pushData = (kind, extra = {}) => {
+  const data = { kind };
+  Object.entries(extra).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') data[key] = String(value);
+  });
+  return data;
+};
+
 /** Sends one push; clears the token if it's dead so later runs stop retrying it. */
-const sendToUser = async (uid, fcmToken, notification) => {
+const sendToUser = async (uid, fcmToken, notification, data) => {
   try {
-    await messaging.send({ token: fcmToken, notification });
+    await messaging.send({ token: fcmToken, notification, ...(data ? { data } : {}) });
     return true;
   } catch (error) {
     const deadToken =
@@ -170,7 +197,12 @@ exports.examAlerts = onSchedule(
             ? EXAM_COPY[offsetDays](names[0])
             : `Tienes ${names.length} exámenes próximos: ${joinSpanish(names)}.`;
 
-        const sent = await sendToUser(uid, fcmToken, { title: 'Schedio', body });
+        // One exam: the tap opens the plan on that exam. Several: just the
+        // plan, on today — there is no single exam to point at.
+        const data = pushData(KIND.EXAM_ALERT, {
+          examId: userExams.length === 1 ? userExams[0].id : null,
+        });
+        const sent = await sendToUser(uid, fcmToken, { title: 'Schedio', body }, data);
         if (!sent) continue;
 
         const field = offsetDays === 3 ? 'notified3Days' : 'notified1Day';
@@ -236,10 +268,14 @@ exports.abandonedOnboarding = onSchedule(
       if (data.abandonedOnboardingSentAt) continue;
       if (alreadyNotifiedToday(data)) continue;
 
-      const sent = await sendToUser(doc.id, data.fcmToken, {
-        title: 'Schedio',
-        body: ABANDONED_COPY,
-      });
+      const sent = await sendToUser(
+        doc.id,
+        data.fcmToken,
+        { title: 'Schedio', body: ABANDONED_COPY },
+        // No destination needed: opening the app goes through `/`, which
+        // already sends an unfinished account back into the onboarding.
+        pushData(KIND.ABANDONED_ONBOARDING)
+      );
       if (!sent) continue;
 
       await doc.ref.update({
@@ -251,39 +287,129 @@ exports.abandonedOnboarding = onSchedule(
 );
 
 // ── Category 2: re-engagement ────────────────────────────────────────────
+//
+// What the onboarding promises at step 6 ("Vuelta a la app"): "Si llevas días
+// sin abrirla y tienes exámenes cerca." The first version kept only the first
+// half. It wrote to everyone four days quiet, once a week, for as long as they
+// stayed away, exams or not, always with the same "hace unos días" — which by
+// October, to someone gone since June, is the kind of push that gets every
+// notification from the app switched off.
+//
+// Now it needs a pending exam inside EXAM_HORIZON_DAYS and names it, and it
+// stops after REENGAGEMENT_MAX_PER_ABSENCE nudges. Opening the app ends an
+// absence, so a student who comes back and drifts off again starts from zero.
 
-const REENGAGEMENT_COPY =
-  'Hace unos días que no entras en Schedio. Cuando quieras retomarlo, todo sigue donde lo dejaste.';
+const DAY_MS = 86400000;
 const INACTIVE_DAYS = 4;
 const REENGAGEMENT_COOLDOWN_DAYS = 7;
+const REENGAGEMENT_MAX_PER_ABSENCE = 3;
+// With the cooldown above the third nudge goes out around day 18 of an
+// absence, so nobody gone longer than this can still be owed one. It is also
+// what bounds the query: "quiet for 4 to 30 days" is capped by recent
+// activity, while "quiet for 4+ days" only ever grows — the same trap
+// abandonedOnboarding's query explains.
+const ABSENCE_WINDOW_DAYS = 30;
+const EXAM_HORIZON_DAYS = 14;
+
+/** Whole Madrid calendar days from today to `date` (0 = today). */
+const madridDaysFromToday = (date) => {
+  const dayNumber = (d) => {
+    const { year, month, day } = madridYMD(d);
+    return Date.UTC(year, month - 1, day) / DAY_MS;
+  };
+  return dayNumber(date) - dayNumber(new Date());
+};
+
+const reengagementCopy = (subject, days) =>
+  `Tu examen de ${subject} es ${days === 1 ? 'mañana' : `en ${days} días`}. ` +
+  'Tu plan sigue donde lo dejaste: con una sesión corta hoy llegas con margen.';
+
+/**
+ * The nearest pending exam per student, among everyone's exams in the next
+ * EXAM_HORIZON_DAYS. One range on `date` only, so it rides the automatic
+ * single-field index; `completed` and the type are filtered here instead of in
+ * the query, which would need a composite index — the kind that broke
+ * examAlerts' first real run when nobody deployed it. Tasks are left out: the
+ * promise and the copy are about exams.
+ */
+const nextExamByUser = async () => {
+  const now = Date.now();
+  const snap = await db
+    .collection('exams')
+    .where('date', '>=', new Date(now))
+    .where('date', '<=', new Date(now + EXAM_HORIZON_DAYS * DAY_MS))
+    .get();
+
+  const byUser = new Map();
+  snap.docs.forEach((d) => {
+    const exam = { id: d.id, ...d.data() };
+    if (!exam.userId || exam.completed === true || exam.type === 'task') return;
+    const when = exam.date?.toDate?.();
+    if (!when) return;
+    const current = byUser.get(exam.userId);
+    if (!current || when < current.when) byUser.set(exam.userId, { exam, when });
+  });
+  return byUser;
+};
 
 // 5 minutes after examAlerts, so today's lastNotifiedDate write (if any) has
 // already landed before this reads it.
 exports.reengagement = onSchedule(
   { schedule: '10 8 * * *', timeZone: TIMEZONE, timeoutSeconds: BATCH_TIMEOUT_SECONDS },
   async () => {
-    const cutoff = new Date(Date.now() - INACTIVE_DAYS * 86400000);
+    const now = Date.now();
 
-    const usersSnap = await db.collection('users').where('lastOpenTimestamp', '<=', cutoff).get();
+    // Two ranges on the same field: the automatic index covers it.
+    const usersSnap = await db
+      .collection('users')
+      .where('lastOpenTimestamp', '<=', new Date(now - INACTIVE_DAYS * DAY_MS))
+      .where('lastOpenTimestamp', '>=', new Date(now - ABSENCE_WINDOW_DAYS * DAY_MS))
+      .get();
+    if (usersSnap.empty) return;
+
+    const upcoming = await nextExamByUser();
+    if (upcoming.size === 0) return;
 
     for (const doc of usersSnap.docs) {
       const data = doc.data();
       if (!data.fcmToken) continue;
       if (alreadyNotifiedToday(data)) continue;
 
-      const lastSent = data.lastReengagementSentAt?.toDate?.();
-      const cooledDown =
-        !lastSent || Date.now() - lastSent.getTime() >= REENGAGEMENT_COOLDOWN_DAYS * 86400000;
-      if (!cooledDown) continue;
+      const next = upcoming.get(doc.id);
+      if (!next) continue;
 
-      const sent = await sendToUser(doc.id, data.fcmToken, {
-        title: 'Schedio',
-        body: REENGAGEMENT_COPY,
-      });
+      // Still the same absence if the last nudge went out after they last
+      // opened the app. Accounts nudged before the count existed have a date
+      // and no number: they count as one already sent.
+      const lastOpen = data.lastOpenTimestamp?.toDate?.();
+      const lastSent = data.lastReengagementSentAt?.toDate?.();
+      const sameAbsence = !!lastSent && (!lastOpen || lastSent > lastOpen);
+      const sentThisAbsence = sameAbsence
+        ? Number.isFinite(data.reengagementCount)
+          ? data.reengagementCount
+          : 1
+        : 0;
+      if (sentThisAbsence >= REENGAGEMENT_MAX_PER_ABSENCE) continue;
+      if (sameAbsence && now - lastSent.getTime() < REENGAGEMENT_COOLDOWN_DAYS * DAY_MS) continue;
+
+      // An exam later today belongs to nobody but the student now; the day
+      // before is examAlerts' to tell (and, when it does, lastNotifiedDate has
+      // already stopped this one above).
+      const days = madridDaysFromToday(next.when);
+      if (days < 1) continue;
+
+      const subject = await subjectNameFor(next.exam);
+      const sent = await sendToUser(
+        doc.id,
+        data.fcmToken,
+        { title: 'Schedio', body: reengagementCopy(subject, days) },
+        pushData(KIND.REENGAGEMENT, { examId: next.exam.id })
+      );
       if (!sent) continue;
 
       await doc.ref.update({
         lastReengagementSentAt: FieldValue.serverTimestamp(),
+        reengagementCount: sentThisAbsence + 1,
         lastNotifiedDate: madridDateKey(new Date()),
       });
     }
@@ -354,12 +480,17 @@ exports.weeklySummary = onSchedule(
           const count = countByUser.get(snap.id) || 0;
           if (count === 0) return; // no positive reinforcement to give — stay silent
 
-          const sent = await sendToUser(snap.id, data.fcmToken, {
-            title: 'Schedio',
-            body: `Esta semana completaste ${count} ${
-              count === 1 ? 'sesión' : 'sesiones'
-            } de estudio. Buen ritmo.`,
-          });
+          const sent = await sendToUser(
+            snap.id,
+            data.fcmToken,
+            {
+              title: 'Schedio',
+              body: `Esta semana completaste ${count} ${
+                count === 1 ? 'sesión' : 'sesiones'
+              } de estudio. Buen ritmo.`,
+            },
+            pushData(KIND.WEEKLY_SUMMARY)
+          );
           if (!sent) return;
 
           await snap.ref.update({ lastNotifiedDate: madridDateKey(new Date()) });

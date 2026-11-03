@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { db, firebaseConfig } from './firebase';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { canRequestWebPush } from './pwa';
 
 // Configure how notifications should be handled when the app is open.
@@ -122,6 +122,30 @@ export async function registerForPushNotifications(uid) {
     platform: Platform.OS === 'ios' ? 'ios' : 'android',
   });
   return true;
+}
+
+/**
+ * Records a "Más tarde" from onboarding step 6 as an answer.
+ *
+ * Without it nothing top-level was written, so `notificationsConsent` stayed
+ * undefined and the dashboard — which asks once when it finds it undefined —
+ * fired the system dialog seconds after the student had said not now. On
+ * Android that is the second of the two asks the OS allows, spent on someone
+ * who had just declined. The step's own copy promises the opposite: "Puedes
+ * activarlas cuando quieras en Ajustes", and that toggle still asks.
+ *
+ * Only for a real tap. The web flow that skips the step because an iOS tab
+ * can't ask yet must keep leaving this undefined: that is what lets the
+ * dashboard ask on its own once the PWA is installed.
+ */
+export async function recordNotificationsDeclined(uid) {
+  if (!uid) return;
+  try {
+    await setDoc(doc(db, 'users', uid), { notificationsConsent: false }, { merge: true });
+  } catch (error) {
+    // Worst case the dashboard asks once more, which is what happened before.
+    console.warn('Could not record the notifications answer', error);
+  }
 }
 
 /**

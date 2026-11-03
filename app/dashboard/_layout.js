@@ -1,6 +1,13 @@
 import { Tabs, useRouter, usePathname } from 'expo-router';
 import { Home, Plus, Map as MapIcon, User, BookOpen } from 'lucide-react-native';
-import { View, StyleSheet, Pressable, Platform, useWindowDimensions } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  Platform,
+  InteractionManager,
+  useWindowDimensions,
+} from 'react-native';
 import React, { useEffect, useState } from 'react';
 import * as Haptics from 'expo-haptics';
 import Animated, {
@@ -28,6 +35,7 @@ import useUserStore from '../../store/userStore';
 import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
 import useSessionStore from '../../store/sessionStore';
+import useNotificationRouteStore from '../../store/notificationRouteStore';
 import { auth } from '../../services/firebase';
 
 /**
@@ -281,6 +289,35 @@ export default function DashboardLayout() {
   useEffect(() => {
     if (authResolved && !authedUser) router.replace('/');
   }, [authResolved, authedUser, router]);
+
+  /**
+   * Where a tapped push asked to go (see services/notificationResponse.js).
+   *
+   * Three things have to be true first:
+   *  · a signed-in student. On native this layout is only reached once `/`
+   *    has decided they're past login and onboarding; on web a tap opens its
+   *    URL directly, and the guard just above covers a missing session;
+   *  · their data loaded (`profile` is set in the same write that loads
+   *    `planOverrides`). The usual destination is Plan, and Plan regenerates
+   *    the plan on focus: landing there before the overrides are in would
+   *    reconcile against an empty map and throw away what the student ticked;
+   *  · no session running. Estudiar is built without a way out while the
+   *    timer runs, so a push tapped mid-session just brings the app back to
+   *    the timer, which is what the student expects anyway.
+   */
+  const pendingRoute = useNotificationRouteStore((state) => state.pending);
+  const profileLoaded = useUserStore((state) => state.profile !== null);
+  const sessionRunning = useSessionStore((state) => state.sessionActive);
+  useEffect(() => {
+    if (!pendingRoute || !authResolved || !authedUser || !profileLoaded) return;
+    const route = useNotificationRouteStore.getState().take();
+    if (!route || sessionRunning) return;
+    // After the fade from the splash has finished, so the push doesn't land
+    // in the middle of it. No cleanup on purpose: `take()` clears `pending`,
+    // which re-runs this effect straight away, and cancelling here would
+    // cancel the very navigation it just scheduled.
+    InteractionManager.runAfterInteractions(() => router.push(route));
+  }, [pendingRoute, authResolved, authedUser, profileLoaded, sessionRunning, router]);
   const [quickActionsVisible, setQuickActionsVisible] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);

@@ -34,7 +34,10 @@ import { tokens } from '../theme/tokens';
 import useAuthStore from '../store/authStore';
 import useUserStore from '../store/userStore';
 import usePreferencesStore from '../store/preferencesStore';
-import { registerForPushNotifications } from '../services/notificationService';
+import {
+  registerForPushNotifications,
+  recordNotificationsDeclined,
+} from '../services/notificationService';
 import { canRequestWebPush } from '../services/pwa';
 import { createExam } from '../services/exams';
 import {
@@ -1075,6 +1078,9 @@ export default function Onboarding() {
                   onPress={() => {
                     setNotificationsConsent(false);
                     setNotificationsEnabled(false);
+                    // Stops the dashboard from asking again a few seconds from
+                    // now — see recordNotificationsDeclined.
+                    recordNotificationsDeclined(auth.currentUser?.uid);
                   }}
                 />
               </View>

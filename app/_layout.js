@@ -13,7 +13,10 @@ import { initCrashlytics } from '../services/crashlytics';
 // scope, before any component mounts — required so Android can redeliver and
 // restart the study-session notification, not just start it the first time.
 import '../services/studyNotification';
-import { requestPermissions } from '../services/notificationService';
+import {
+  queueLastNotificationResponse,
+  queueRouteFromNotification,
+} from '../services/notificationResponse';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import {
@@ -94,16 +97,22 @@ export default function Layout() {
     // them why.
     checkGoogleRedirectResult().catch(() => {});
 
-    // Notification setup
-    requestPermissions();
+    // No permission request here. This used to call `requestPermissions()` on
+    // every mount, which on Android 13+ is the system dialog itself — shown
+    // over the splash or the welcome carousel, before the student knows what
+    // the app is, and two refusals there make Android stop asking for good.
+    // The ask now happens only where it has context: step 6 of the onboarding,
+    // the dashboard's first visit, and the toggle in Ajustes.
 
-    // Listen for notification clicks
-    const notificationListener = Notifications.addNotificationResponseReceivedListener(
-      (response) => {
-        console.log('Notification clicked:', response.notification.request.content.data);
-        // In the future we can navigate to specific screens here
-      }
+    // A tap on one of our pushes carries `data.kind` (see functions/index.js).
+    // Turned into a route here and handed to the dashboard layout, which is
+    // the first place that knows the student is signed in and onboarded.
+    const notificationListener = Notifications.addNotificationResponseReceivedListener((response) =>
+      queueRouteFromNotification(response)
     );
+    // Cold start: a tap that launched the app fired before this listener
+    // existed, so it is only reachable as the last stored response.
+    queueLastNotificationResponse();
 
     return () => {
       unsubscribe && unsubscribe();
