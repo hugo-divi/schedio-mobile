@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { onAuthChange, isSessionExpired, signOut, touchSession } from '../services/auth';
+import { onAuthChange } from '../services/auth';
 import { checkEntitlements, identifyUser, resetUser } from '../services/revenuecat';
 import { markAppOpened } from '../services/notificationService';
 import { markDeviceHadAccount } from '../services/welcome';
@@ -46,43 +46,19 @@ const useAuthStore = create((set) => ({
   initAuth: () => {
     try {
       console.log('[AuthStore] Initializing auth listener...');
-      // Firebase fires this listener once immediately with whatever session
-      // it already had persisted before this call — that first event is the
-      // only one that can legitimately be a stale, weeks-old session. Every
-      // later event within this same app run was triggered by an
-      // interactive signIn/signUp/signOut call, which writes its own fresh
-      // `markSessionStart()` timestamp — but *after* the credential promise
-      // resolves, racing this very listener. On a device with no timestamp
-      // yet (fresh install, fresh emulator), that race lost: a brand-new
-      // login read `isSessionExpired()` before the write landed, saw no
-      // record, and immediately force-signed the student back out.
-      let isRestoringSession = true;
+      // A restored session is kept for as long as Firebase keeps it. There
+      // used to be a forced sign-out here after 45 days without opening the
+      // app, and it landed on exactly the students worth winning back: anyone
+      // returning after the summer — or because a push reminded them of an
+      // exam — met a login form instead of their plan, on an app whose whole
+      // argument is coming back to it. Signing out is the student's call, from
+      // Ajustes.
       const unsubscribe = onAuthChange(async (user) => {
         console.log('[AuthStore] Auth change detected. User:', user?.uid || 'guest');
-        const checkingRestoredSession = isRestoringSession;
-        isRestoringSession = false;
-
-        // Firebase's refresh token doesn't expire on its own, so a restored
-        // session is otherwise good forever. Force a fresh login after a
-        // stretch of not opening the app instead of trusting it indefinitely.
-        // Only checked when restoring a session from before this app run —
-        // see the comment above `isRestoringSession`.
-        if (user && checkingRestoredSession && (await isSessionExpired())) {
-          console.log('[AuthStore] Session unused for too long, signing out.');
-          await signOut();
-          return; // onAuthChange fires again with user=null; that pass sets state
-        }
 
         set({ user, loading: false, authResolved: true });
 
         if (user) {
-          // Survived the check above, so this counts as using the app: push
-          // the clock forward. Without this the window would measure time
-          // since the last password was typed, and a student who opens
-          // Schedio daily would be signed out on the same schedule as one who
-          // had not opened it at all.
-          touchSession();
-
           // The pre-login carousel is over for this device: anyone who has
           // ever been signed in here has no business seeing an intro again if
           // they later sign out. Covers the accounts that were already signed

@@ -9,59 +9,13 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { auth, googleProvider, db } from './firebase';
 
-// Firebase's own refresh token doesn't expire on a schedule — left alone, a
-// signed-in account stays signed in forever, which is what made closing the
-// app and reopening it demand a fresh login (nothing was actually rotating
-// the session; app/index.js just always routed to /login regardless of
-// whether one was already restored). Most consumer apps re-prompt after a
-// stretch of real time instead, so that's tracked here locally rather than
-// relying on any Firebase-side expiry.
-/**
- * 45 days, and — since `touchSession` below — 45 days of *not opening the
- * app*, not 45 days since the last time a password was typed.
- *
- * It used to be the latter, which meant a student who opened Schedio every
- * single day was thrown out on exactly the same schedule as one who had not
- * touched it in a month: the most engaged user punished identically to the
- * dormant one, on an app whose whole argument is constancy.
- *
- * 45 and not 30 or 21 because of the school calendar. Christmas is about
- * fifteen days off and Easter about ten; anything tighter meets a student
- * returning in January — the moment they most need the app — with a login
- * form. Summer escapes any reasonable number, and there the September
- * re-login lands alongside setting up the new year anyway.
- */
-const SESSION_MAX_AGE_MS = 45 * 24 * 60 * 60 * 1000; // 45 days
-const LAST_AUTH_AT_KEY = 'schedio:lastAuthAt';
-
-const markSessionStart = () => AsyncStorage.setItem(LAST_AUTH_AT_KEY, String(Date.now()));
-
-/**
- * Pushes the clock forward for a session that is being used. Called from
- * store/authStore.js on every launch that restores a valid session, which is
- * what turns the window above from "since you logged in" into "since you last
- * opened the app".
- *
- * Deliberately separate from `markSessionStart`, which the interactive
- * sign-in paths call: same write, but the two mean different things and only
- * one of them should ever move if the policy changes.
- */
-export const touchSession = () => markSessionStart();
-
-/**
- * Whether the signed-in session is older than SESSION_MAX_AGE_MS. No record
- * at all (e.g. upgrading from a build before this existed) counts as
- * expired — safer to ask once for a fresh login than to trust an
- * unknown-age session indefinitely.
- */
-export const isSessionExpired = async () => {
-  const raw = await AsyncStorage.getItem(LAST_AUTH_AT_KEY);
-  if (!raw) return true;
-  return Date.now() - Number(raw) > SESSION_MAX_AGE_MS;
-};
+// Sessions last as long as Firebase keeps them. This file used to keep its own
+// clock ("schedio:lastAuthAt") and force a fresh login after 45 days without
+// opening the app — see the note in store/authStore.js for why that went. A
+// device upgrading from those builds still has the key in AsyncStorage;
+// nothing reads it any more, and it is a single number.
 
 /**
  * Firebase's own error.message is the raw SDK string (e.g. "Firebase: Error
@@ -160,7 +114,6 @@ export const signUp = async (email, password, displayName) => {
     // Password accounts start unverified; Google accounts skip this
     // entirely because Google already verified the address.
     await sendEmailVerification(user);
-    await markSessionStart();
 
     return user;
   } catch (error) {
@@ -197,7 +150,6 @@ export const refreshEmailVerified = async () => {
 export const signIn = async (email, password) => {
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    await markSessionStart();
     return userCredential.user;
   } catch (error) {
     console.error('[AuthService] Error signing in:', error.code, error.message);
@@ -225,7 +177,6 @@ export const signInWithGoogle = async () => {
       try {
         const result = await signInWithPopup(auth, googleProvider);
         await ensureUserDoc(result.user);
-        await markSessionStart();
         return result.user;
       } catch (popupError) {
         const isBlockedOrCancelled =
@@ -265,7 +216,6 @@ export const signInWithGoogle = async () => {
     const credential = GoogleAuthProvider.credential(idToken);
     const userCredential = await signInWithCredential(auth, credential);
     await ensureUserDoc(userCredential.user);
-    await markSessionStart();
     return userCredential.user;
   } catch (error) {
     console.error('Error signing in with Google (native):', error);
@@ -297,7 +247,6 @@ export const checkGoogleRedirectResult = async () => {
     if (!result) return null;
 
     await ensureUserDoc(result.user);
-    await markSessionStart();
     return result.user;
   } catch (error) {
     console.error('Error checking redirect result:', error);
