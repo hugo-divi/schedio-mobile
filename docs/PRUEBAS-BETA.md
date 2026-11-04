@@ -112,6 +112,16 @@ dan ganas de abrir la app o de quitar el aviso.
 Si una insignia se repite, apunta cuál, en qué pantalla estabas y si acababas
 de abrir la app. Con eso lo encuentro.
 
+## 3b. Al terminar una sesión
+
+| #    | Haz esto                          | Debería pasar                                                                                                       |
+| ---- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| 3b.1 | Termina una sesión de 5 min o más | Debajo del resumen, «Compartir» y, si te queda algo hoy, una línea discreta «Siguiente en tu plan: Inglés · 20 min» |
+| 3b.2 | Toca «Compartir»                  | Una hoja con la tarjeta tal como saldrá: minutos, asignatura, racha y plan de hoy, sin tu nombre                    |
+| 3b.3 | Toca «Compartir» en esa hoja      | La hoja de compartir del iPhone, con la imagen: prueba a subirla a una historia o a guardarla en Fotos              |
+| 3b.4 | Toca la línea de «Siguiente»      | Empieza esa sesión directamente; tu valoración y tu nota de la sesión anterior se guardan                           |
+| 3b.5 | Termina la última sesión del día  | No sale «Siguiente»; la tarjeta dice «Plan de hoy completado»                                                       |
+
 ## 4. Enlace de un aula
 
 | #   | Haz esto                                                   | Debería pasar                                                                               |

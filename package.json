@@ -29,6 +29,7 @@
     "check:today-copy": "node scripts/check-today-copy.mjs",
     "check:daily-reminder": "node scripts/check-daily-reminder.mjs",
     "check:class-dates": "node scripts/check-class-dates.mjs",
+    "check:share-card": "node scripts/check-share-card.mjs",
     "deploy:beta-preview": "bash scripts/deploy-beta-preview.sh"
   },
   "dependencies": {
@@ -53,6 +54,7 @@
     "expo-constants": "~18.0.13",
     "expo-dev-client": "~6.0.21",
     "expo-document-picker": "~14.0.8",
+    "expo-file-system": "~19.0.23",
     "expo-focus-mode": "file:modules/expo-focus-mode",
     "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",

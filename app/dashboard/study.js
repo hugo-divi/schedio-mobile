@@ -16,7 +16,18 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter, useNavigation, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { Play, Pause, X, Check, Plus, Trash2, BellOff, Flame } from 'lucide-react-native';
+import {
+  Play,
+  Pause,
+  X,
+  Check,
+  Plus,
+  Trash2,
+  BellOff,
+  Flame,
+  Share2,
+  ChevronRight,
+} from 'lucide-react-native';
 import Svg, {
   Circle as SvgCircle,
   Path,
@@ -83,6 +94,9 @@ import Button from '../../components/ui/Button';
 import BottomSheet from '../../components/ui/BottomSheet';
 import SectionTitle, { OverlineLabel } from '../../components/ui/SectionTitle';
 import SchedioLogoReveal from '../../components/SchedioLogoReveal';
+import ShareCardSheet from '../../components/ShareCardSheet';
+import { isBetaProfile } from '../../services/beta';
+import { localDateKey } from '../../services/priority';
 
 const font = tokens.typography.families.inter;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -1071,13 +1085,13 @@ export default function StudySessionScreen() {
     [duration, subjects, selectedSubject, goals, user?.uid, taskId]
   );
 
-  const handleFinish = () => {
+  // The mood and the note are saved against the session once it exists.
+  // Fire-and-forget: the student is already on their way, and nothing here
+  // changes their streak or their XP.
+  const saveSessionFeedback = () => {
     const focusScore = MOODS.find((m) => m.key === mood)?.score;
     const trimmed = notes.trim();
     const pending = savedSessionRef.current;
-
-    // Fire-and-forget: the student is already on their way to the dashboard,
-    // and nothing here changes their streak or their XP.
     if (pending && (trimmed || focusScore)) {
       pending
         .then((sessionId) => {
@@ -1088,7 +1102,19 @@ export default function StudySessionScreen() {
         })
         .catch((error) => console.error('Error saving session feedback:', error));
     }
+  };
 
+  const resetEnd = () => {
+    savedSessionRef.current = null;
+    setSummary(null);
+    setMood(null);
+    setNotes('');
+    setGoals([]);
+    setShareOpen(false);
+  };
+
+  const handleFinish = () => {
+    saveSessionFeedback();
     router.replace('/dashboard');
 
     // Resetting before navigating is what produced the flash of the empty
@@ -1098,13 +1124,70 @@ export default function StudySessionScreen() {
     // frame or two later. Waiting until the transition has settled means the
     // reset happens off-screen, where nobody sees it.
     InteractionManager.runAfterInteractions(() => {
-      savedSessionRef.current = null;
+      resetEnd();
       setStep('setup');
-      setSummary(null);
-      setMood(null);
-      setNotes('');
-      setGoals([]);
     });
+  };
+
+  // ── Al terminar (beta): compartir, y lo siguiente del plan ──
+
+  const beta = useUserStore((state) => isBetaProfile(state.profile));
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareCard, setShareCard] = useState(null);
+
+  /**
+   * What's left of today's plan, as a suggestion only: the summary's main
+   * button stays "Volver a Inicio". Plan order, required tasks before the
+   * optional ones, never the task that just finished.
+   */
+  const nextTask = useMemo(() => {
+    if (!beta || step !== 'end') return null;
+    const todayKey = localDateKey(new Date());
+    const pending = (microplans || []).filter(
+      (t) =>
+        t &&
+        t.id !== taskId &&
+        !t.completed &&
+        !t.dismissed &&
+        t.subjectId &&
+        localDateKey(t.date) === todayKey
+    );
+    return pending.find((t) => !t.isOptional) || null;
+  }, [beta, step, microplans, taskId]);
+
+  const startNextTask = () => {
+    if (!nextTask) return;
+    saveSessionFeedback();
+    resetEnd();
+    // Same hand-off as "Empezar" on Inicio and Plan; the auto-start effect
+    // below picks the new params up and starts the session.
+    router.replace({
+      pathname: '/dashboard/study',
+      params: {
+        subjectId: nextTask.subjectId,
+        autoStart: 'true',
+        duration: String(nextTask.duration || 25),
+        goal: nextTask.text,
+        taskId: nextTask.id,
+      },
+    });
+  };
+
+  const openShare = () => {
+    if (!summary) return;
+    const todayKey = localDateKey(new Date());
+    const core = (useUserStore.getState().microplans || []).filter(
+      (t) => t && !t.dismissed && !t.isOptional && localDateKey(t.date) === todayKey
+    );
+    setShareCard({
+      minutes: summary.minutes,
+      subjectName: summary.subjectName,
+      subjectColor: summary.subjectColor,
+      streak: useUserStore.getState().stats?.streak ?? 0,
+      planDone: core.filter((t) => t.completed || t.id === taskId).length,
+      planTotal: core.length,
+    });
+    setShareOpen(true);
   };
 
   // ── Goals ──
@@ -1898,12 +1981,44 @@ export default function StudySessionScreen() {
                 />
               </Animated.View>
 
+              {nextTask ? (
+                <Animated.View
+                  entering={FadeInDown.duration(460).delay(300)}
+                  style={{ width: '100%' }}
+                >
+                  <TouchableOpacity
+                    style={styles.nextRow}
+                    onPress={startNextTask}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Empezar lo siguiente: ${
+                      subjects.find((x) => x.id === nextTask.subjectId)?.name || 'Estudio'
+                    }, ${nextTask.duration} minutos`}
+                  >
+                    <Text style={styles.nextLabel}>Siguiente en tu plan</Text>
+                    <Text style={styles.nextText} numberOfLines={1}>
+                      {subjects.find((x) => x.id === nextTask.subjectId)?.name || 'Estudio'} ·{' '}
+                      {nextTask.duration} min
+                    </Text>
+                    <ChevronRight size={16} color={tokens.colors.textSecondary} />
+                  </TouchableOpacity>
+                </Animated.View>
+              ) : null}
+
               <View style={styles.bottomSpacer} />
 
               <Animated.View
                 entering={FadeInDown.duration(460).delay(340)}
-                style={{ width: '100%' }}
+                style={styles.endButtons}
               >
+                {beta && summary.minutes >= 5 ? (
+                  <Button
+                    title="Compartir"
+                    variant="secondary"
+                    icon={<Share2 size={16} color={tokens.colors.textPrimary} />}
+                    onPress={openShare}
+                    fullWidth
+                  />
+                ) : null}
                 <Button title="Volver a Inicio" onPress={handleFinish} fullWidth />
               </Animated.View>
             </>
@@ -1932,6 +2047,8 @@ export default function StudySessionScreen() {
         onToggleDontShow={() => setHideFocusReminder(!hideFocusReminder)}
       />
 
+      <ShareCardSheet visible={shareOpen} onClose={() => setShareOpen(false)} card={shareCard} />
+
       <RecoverSessionSheet
         visible={!!recoverableSession}
         subjectName={subjects.find((s) => s.id === recoverableSession?.subjectId)?.name}
@@ -1943,6 +2060,30 @@ export default function StudySessionScreen() {
 }
 
 const styles = StyleSheet.create({
+  endButtons: { width: '100%', gap: 10 },
+  nextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: tokens.colors.borderDefault,
+  },
+  nextLabel: {
+    fontFamily: tokens.typography.families.inter.medium,
+    fontSize: 13,
+    color: tokens.colors.textSecondary,
+  },
+  nextText: {
+    flex: 1,
+    fontFamily: tokens.typography.families.inter.semibold,
+    fontSize: 14,
+    color: tokens.colors.textPrimary,
+    textAlign: 'right',
+  },
   container: {
     flex: 1,
     backgroundColor: tokens.colors.background,

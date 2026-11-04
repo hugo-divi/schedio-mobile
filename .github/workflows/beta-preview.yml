@@ -48,7 +48,7 @@ jobs:
         if: env.HAS_DEPLOY_KEY == 'true'
         run: |
           npm run lint
-          for s in check:notification-routes check:badges check:today-copy check:daily-reminder check:class-dates; do
+          for s in check:notification-routes check:badges check:today-copy check:daily-reminder check:class-dates check:share-card; do
             npm run -s "$s"
           done
 
