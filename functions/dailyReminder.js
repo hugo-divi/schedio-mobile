@@ -251,6 +251,44 @@ const examMessage = ({ alerts, pendingCore, examTasksMinutes }) => {
   return { title, body };
 };
 
+/**
+ * A date the class moved, on an exam the student had taken from the aula
+ * (services/classDates.js writes `classLink.pendingDate` when it sees the
+ * change and the student hasn't decided yet; whatever propagates aula edits
+ * server-side can write the same fields).
+ */
+const classChangesOf = (exams, now, tz) =>
+  (exams || [])
+    .filter((exam) => exam && !exam.completed && exam.classLink?.pendingDate)
+    .filter((exam) => exam.classLink.pendingNotified !== true)
+    .map((exam) => ({
+      exam,
+      to: toDate(exam.classLink.pendingDate),
+      from: toDate(exam.date),
+    }))
+    .filter((row) => row.to && row.from && dayKeyIn(row.to, tz) !== dayKeyIn(row.from, tz))
+    .filter((row) => daysUntil(row.to, now, tz) >= 0)
+    .sort((a, b) => a.to - b.to);
+
+const weekdayDayIn = (date, tz) =>
+  date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', timeZone: tz });
+
+const classChangeMessage = ({ changes, pendingCore, tz }) => {
+  const [main, ...rest] = changes;
+  const subject = titleName(main.exam.subjectName || main.exam.name || 'tu examen');
+  const what = main.exam.type === 'task' ? `la entrega de ${subject}` : `el examen de ${subject}`;
+  const by = main.exam.classLink.pendingBy
+    ? ` (lo cambió ${clip(main.exam.classLink.pendingBy, 24)})`
+    : '';
+  let body = `Ahora es el ${weekdayDayIn(main.to, tz)}${by}. Entra para mover el tuyo o quedarte con tu fecha.`;
+  if (rest.length > 0)
+    body += ` Y ${rest.length === 1 ? 'otra fecha' : `${rest.length} fechas más`}.`;
+  else if (pendingCore.length > 0) {
+    body += ` Hoy: ${titleName(pendingCore[0].subjectName || 'estudio')} ${pendingCore[0].duration} min.`;
+  }
+  return { title: `Tu clase ha movido ${what}`, body };
+};
+
 // ── The decision ─────────────────────────────────────────────────────────
 
 /**
@@ -341,6 +379,34 @@ const decideDailyReminder = ({
       examUpdates: alerts.map((row) => ({
         id: row.exam.id,
         field: row.days === 1 ? 'notified1Day' : 'notified3Days',
+      })),
+      isPlan: false,
+      today,
+    };
+  }
+
+  // 1b. The class moved a date you have. A new fact, not a nudge: it goes
+  // out even on a free day, a joker day or while the plan is paused for
+  // being ignored — once per change (`pendingNotified`).
+  const classChanges = classChangesOf(exams, now, tz);
+  if (classChanges.length > 0) {
+    return {
+      send: true,
+      reason: 'class-date-change',
+      kind: 'class_date_change',
+      ...classChangeMessage({
+        changes: classChanges,
+        pendingCore: isJokerDay || paused ? [] : pendingCore,
+        tz,
+      }),
+      data: {
+        kind: 'class_date_change',
+        examId: String(classChanges[0].exam.id),
+        aulaId: String(classChanges[0].exam.classLink.aulaId || ''),
+      },
+      examUpdates: classChanges.map((row) => ({
+        id: row.exam.id,
+        field: 'classLink.pendingNotified',
       })),
       isPlan: false,
       today,

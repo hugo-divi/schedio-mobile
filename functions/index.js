@@ -104,6 +104,8 @@ const KIND = {
   WEEKLY_SUMMARY: 'weekly_summary',
   ABANDONED_ONBOARDING: 'abandoned_onboarding',
   DAILY_PLAN: 'daily_plan',
+  // Sent only by the daily reminder, when the class moved a date you have.
+  CLASS_DATE_CHANGE: 'class_date_change',
 };
 
 /**

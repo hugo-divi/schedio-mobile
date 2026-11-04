@@ -37,6 +37,8 @@ import useAuthStore from '../../store/authStore';
 import usePrimeIntentStore, { PRIME_INTENTS, PRIME_ORIGINS } from '../../store/primeIntentStore';
 import useSessionStore from '../../store/sessionStore';
 import useNotificationRouteStore from '../../store/notificationRouteStore';
+import useClassInviteStore, { getClassInviteHandler } from '../../store/classInviteStore';
+import { isBetaProfile } from '../../services/beta';
 import { auth } from '../../services/firebase';
 
 /**
@@ -319,6 +321,42 @@ export default function DashboardLayout() {
     // cancel the very navigation it just scheduled.
     InteractionManager.runAfterInteractions(() => router.push(route));
   }, [pendingRoute, authResolved, authedUser, profileLoaded, sessionRunning, router]);
+
+  /**
+   * The aula a link invited them to (app/aula/[code].js saved it, possibly
+   * before they even had an account). Same three conditions as above, plus:
+   * beta accounts only for now, and someone to hand it to — the aula
+   * registers itself with `registerClassInviteHandler`. Until it does, the
+   * code stays saved instead of being thrown away.
+   */
+  const pendingInvite = useClassInviteStore((state) => state.pending);
+  const inviteHydrated = useClassInviteStore((state) => state.hydrated);
+  const inviteHandled = useClassInviteStore((state) => state.hasHandler);
+  const beta = useUserStore((state) => isBetaProfile(state.profile));
+  useEffect(() => {
+    useClassInviteStore.getState().hydrate();
+  }, []);
+  useEffect(() => {
+    if (!inviteHydrated || !pendingInvite || !inviteHandled) return;
+    if (!authResolved || !authedUser || !profileLoaded || !beta || sessionRunning) return;
+    const handler = getClassInviteHandler();
+    if (!handler) return;
+    const invite = useClassInviteStore.getState().take();
+    if (!invite) return;
+    InteractionManager.runAfterInteractions(() =>
+      handler(invite.code, { source: invite.source, router })
+    );
+  }, [
+    inviteHydrated,
+    pendingInvite,
+    inviteHandled,
+    authResolved,
+    authedUser,
+    profileLoaded,
+    beta,
+    sessionRunning,
+    router,
+  ]);
   const [quickActionsVisible, setQuickActionsVisible] = useState(false);
   const [eventModalVisible, setEventModalVisible] = useState(false);
   const [uploadModalVisible, setUploadModalVisible] = useState(false);

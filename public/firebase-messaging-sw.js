@@ -21,6 +21,7 @@ function pathFor(data) {
   switch (data.kind) {
     case 'exam_alert':
     case 'reengagement':
+    case 'class_date_change':
       return examId
         ? `/dashboard/plans?${new URLSearchParams({ highlightId: examId }).toString()}`
         : '/dashboard/plans';

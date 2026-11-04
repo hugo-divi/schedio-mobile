@@ -180,3 +180,58 @@ export const deleteExam = async (examId) => {
 // imported it — and its stepped 10/9/8 scale made an exam in 3 days score the
 // same as one in 10. Scoring now lives in services/priority.js, which is the
 // only place that computes it. See `computeExamPriority` / `rankExams`.
+
+// ── Fechas del aula ──────────────────────────────────────────────────────
+// Lo que decide qué escribir está en services/classDates.js (puro y con su
+// check); aquí solo se escribe. Todas devuelven lo escrito para que la
+// pantalla del aula pueda actualizarse sin volver a leer.
+
+/** "Añadir a mi calendario". */
+export const addClassDateToCalendar = async (classDate, { userId, subject = null } = {}) => {
+  const { examFromClassDate } = await import('./classDates');
+  return createExam(examFromClassDate(classDate, { userId, subject }));
+};
+
+/** "Añadir todas" las que faltan (las dudosas se deciden una a una). */
+export const addAllClassDatesToCalendar = async (classDates, exams, { userId, subjects } = {}) => {
+  const { examsToAddAll } = await import('./classDates');
+  const toAdd = examsToAddAll(classDates, exams, { userId, subjects });
+  return Promise.all(toAdd.map((exam) => createExam(exam)));
+};
+
+/** "Es el mismo": vincula tu examen y se queda con tu fecha. */
+export const linkClassDate = async (examId, classDate) => {
+  const { linkUpdates } = await import('./classDates');
+  const updates = linkUpdates(classDate);
+  await updateExam(examId, updates);
+  return updates;
+};
+
+/** "Mover el mío" a la fecha nueva del aula. */
+export const acceptClassDateChange = async (examId, classDate) => {
+  const { acceptChangeUpdates } = await import('./classDates');
+  const updates = acceptChangeUpdates(classDate);
+  await updateExam(examId, updates);
+  return updates;
+};
+
+/** "Dejar la mía". */
+export const keepMyExamDate = async (examId, classDate) => {
+  const { keepMineUpdates } = await import('./classDates');
+  const updates = keepMineUpdates(classDate);
+  await updateExam(examId, updates);
+  return updates;
+};
+
+/**
+ * Apunta en tu examen un cambio del aula aún sin decidir, para que la
+ * notificación del día lo cuente si no entras a resolverlo. No escribe si
+ * ya estaba apuntado.
+ */
+export const markPendingClassChange = async (exam, classDate) => {
+  const { pendingChangeUpdates } = await import('./classDates');
+  const updates = pendingChangeUpdates(exam, classDate);
+  if (!updates) return null;
+  await updateExam(exam.id, updates);
+  return updates;
+};

@@ -141,6 +141,7 @@ npm run check:review-prompt   # when a store rating may be asked for
 npm run check:badges          # badge rules, and the repeated-badge regression
 npm run check:today-copy      # what "Hoy" on Inicio says without the AI
 npm run check:daily-reminder  # when the daily plan reminder goes out, and what it says
+npm run check:class-dates     # aula dates in your calendar, invite links, and the class-change push
 ```
 
 ## Builds (EAS)

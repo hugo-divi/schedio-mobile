@@ -27,7 +27,8 @@
     "check:review-prompt": "node scripts/check-review-prompt.mjs",
     "check:badges": "node scripts/check-badges.mjs",
     "check:today-copy": "node scripts/check-today-copy.mjs",
-    "check:daily-reminder": "node scripts/check-daily-reminder.mjs"
+    "check:daily-reminder": "node scripts/check-daily-reminder.mjs",
+    "check:class-dates": "node scripts/check-class-dates.mjs"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

@@ -103,6 +103,11 @@ const expectations = [
     { kind: 'daily_plan', taskId: 'x' },
     { pathname: '/dashboard' },
   ],
+  [
+    'la clase movió una fecha → el plan, en ese examen',
+    { kind: 'class_date_change', examId: ID, aulaId: 'a1' },
+    { pathname: '/dashboard/plans', params: { highlightId: ID } },
+  ],
   ['onboarding a medias → nada (ya lo hace "/")', { kind: 'abandoned_onboarding' }, null],
   ['tipo desconocido → nada', { kind: 'promo' }, null],
   ['sin data → nada', undefined, null],

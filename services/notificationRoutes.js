@@ -20,6 +20,7 @@ export const NOTIFICATION_KINDS = {
   WEEKLY_SUMMARY: 'weekly_summary',
   ABANDONED_ONBOARDING: 'abandoned_onboarding',
   DAILY_PLAN: 'daily_plan',
+  CLASS_DATE_CHANGE: 'class_date_change',
 };
 
 /**
@@ -51,6 +52,7 @@ export const routeForNotification = (data) => {
   switch (data.kind) {
     case NOTIFICATION_KINDS.EXAM_ALERT:
     case NOTIFICATION_KINDS.REENGAGEMENT:
+    case NOTIFICATION_KINDS.CLASS_DATE_CHANGE:
       return examId
         ? { pathname: '/dashboard/plans', params: { highlightId: examId } }
         : { pathname: '/dashboard/plans' };

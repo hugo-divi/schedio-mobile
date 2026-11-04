@@ -139,6 +139,7 @@ npm run check:review-prompt   # cuándo se puede pedir una valoración en la tie
 npm run check:badges          # reglas de las insignias y la regresión de la insignia repetida
 npm run check:today-copy      # lo que dice "Hoy" en Inicio sin la IA
 npm run check:daily-reminder  # cuándo sale el recordatorio diario y qué dice
+npm run check:class-dates     # fechas del aula en tu calendario, enlaces de invitación y el aviso de cambio
 ```
 
 ## Builds (EAS)
