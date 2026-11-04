@@ -28,7 +28,8 @@
     "check:badges": "node scripts/check-badges.mjs",
     "check:today-copy": "node scripts/check-today-copy.mjs",
     "check:daily-reminder": "node scripts/check-daily-reminder.mjs",
-    "check:class-dates": "node scripts/check-class-dates.mjs"
+    "check:class-dates": "node scripts/check-class-dates.mjs",
+    "deploy:beta-preview": "bash scripts/deploy-beta-preview.sh"
   },
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",
