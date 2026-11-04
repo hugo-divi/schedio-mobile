@@ -22,11 +22,17 @@ probarlo en tu iPhone **sin publicar nada para los demás**.
    ```
 4. **Publica la vista previa.** No toques `firebase deploy --only hosting`:
    eso publica para todos.
+
    ```bash
    npm run deploy:beta-preview
    ```
+
    Añade el dominio que te dé a Authentication → Settings → Dominios
    autorizados.
+
+   O mejor, deja que se publique sola (ver «Publicación automática» abajo):
+   la URL sale en la pestaña Actions de GitHub, en «Vista previa beta».
+
 5. **Instálala en el iPhone.** Abre la URL en Safari → Compartir → Añadir a
    pantalla de inicio. Ábrela siempre desde ese icono: en iOS las
    notificaciones solo funcionan así.
@@ -36,6 +42,32 @@ probarlo en tu iPhone **sin publicar nada para los demás**.
 >
 > Cada cuenta guarda un solo dispositivo para las notificaciones: al activarlas
 > en la vista previa, dejan de llegar al PWA de siempre de esa cuenta.
+
+### Publicación automática (configurar una vez)
+
+`.github/workflows/beta-preview.yml` publica la vista previa con cada cambio
+que se sube a una rama `claude/**`. Así no hace falta repetir el paso 4.
+`app.schedio.es` no se toca. Necesita estos secretos del repositorio, en
+GitHub → Settings → Secrets and variables → Actions:
+
+1. **`FIREBASE_SERVICE_ACCOUNT_SCHEDIO_B3958`**: lo más fácil es ejecutar
+   `firebase init hosting:github` en el proyecto. Crea la cuenta de servicio
+   con los permisos justos y sube este secreto al repositorio.
+   - Responde **No** a lo de ejecutar un build y a lo de desplegar en el canal
+     live.
+   - No subas los `.yml` que genera: ya está el nuestro.
+2. **Los mismos valores de tu `.env.local`**, cada uno como secreto con el
+   mismo nombre:
+   - `EXPO_PUBLIC__FIREBASE_API_KEY`
+   - `EXPO_PUBLIC__FIREBASE_AUTH_DOMAIN`
+   - `EXPO_PUBLIC__FIREBASE_PROJECT_ID`
+   - `EXPO_PUBLIC__FIREBASE_STORAGE_BUCKET`
+   - `EXPO_PUBLIC__FIREBASE_MESSAGING_SENDER_ID`
+   - `EXPO_PUBLIC__FIREBASE_APP_ID`
+   - `EXPO_PUBLIC__FIREBASE_VAPID_KEY`
+
+Mientras falte la cuenta de servicio, el flujo se salta sin fallar. Las
+reglas y la función (pasos 2 y 3) siguen siendo a mano, pero solo una vez.
 
 ## 1. Aviso diario (lo más importante)
 

@@ -1,0 +1,86 @@
+# Publica la web en el canal de vista previa "beta" de Firebase Hosting con
+# cada push a una rama claude/**. app.schedio.es (el canal live) no se toca.
+#
+# Necesita, una vez, estos secretos del repositorio (Settings → Secrets and
+# variables → Actions). Ver docs/PRUEBAS-BETA.md, "Publicación automática":
+#   FIREBASE_SERVICE_ACCOUNT_SCHEDIO_B3958  (JSON de una cuenta de servicio
+#                                           con el rol "Firebase Hosting Admin")
+#   EXPO_PUBLIC__FIREBASE_API_KEY, …_AUTH_DOMAIN, …_PROJECT_ID,
+#   …_STORAGE_BUCKET, …_MESSAGING_SENDER_ID, …_APP_ID, …_VAPID_KEY
+# Sin la cuenta de servicio, el trabajo se salta sin fallar.
+name: Vista previa beta
+
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    env:
+      HAS_DEPLOY_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SCHEDIO_B3958 != '' }}
+    steps:
+      - name: Sin credenciales, nada que publicar
+        if: env.HAS_DEPLOY_KEY != 'true'
+        run: echo "Falta el secreto FIREBASE_SERVICE_ACCOUNT_SCHEDIO_B3958; no se publica." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: env.HAS_DEPLOY_KEY == 'true'
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: env.HAS_DEPLOY_KEY == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - if: env.HAS_DEPLOY_KEY == 'true'
+        run: npm ci
+
+      - name: Comprobaciones
+        if: env.HAS_DEPLOY_KEY == 'true'
+        run: |
+          npm run lint
+          for s in check:notification-routes check:badges check:today-copy check:daily-reminder check:class-dates; do
+            npm run -s "$s"
+          done
+
+      - name: Compilar la web
+        if: env.HAS_DEPLOY_KEY == 'true'
+        env:
+          EXPO_PUBLIC__FIREBASE_API_KEY: ${{ secrets.EXPO_PUBLIC__FIREBASE_API_KEY }}
+          EXPO_PUBLIC__FIREBASE_AUTH_DOMAIN: ${{ secrets.EXPO_PUBLIC__FIREBASE_AUTH_DOMAIN }}
+          EXPO_PUBLIC__FIREBASE_PROJECT_ID: ${{ secrets.EXPO_PUBLIC__FIREBASE_PROJECT_ID }}
+          EXPO_PUBLIC__FIREBASE_STORAGE_BUCKET: ${{ secrets.EXPO_PUBLIC__FIREBASE_STORAGE_BUCKET }}
+          EXPO_PUBLIC__FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.EXPO_PUBLIC__FIREBASE_MESSAGING_SENDER_ID }}
+          EXPO_PUBLIC__FIREBASE_APP_ID: ${{ secrets.EXPO_PUBLIC__FIREBASE_APP_ID }}
+          EXPO_PUBLIC__FIREBASE_VAPID_KEY: ${{ secrets.EXPO_PUBLIC__FIREBASE_VAPID_KEY }}
+        run: npx expo export --platform web --clear
+
+      - name: Publicar en el canal beta
+        if: env.HAS_DEPLOY_KEY == 'true'
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SCHEDIO_B3958 }}
+        run: |
+          key="$RUNNER_TEMP/sa.json"
+          printf '%s' "$SERVICE_ACCOUNT" > "$key"
+          export GOOGLE_APPLICATION_CREDENTIALS="$key"
+          npx --yes firebase-tools@13.35.1 hosting:channel:deploy beta \
+            --expires 30d --project schedio-b3958 --json > "$RUNNER_TEMP/deploy.json"
+          rm -f "$key"
+          url=$(node -e "const r=require(process.argv[1]).result||{}; const s=Object.values(r)[0]||{}; console.log(s.url||'')" "$RUNNER_TEMP/deploy.json")
+          echo "Vista previa: $url"
+          {
+            echo "### Vista previa beta"
+            echo ""
+            echo "$url"
+            echo ""
+            echo "Commit: \`${GITHUB_SHA::7}\` · caduca en 30 días"
+          } >> "$GITHUB_STEP_SUMMARY"
